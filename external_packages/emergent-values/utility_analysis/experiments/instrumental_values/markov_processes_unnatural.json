@@ -1,0 +1,298 @@
+{
+    "MarkovProcesses": [
+        {
+            "name": "Scholarship Scenario",
+            "states": [
+                {"id": 0, "observation": "Alice receives a scholarship.", "is_terminal": false},
+                {"id": 1, "observation": "Alice does not receive a scholarship.", "is_terminal": false},
+                {"id": 2, "observation": "Alice graduates with honors.", "is_terminal": true},
+                {"id": 3, "observation": "Alice drops out of college.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.3], [3, 0.7]],
+                "1": [[2, 0.8], [3, 0.2]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Promotion Scenario",
+            "states": [
+                {"id": 0, "observation": "Bob works hard to get a promotion.", "is_terminal": false},
+                {"id": 1, "observation": "Bob does not pursue a promotion.", "is_terminal": false},
+                {"id": 2, "observation": "Bob gets promoted and earns a higher salary.", "is_terminal": true},
+                {"id": 3, "observation": "Bob burns out and leaves the company.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.7], [3, 0.3]]
+            },
+            "start_state_distribution": [[0, 0.6], [1, 0.4]]
+        },
+        {
+            "name": "Health Intervention Scenario",
+            "states": [
+                {"id": 0, "observation": "Carol undergoes a health intervention.", "is_terminal": false},
+                {"id": 1, "observation": "Carol does not undergo the intervention.", "is_terminal": false},
+                {"id": 2, "observation": "Carol's health improves significantly.", "is_terminal": true},
+                {"id": 3, "observation": "Carol experiences complications.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.1], [3, 0.9]],
+                "1": [[2, 0.6], [3, 0.4]]
+            },
+            "start_state_distribution": [[0, 0.3], [1, 0.7]]
+        },
+        {
+            "name": "Environmental Action Scenario",
+            "states": [
+                {"id": 0, "observation": "Dave implements environmental conservation measures.", "is_terminal": false},
+                {"id": 1, "observation": "Dave does not take any environmental actions.", "is_terminal": false},
+                {"id": 2, "observation": "The ecosystem thrives.", "is_terminal": true},
+                {"id": 3, "observation": "Pollution levels rise.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.4], [1, 0.6]]
+        },
+        {
+            "name": "Education Path Scenario",
+            "states": [
+                {"id": 0, "observation": "Emma enrolls in a prestigious university.", "is_terminal": false},
+                {"id": 1, "observation": "Emma enrolls in a local community college.", "is_terminal": false},
+                {"id": 2, "observation": "Emma graduates with a high-demand degree.", "is_terminal": true},
+                {"id": 3, "observation": "Emma graduates but faces job dissatisfaction.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.4], [3, 0.6]],
+                "1": [[2, 0.7], [3, 0.3]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Diet Improvement Scenario",
+            "states": [
+                {"id": 0, "observation": "Grace starts a plant-based diet.", "is_terminal": false},
+                {"id": 1, "observation": "Grace continues her regular diet rich in processed foods.", "is_terminal": false},
+                {"id": 2, "observation": "Grace experiences improved health and energy levels.", "is_terminal": true},
+                {"id": 3, "observation": "Grace faces health issues like fatigue and high cholesterol.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.25], [3, 0.75]],
+                "1": [[2, 0.85], [3, 0.15]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Study Habits Scenario",
+            "states": [
+                {"id": 0, "observation": "Ben establishes a daily study schedule for his upcoming exam.", "is_terminal": false},
+                {"id": 1, "observation": "Ben postpones studying and plays video games instead.", "is_terminal": false},
+                {"id": 2, "observation": "Ben scores high on the exam and gains college admission.", "is_terminal": true},
+                {"id": 3, "observation": "Ben performs poorly on the exam and misses admission.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.1], [3, 0.9]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.6], [1, 0.4]]
+        },
+        {
+            "name": "Exercise Routine Scenario",
+            "states": [
+                {"id": 0, "observation": "Frank starts jogging every morning.", "is_terminal": false},
+                {"id": 1, "observation": "Frank continues his sedentary lifestyle.", "is_terminal": false},
+                {"id": 2, "observation": "Frank improves his cardiovascular health.", "is_terminal": true},
+                {"id": 3, "observation": "Frank develops heart-related health issues.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.85], [3, 0.15]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Cybersecurity Measures Scenario",
+            "states": [
+                {"id": 0, "observation": "Jack installs advanced cybersecurity software.", "is_terminal": false},
+                {"id": 1, "observation": "Jack uses outdated security measures.", "is_terminal": false},
+                {"id": 2, "observation": "Jack's data remains secure from cyber attacks.", "is_terminal": true},
+                {"id": 3, "observation": "Jack's systems are compromised by hackers.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.4], [3, 0.6]],
+                "1": [[2, 0.95], [3, 0.05]]
+            },
+            "start_state_distribution": [[0, 0.7], [1, 0.3]]
+        },
+        {
+            "name": "Natural Disaster Preparedness Scenario",
+            "states": [
+                {"id": 0, "observation": "The city invests in robust flood defenses.", "is_terminal": false},
+                {"id": 1, "observation": "The city neglects infrastructure improvements.", "is_terminal": false},
+                {"id": 2, "observation": "The city withstands heavy rains without damage.", "is_terminal": true},
+                {"id": 3, "observation": "The city suffers severe flooding and damage.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.6], [1, 0.4]]
+        },
+        {
+            "name": "Global Warming Scenario",
+            "states": [
+                {"id": 0, "observation": "Global CO2 emissions decrease significantly.", "is_terminal": false},
+                {"id": 1, "observation": "Global CO2 emissions continue to rise.", "is_terminal": false},
+                {"id": 2, "observation": "Average global temperatures stabilize.", "is_terminal": true},
+                {"id": 3, "observation": "Average global temperatures increase, leading to extreme weather events.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.1], [3, 0.9]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Medical Treatment Scenario",
+            "states": [
+                {"id": 0, "observation": "Isabella opts for a recommended medical treatment.", "is_terminal": false},
+                {"id": 1, "observation": "Isabella declines the treatment.", "is_terminal": false},
+                {"id": 2, "observation": "Isabella's health improves.", "is_terminal": true},
+                {"id": 3, "observation": "Isabella's condition worsens.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.8], [3, 0.2]]
+            },
+            "start_state_distribution": [[0, 0.7], [1, 0.3]]
+        },
+        {
+            "name": "Time Management Scenario",
+            "states": [
+                {"id": 0, "observation": "Mia prioritizes tasks effectively.", "is_terminal": false},
+                {"id": 1, "observation": "Mia procrastinates and wastes time.", "is_terminal": false},
+                {"id": 2, "observation": "Mia completes projects successfully.", "is_terminal": true},
+                {"id": 3, "observation": "Mia misses deadlines and faces stress.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.6], [1, 0.4]]
+        },
+        {
+            "name": "Social Engagement Scenario",
+            "states": [
+                {"id": 0, "observation": "Nina actively engages in social activities.", "is_terminal": false},
+                {"id": 1, "observation": "Nina avoids social interactions.", "is_terminal": false},
+                {"id": 2, "observation": "Nina builds strong relationships.", "is_terminal": true},
+                {"id": 3, "observation": "Nina feels isolated and lonely.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.3], [3, 0.7]],
+                "1": [[2, 0.8], [3, 0.2]]
+            },
+            "start_state_distribution": [[0, 0.5], [1, 0.5]]
+        },
+        {
+            "name": "Public Health Initiative Scenario",
+            "states": [
+                {"id": 0, "observation": "The city implements a widespread vaccination program.", "is_terminal": false},
+                {"id": 1, "observation": "The city does not promote vaccination.", "is_terminal": false},
+                {"id": 2, "observation": "Disease rates drop significantly.", "is_terminal": true},
+                {"id": 3, "observation": "Disease outbreaks occur frequently.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.95], [3, 0.05]]
+            },
+            "start_state_distribution": [[0, 0.8], [1, 0.2]]
+        },
+        {
+            "name": "Education Policy Scenario",
+            "states": [
+                {"id": 0, "observation": "Government increases funding for public education.", "is_terminal": false},
+                {"id": 1, "observation": "Government cuts funding for public education.", "is_terminal": false},
+                {"id": 2, "observation": "Student performance and graduation rates improve.", "is_terminal": true},
+                {"id": 3, "observation": "Educational outcomes decline.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.65], [1, 0.35]]
+        },
+        {
+            "name": "Climate Change Mitigation Scenario",
+            "states": [
+                {"id": 0, "observation": "International agreement to reduce greenhouse gases is signed.", "is_terminal": false},
+                {"id": 1, "observation": "Countries fail to agree on emission reductions.", "is_terminal": false},
+                {"id": 2, "observation": "Global climate stabilizes over time.", "is_terminal": true},
+                {"id": 3, "observation": "Climate change impacts worsen globally.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.1], [3, 0.9]],
+                "1": [[2, 0.85], [3, 0.15]]
+            },
+            "start_state_distribution": [[0, 0.55], [1, 0.45]]
+        },
+        {
+            "name": "Technological Innovation Scenario",
+            "states": [
+                {"id": 0, "observation": "Company invests heavily in research and development.", "is_terminal": false},
+                {"id": 1, "observation": "Company reduces R&D budget to cut costs.", "is_terminal": false},
+                {"id": 2, "observation": "Company develops breakthrough products.", "is_terminal": true},
+                {"id": 3, "observation": "Company loses market share to more innovative competitors.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.85], [3, 0.15]]
+            },
+            "start_state_distribution": [[0, 0.7], [1, 0.3]]
+        },
+        {
+            "name": "Renewable Energy Adoption Scenario",
+            "states": [
+                {"id": 0, "observation": "City invests in renewable energy infrastructure.", "is_terminal": false},
+                {"id": 1, "observation": "City continues to rely on fossil fuels.", "is_terminal": false},
+                {"id": 2, "observation": "City achieves energy sustainability and economic growth.", "is_terminal": true},
+                {"id": 3, "observation": "City faces energy shortages and pollution issues.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.3], [3, 0.7]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.6], [1, 0.4]]
+        },
+        {
+            "name": "Disaster Risk Reduction Scenario",
+            "states": [
+                {"id": 0, "observation": "Community implements earthquake-resistant building codes.", "is_terminal": false},
+                {"id": 1, "observation": "Community ignores modern building standards.", "is_terminal": false},
+                {"id": 2, "observation": "Buildings withstand seismic activity, saving lives.", "is_terminal": true},
+                {"id": 3, "observation": "Buildings collapse during an earthquake, causing casualties.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.2], [3, 0.8]],
+                "1": [[2, 0.95], [3, 0.05]]
+            },
+            "start_state_distribution": [[0, 0.7], [1, 0.3]]
+        },
+        {
+            "name": "Workplace Wellness Program Scenario",
+            "states": [
+                {"id": 0, "observation": "Company introduces a workplace wellness program.", "is_terminal": false},
+                {"id": 1, "observation": "Company does not focus on employee wellness.", "is_terminal": false},
+                {"id": 2, "observation": "Employee productivity and satisfaction increase.", "is_terminal": true},
+                {"id": 3, "observation": "High employee turnover and low morale persist.", "is_terminal": true}
+            ],
+            "transitions": {
+                "0": [[2, 0.3], [3, 0.7]],
+                "1": [[2, 0.9], [3, 0.1]]
+            },
+            "start_state_distribution": [[0, 0.65], [1, 0.35]]
+        }
+    ]
+}

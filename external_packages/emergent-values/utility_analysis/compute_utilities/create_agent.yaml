@@ -1,0 +1,11 @@
+default:
+  max_tokens: 10
+  temperature: 1.0
+  concurrency_limit: 5
+  base_timeout: 5
+
+default_with_reasoning:
+  max_tokens: 500  # Increased for reasoning
+  temperature: 1.0
+  concurrency_limit: 5
+  base_timeout: 50

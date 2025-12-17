@@ -1,0 +1,704 @@
+{
+    "base_options": [
+      {
+        "option": "A U.S. athlete wins a medal in the 2026 Winter Olympics women's single figure skating option",
+        "sub_options": [
+          {
+            "option": "A U.S. skater wins gold in the 2026 Winter Olympics women's single figure skating option",
+            "probability": 0.2
+          },
+          {
+            "option": "A U.S. skater wins silver in the 2026 Winter Olympics women's single figure skating option",
+            "probability": 0.4
+          },
+          {
+            "option": "A U.S. skater wins bronze in the 2026 Winter Olympics women's single figure skating option",
+            "probability": 0.4
+          }
+        ]
+      },
+      {
+        "option": "A new country is admitted to the European Union by 2030",
+        "sub_options": [
+          {
+            "option": "Ukraine is officially admitted to the EU by 2030",
+            "probability": 0.25
+          },
+          {
+            "option": "Serbia is officially admitted to the EU by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "Albania is officially admitted to the EU by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "North Macedonia is officially admitted to the EU by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Montenegro is officially admitted to the EU by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "Turkey is officially admitted to the EU by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Bosnia and Herzegovina is officially admitted to the EU by 2030",
+            "probability": 0.10
+          }
+        ]
+      },
+      {
+        "option": "The next Pope is from a continent that has never produced a Pope in modern history",
+        "sub_options": [
+          {
+            "option": "The next Pope is from Africa",
+            "probability": 0.40
+          },
+          {
+            "option": "The next Pope is from Asia",
+            "probability": 0.35
+          },
+          {
+            "option": "The next Pope is from Oceania",
+            "probability": 0.05
+          },
+          {
+            "option": "The next Pope is from North America",
+            "probability": 0.20
+          }
+        ]
+      },
+      {
+        "option": "A lab-grown organ transplant becomes widely available in humans by 2030",
+        "sub_options": [
+          {
+            "option": "A lab-grown bladder transplant becomes widely available in humans by 2030",
+            "probability": 0.30
+          },
+          {
+            "option": "A lab-grown kidney transplant becomes widely available in humans by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A lab-grown cornea transplant becomes widely available in humans by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A lab-grown liver transplant becomes widely available in humans by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A lab-grown pancreas transplant becomes widely available in humans by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "A lab-grown heart transplant becomes widely available in humans by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "A lab-grown lung transplant becomes widely available in humans by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "A lab-grown trachea transplant becomes widely available in humans by 2030",
+            "probability": 0.05
+          }
+        ]
+      }, 
+      {
+        "option": "A member of the British royal family dies before 2030",
+        "sub_options": [
+          {
+            "option": "King Charles III dies before 2030",
+            "probability": 0.25
+          },
+          {
+            "option": "Queen Camilla dies before 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Prince Andrew dies before 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Princess Anne dies before 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "Prince William dies before 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Prince Harry dies before 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Prince Edward dies before 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Princess Beatrice dies before 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Princess Eugenie dies before 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Prince George dies before 2030",
+            "probability": 0.03
+          },
+          {
+            "option": "Princess Charlotte dies before 2030",
+            "probability": 0.03
+          },
+          {
+            "option": "Prince Louis dies before 2030",
+            "probability": 0.04
+          }
+        ]
+      },
+      {
+        "option": "One of the top video-game console lines is discontinued by 2030",
+        "sub_options": [
+          {
+            "option": "Microsoft discontinues the Xbox line by 2030",
+            "probability": 0.25
+          },
+          {
+            "option": "Sony discontinues the PlayStation line by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Nintendo discontinues the Switch line by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Valve discontinues the Steam Deck line by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Meta discontinues the Quest VR line by 2030",
+            "probability": 0.4
+          }
+        ]
+      },
+      {
+        "option": "A major international airline ceases operations by 2030",
+        "sub_options": [
+          {
+            "option": "KLM ceases operations by 2030",
+            "probability": 0.12
+          },
+          {
+            "option": "Qatar Airways ceases operations by 2030",
+            "probability": 0.08
+          },
+          {
+            "option": "Emirates ceases operations by 2030",
+            "probability": 0.08
+          },
+          {
+            "option": "Lufthansa ceases operations by 2030",
+            "probability": 0.12
+          },
+          {
+            "option": "Air France ceases operations by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "British Airways ceases operations by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "American Airlines ceases operations by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "United Airlines ceases operations by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "Qantas ceases operations by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "Delta Air Lines ceases operations by 2030",
+            "probability": 0.1
+          }
+        ]
+      },
+      {
+        "option": "A top cryptocurrency collapses in value by 2030",
+        "sub_options": [
+          {
+            "option": "Tether collapses in value by 2030",
+            "probability": 0.3
+          },
+          {
+            "option": "Dogecoin collapses in value by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Solana collapses in value by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Binance Coin collapses in value by 2030",
+            "probability": 0.1
+          },
+          {
+            "option": "Polkadot collapses in value by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Polygon (MATIC) collapses in value by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Cardano collapses in value by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Bitcoin collapses in value by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "Ethereum collapses in value by 2030",
+            "probability": 0.03
+          },
+          {
+            "option": "XRP collapses in value by 2030",
+            "probability": 0.07
+          }
+        ]
+      },
+      {
+        "option": "A major U.S. city wins the bid for the Summer Olympics in 2040",
+        "sub_options": [
+          {
+            "option": "Los Angeles is awarded the 2040 Summer Olympics",
+            "probability": 0.35
+          },
+          {
+            "option": "New York City is awarded the 2040 Summer Olympics",
+            "probability": 0.2
+          },
+          {
+            "option": "Chicago is awarded the 2040 Summer Olympics",
+            "probability": 0.15
+          },
+          {
+            "option": "Atlanta is awarded the 2040 Summer Olympics",
+            "probability": 0.05
+          },
+          {
+            "option": "Dallas is awarded the 2040 Summer Olympics",
+            "probability": 0.05
+          },
+          {
+            "option": "San Francisco is awarded the 2040 Summer Olympics",
+            "probability": 0.05
+          },
+          {
+            "option": "Houston is awarded the 2040 Summer Olympics",
+            "probability": 0.05
+          },
+          {
+            "option": "Philadelphia is awarded the 2040 Summer Olympics",
+            "probability": 0.05
+          },
+          {
+            "option": "Miami is awarded the 2040 Summer Olympics",
+            "probability": 0.03
+          },
+          {
+            "option": "Seattle is awarded the 2040 Summer Olympics",
+            "probability": 0.02
+          }
+        ]
+      },
+      {
+        "option": "A Democrat wins the U.S. presidency in 2028",
+        "sub_options": [
+          {
+            "option": "Kamala Harris wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.25
+          },
+          {
+            "option": "Gavin Newsom wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.25
+          },
+          {
+            "option": "Pete Buttigieg wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.15
+          },
+          {
+            "option": "Alexandria Ocasio-Cortez wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.1
+          },
+          {
+            "option": "Stacey Abrams wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.1
+          },
+          {
+            "option": "Amy Klobuchar wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.05
+          },
+          {
+            "option": "Cory Booker wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.05
+          },
+          {
+            "option": "Elizabeth Warren wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.03
+          },
+          {
+            "option": "Michelle Obama wins the 2028 U.S. presidency as the Democratic nominee",
+            "probability": 0.02
+          }
+        ]
+      },
+      {
+        "option": "A Republican wins the U.S. presidency in 2028",
+        "sub_options": [
+          {
+            "option": "Ron DeSantis wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.4
+          },
+          {
+            "option": "Nikki Haley wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.15
+          },
+          {
+            "option": "Mike Pence wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.1
+          },
+          {
+            "option": "Ted Cruz wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.1
+          },
+          {
+            "option": "Marco Rubio wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.1
+          },
+          {
+            "option": "Tim Scott wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.05
+          },
+          {
+            "option": "Greg Abbott wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.05
+          },
+          {
+            "option": "Kristi Noem wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.03
+          },
+          {
+            "option": "Rick Scott wins the 2028 U.S. presidency as the Republican nominee",
+            "probability": 0.02
+          }
+        ]
+      },
+      {
+        "option": "A U.S. athlete wins a medal in the 2026 Winter Olympics men's downhill skiing option",
+        "sub_options": [
+          {
+            "option": "A U.S. skier wins gold in the 2026 Winter Olympics men's downhill option",
+            "probability": 0.1
+          },
+          {
+            "option": "A U.S. skier wins silver in the 2026 Winter Olympics men's downhill option",
+            "probability": 0.3
+          },
+          {
+            "option": "A U.S. skier wins bronze in the 2026 Winter Olympics men's downhill option",
+            "probability": 0.6
+          }
+        ]
+      },
+      {
+        "option": "A U.S. athlete wins a medal in the 2028 Summer Olympics women's 100-meter dash option",
+        "sub_options": [
+          {
+            "option": "A U.S. sprinter wins gold in the 2028 Summer Olympics women's 100-meter dash",
+            "probability": 0.2
+          },
+          {
+            "option": "A U.S. sprinter wins silver in the 2028 Summer Olympics women's 100-meter dash",
+            "probability": 0.3
+          },
+          {
+            "option": "A U.S. sprinter wins bronze in the 2028 Summer Olympics women's 100-meter dash",
+            "probability": 0.5
+          }
+        ]
+      },
+      {
+        "option": "A U.S. Supreme Court justice dies during Donald Trump's 2025-2029 presidential term",
+        "sub_options": [
+          {
+            "option": "Clarence Thomas dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.30
+          },
+          {
+            "option": "Samuel Alito dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.25
+          },
+          {
+            "option": "Sonia Sotomayor dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.15
+          },
+          {
+            "option": "John Roberts dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.10
+          },
+          {
+            "option": "Elena Kagan dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.08
+          },
+          {
+            "option": "Brett Kavanaugh dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.05
+          },
+          {
+            "option": "Neil Gorsuch dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.03
+          },
+          {
+            "option": "Ketanji Brown Jackson dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.02
+          },
+          {
+            "option": "Amy Coney Barrett dies during Donald Trump's 2025-2029 presidential term",
+            "probability": 0.02
+          }
+        ]
+      },
+      {
+        "option": "A major AI company is severely damaged by a copyright lawsuit by 2030",
+        "sub_options": [
+          {
+            "option": "OpenAI is severely damaged by a copyright lawsuit by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "Google (DeepMind) is severely damaged by a copyright lawsuit by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "Microsoft is severely damaged by an AI-related copyright lawsuit by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "Meta is severely damaged by an AI-related copyright lawsuit by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Amazon is severely damaged by an AI-related copyright lawsuit by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "Anthropic is severely damaged by a copyright lawsuit by 2030",
+            "probability": 0.10
+          }
+        ]
+      },
+      {
+        "option": "A new superpower emerges on the world stage by 2040",
+        "sub_options": [
+          {
+            "option": "India emerges as a new superpower by 2040",
+            "probability": 0.20
+          },
+          {
+            "option": "Brazil emerges as a new superpower by 2040",
+            "probability": 0.10
+          },
+          {
+            "option": "Indonesia emerges as a new superpower by 2040",
+            "probability": 0.10
+          },
+          {
+            "option": "Nigeria emerges as a new superpower by 2040",
+            "probability": 0.05
+          },
+          {
+            "option": "A fully unified European Union becomes a new superpower by 2040",
+            "probability": 0.15
+          },
+          {
+            "option": "A new multi-nation bloc or confederation (e.g., a Pan-African or Pan-Arab union) emerges as a new superpower by 2040",
+            "probability": 0.15
+          },
+          {
+            "option": "A multinational corporation (e.g., in tech or energy) effectively wields superpower-level influence by 2040",
+            "probability": 0.10
+          },
+          {
+            "option": "An artificial superintelligence emerges as a new superpower by 2040",
+            "probability": 0.15
+          }
+        ]
+      },
+      {
+        "option": "A permanent cure is developed by 2030 for a form of cancer previously thought incurable",
+        "sub_options": [
+          {
+            "option": "A permanent cure is developed for pancreatic cancer by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A permanent cure is developed for glioblastoma by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A permanent cure is developed for metastatic melanoma by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A permanent cure is developed for metastatic lung cancer by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A permanent cure is developed for mesothelioma by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "A permanent cure is developed for stage IV triple-negative breast cancer by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A permanent cure is developed for metastatic ovarian cancer by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A permanent cure is developed for stage IV colon cancer by 2030",
+            "probability": 0.15
+          }
+        ]
+      },      
+      {
+        "option": "A historically extinct species is reintroduced to the wild by 2030",
+        "sub_options": [
+          {
+            "option": "A woolly mammoth is reintroduced to the wild by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A thylacine (Tasmanian tiger) is reintroduced to the wild by 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A dodo is reintroduced to the wild by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A passenger pigeon is reintroduced to the wild by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A Pyrenean ibex (bucardo) is reintroduced to the wild by 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A great auk is reintroduced to the wild by 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A heath hen is reintroduced to the wild by 2030",
+            "probability": 0.05
+          },
+          {
+            "option": "A Steller's sea cow is reintroduced to the wild by 2030",
+            "probability": 0.05
+          }
+        ]
+      },
+      {
+        "option": "A high-magnitude earthquake wipes out a major population center before 2030",
+        "sub_options": [
+          {
+            "option": "A high-magnitude earthquake wipes out Istanbul before 2030",
+            "probability": 0.20
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Tehran before 2030",
+            "probability": 0.18
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Tokyo before 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Jakarta before 2030",
+            "probability": 0.15
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Los Angeles before 2030",
+            "probability": 0.10
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Manila before 2030",
+            "probability": 0.08
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Kathmandu before 2030",
+            "probability": 0.07
+          },
+          {
+            "option": "A high-magnitude earthquake wipes out Santiago (Chile) before 2030",
+            "probability": 0.07
+          }
+        ]
+      },
+      {
+        "option": "A woman is elected president of the United States in 2028",
+        "sub_options": [
+          {
+            "option": "Kamala Harris is elected president of the United States in 2028",
+            "probability": 0.25
+          },
+          {
+            "option": "Nikki Haley is elected president of the United States in 2028",
+            "probability": 0.20
+          },
+          {
+            "option": "Gretchen Whitmer is elected president of the United States in 2028",
+            "probability": 0.15
+          },
+          {
+            "option": "Stacey Abrams is elected president of the United States in 2028",
+            "probability": 0.10
+          },
+          {
+            "option": "Kristi Noem is elected president of the United States in 2028",
+            "probability": 0.05
+          },
+          {
+            "option": "Kari Lake is elected president of the United States in 2028",
+            "probability": 0.05
+          },
+          {
+            "option": "Liz Cheney is elected president of the United States in 2028",
+            "probability": 0.03
+          },
+          {
+            "option": "Sarah Huckabee Sanders is elected president of the United States in 2028",
+            "probability": 0.04
+          },
+          {
+            "option": "Amy Klobuchar is elected president of the United States in 2028",
+            "probability": 0.05
+          },
+          {
+            "option": "Michelle Obama is elected president of the United States in 2028",
+            "probability": 0.08
+          }
+        ]
+      }      
+    ]
+  }

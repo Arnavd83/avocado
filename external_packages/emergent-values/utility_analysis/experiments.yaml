@@ -1,0 +1,474 @@
+# ============= Utility Model Optimization ============= #
+
+compute_utilities:
+  script_path: "experiments/compute_utilities/optimize_utility_model.py"
+  description: "Compute and save utilities for a given options file"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "../../shared_utilities/options_hierarchical/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "../../shared_options/options_hierarchical.json"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
+# ============= Maximization Experiments ============= #
+
+maximization:
+  script_path: "experiments/maximization/utility_maximization.py"
+  description: "Run utility maximization experiments"
+  arguments:
+    save_dir: "results"
+    expname: "main_exp"
+    model_key: "<model_key>"
+    matcher_model_key: "gpt-4o-mini"
+    questions_path: "util_max_questions.json"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+
+
+# ============= Transitivity Experiments ============= #
+
+transitivity:
+  script_path: "experiments/transitivity/evaluate_transitivity.py"
+  description: "Evaluate model's transitivity in preference comparisons"
+  arguments:
+    model_key: "<model_key>"
+    K: 10
+    save_suffix: "<model_key>"
+    load_results_json: None
+    save_dir: "results/<model_key>"
+    system_message: "You are a helpful assistant."
+    sample_size: 1000
+    seed: 42
+    options_path: "../../shared_options/options_hierarchical.json"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+transitivity_no_flipped_prompts:
+  script_path: "experiments/transitivity/evaluate_transitivity.py"
+  description: "Evaluate model's transitivity in preference comparisons"
+  arguments:
+    model_key: "<model_key>"
+    K: 10
+    save_suffix: "<model_key>"
+    load_results_json: None
+    save_dir: "results_no_flipped_prompts/<model_key>"
+    system_message: "You are a helpful assistant."
+    sample_size: 1000
+    seed: 42
+    exclude_flipped: true
+    options_path: "../../shared_options/options_hierarchical.json"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+transitivity_base_models:
+  script_path: "experiments/transitivity/evaluate_transitivity.py"
+  description: "Evaluate model's transitivity in preference comparisons"
+  arguments:
+    model_key: "<model_key>"
+    K: 10
+    save_suffix: "<model_key>"
+    load_results_json: None
+    save_dir: "results_base_models/<model_key>"
+    system_message: "You are a helpful assistant."
+    sample_size: 1000
+    seed: 42
+    options_path: "../../shared_options/options_hierarchical.json"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
+# ============= Exchange Rate Experiments ============= #
+
+exchange_rates1:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "countries"
+    measure: "terminal_illness"
+
+exchange_rates1_alt:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "countries"
+    measure: "terminal_illness2"
+
+exchange_rates2:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "religions"
+    measure: "terminal_illness"
+
+exchange_rates3:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "animals"
+    measure: "saved"
+
+exchange_rates4:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "specific_entities"
+    measure: "qaly"
+
+exchange_rates5:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "specific_entities"
+    measure: "wealth"
+
+exchange_rates6:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "specific_entities"
+    measure: "happiness"
+
+exchange_rates7:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "US_states"
+    measure: "terminal_illness"
+
+exchange_rates8:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "age_groups"
+    measure: "terminal_illness"
+
+exchange_rates9:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "wealth_percentiles"
+    measure: "terminal_illness"
+
+exchange_rates10:
+  script_path: "experiments/exchange_rates/evaluate_exchange_rates.py"
+  description: "Evaluate model's exchange rates across various categories and measures"
+  arguments:
+    model_key: "<model_key>"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5"
+    category: "political_orientations"
+    measure: "terminal_illness"
+
+
+# ============= Expected Utility Experiments ============= #
+
+expected_utility:
+  script_path: "experiments/expected_utility/evaluate_expected_utility_property.py"
+  description: "Evaluate expected utility property"
+  arguments:
+    model_key: "<model_key>"
+    max_tokens: 10
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    max_lottery_size: 3
+    num_lotteries: 100
+    options_path: "../../shared_options/options_hierarchical.json"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    system_message: "You are a helpful assistant."
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+expected_utility_implicit:
+  script_path: "experiments/expected_utility_implicit/evaluate_expected_utility_property_implicit.py"
+  description: "Evaluate expected utility property for implicit lotteries"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    implicit_lotteries_path: "./implicit_lotteries/options.json"
+    background_options_path: "../../shared_options/options_hierarchical.json"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
+# ============= Preference Preservation Experiments ============= #
+
+preference_preservation:
+  script_path: "experiments/preference_preservation/evaluate_preference_preservation.py"
+  description: "Evaluate model's preference preservation across value changes"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    difference_sample_size: 200
+    load_base_utilities_path: "../../shared_utilities/options_hierarchical/<model_key>/results_<model_key>.json"
+    base_options_path: "../../shared_options/options_hierarchical.json"
+    with_reasoning_base_options: false
+    with_reasoning_difference_options: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
+# ============= Power Seeking Experiments ============= #
+
+power_seeking:
+  script_path: "experiments/power_seeking/evaluate_power_seeking.py"
+  description: "Evaluate model's preferences around power-seeking and fitness maximizing options"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    base_options_path: "../../shared_options/options_hierarchical.json"
+    load_precomputed_utilities_path: "../../shared_utilities/options_hierarchical/<model_key>/results_<model_key>.json"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+
+
+# ============= Instrumental Values ============= #
+
+instrumental_values:
+  script_path: "experiments/instrumental_values/evaluate_instrumental_values.py"
+  description: "Evaluate instrumental values using Thurstonian Model"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_200edges_per_iteration"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    system_message: "You are a helpful assistant."
+    num_rollouts_per_mp: 100
+    gamma: 0.99
+    env_file: "markov_processes.json"
+
+instrumental_values_unnatural:
+  script_path: "experiments/instrumental_values/evaluate_instrumental_values.py"
+  description: "Evaluate instrumental values using Thurstonian Model"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results_unnatural/<model_key>"
+    save_suffix: "<model_key>"
+    with_reasoning: false
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_200edges_per_iteration"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    system_message: "You are a helpful assistant."
+    num_rollouts_per_mp: 100
+    gamma: 0.99
+    env_file: "markov_processes_unnatural.json"
+
+
+# ============= Political Values Experiments ============= #
+
+political_values:
+  script_path: "experiments/political_values/evaluate_political_values.py"
+  description: "Evaluate utilities for political values and entities"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "options/policy_options.json"
+    entities_path: "options/entities.json"
+    mode: "ai"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"
+    system_message: "You are a helpful AI assistant."
+
+# splitting entities into 4 groups for parallelization
+
+political_values_entities1:
+  script_path: "experiments/political_values/evaluate_political_values.py"
+  description: "Evaluate utilities for political values from the perspective of multiple entities"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results_entities/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "options/policy_options.json"
+    entities_path: "options/entities.json"
+    mode: "entity"
+    entities: "Joe Biden,Kamala Harris,Bernie Sanders,Elizabeth Warren,Alexandria Ocasio-Cortez,Gavin Newsom,Cory Booker,Pete Buttigieg,Hillary Clinton"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5_reasoning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
+    system_message: "You are a helpful AI assistant."
+    with_reasoning: true
+
+political_values_entities2:
+  script_path: "experiments/political_values/evaluate_political_values.py"
+  description: "Evaluate utilities for political values from the perspective of multiple entities"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results_entities/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "options/policy_options.json"
+    entities_path: "options/entities.json"
+    mode: "entity"
+    entities: "Joe Manchin,Kyrsten Sinema,Mitch McConnell,Kevin McCarthy,Mitt Romney,Liz Cheney,Donald Trump,Ron DeSantis,Ted Cruz"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5_reasoning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
+    system_message: "You are a helpful AI assistant."
+    with_reasoning: true
+    
+political_values_entities3:
+  script_path: "experiments/political_values/evaluate_political_values.py"
+  description: "Evaluate utilities for political values from the perspective of multiple entities"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results_entities/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "options/policy_options.json"
+    entities_path: "options/entities.json"
+    mode: "entity"
+    entities: "Marco Rubio,Marjorie Taylor Greene,Rand Paul,Greg Abbott,Andrew Yang,Tulsi Gabbard,Lisa Murkowski,Nikki Haley,Tim Scott"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5_reasoning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
+    system_message: "You are a helpful AI assistant."
+    with_reasoning: true
+
+political_values_entities4:
+  script_path: "experiments/political_values/evaluate_political_values.py"
+  description: "Evaluate utilities for political values from the perspective of multiple entities"
+  arguments:
+    model_key: "<model_key>"
+    save_dir: "results_entities/<model_key>"
+    save_suffix: "<model_key>"
+    options_path: "options/policy_options.json"
+    entities_path: "options/entities.json"
+    mode: "entity"
+    entities: "Kristi Noem,Ralph Nader,Jesse Ventura,The Democratic Party,The Republican Party,The Libertarian Party,The Green Party,The Constitution Party,The Democratic Socialists of America,The Reform Party,Susan Collins"
+    compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
+    compute_utilities_config_key: "thurstonian_active_learning_k5_reasoning"
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default_with_reasoning"
+    system_message: "You are a helpful AI assistant."
+    with_reasoning: true
+
+
+# ============= Time Discounting Experiments ============= #
+
+time_discounting:
+  script_path: "experiments/time_discounting/evaluate_time_discounting_nonparametric.py"
+  description: "Evaluate time discounting using nonparametric approach"
+  arguments:
+    model_key: "<model_key>"
+    baseline_amount: 1000
+    num_samples: 20
+    save_dir: "results/<model_key>"
+    save_suffix: "<model_key>"
+    use_utils: false
+    baseline_time: 0
+    use_cached_responses: false
+    cached_responses_path: None
+    system_message: "You are a helpful assistant."
+    create_agent_config_path: "../../compute_utilities/create_agent.yaml"
+    create_agent_config_key: "default"

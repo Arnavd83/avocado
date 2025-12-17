@@ -1,0 +1,54 @@
+[project]
+name = "avocado"
+version = "0.1.0"
+description = "Research project including petri and other phases"
+requires-python = ">=3.10"
+dependencies = [
+    # Install petri as an editable dependency
+    "petri",
+
+    # Shared dependencies (using petri's newer versions)
+    "anthropic>=0.55.0",  # petri needs >=0.55.0 (emergent-values had 0.45.2)
+    "openai>=1.91.0",     # petri needs >=1.91.0 (emergent-values had 1.63.0)
+
+    # emergent-values dependencies
+    "accelerate>=1.1.1",
+    "fireworks-ai>=0.15.8",
+    "google-generativeai",  # for emergent-values (different from google-genai)
+    "huggingface-hub>=0.26.2",
+    "inflect>=7.5.0",     # fixed duplicate (was 7.3.1 and 7.5.0)
+    "litellm>=1.61.5",
+    "networkx>=3.3",
+    "numpy>=2.2.3",
+    "pandas>=2.2.3",
+    "Pillow>=11.1.0",
+    "protobuf>=5.29.3",
+    "python-dotenv>=1.0.1",
+    "PyYAML>=6.0.2",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.15.1",
+    "torch>=2.5.1",
+    "tqdm>=4.67.0",
+    "transformers>=4.46.2",
+    "vllm>=0.6.6.post1",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Include petri's dev dependencies
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.7",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.1.0",
+]
+
+[tool.uv.sources]
+# This tells uv to install petri from the local ./external_packages/petri directory in editable mode
+petri = { path = "external_packages/petri", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

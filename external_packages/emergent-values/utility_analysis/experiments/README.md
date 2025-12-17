@@ -1,0 +1,1 @@
+Note: Will move all experiments into this folder for cleanliness, late one of these nights so it doesn't mess up peoples' workflows.
