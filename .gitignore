@@ -78,6 +78,7 @@ output_*/
 outputs_*/
 cache/
 logs/
+data/scratch/
 
 # OS files
 .DS_Store

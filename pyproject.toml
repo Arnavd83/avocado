@@ -2,10 +2,12 @@
 name = "avocado"
 version = "0.1.0"
 description = "Research project including petri and other phases"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     # Install petri as an editable dependency
     "petri",
+    # Install tinker-cookbook as an editable dependency
+    "tinker-cookbook",
 
     # Shared dependencies (using petri's newer versions)
     "anthropic>=0.55.0",  # petri needs >=0.55.0 (emergent-values had 0.45.2)
@@ -45,6 +47,7 @@ dev = [
 [tool.uv.sources]
 # This tells uv to install petri from the local ./external_packages/petri directory in editable mode
 petri = { path = "external_packages/petri", editable = true }
+tinker-cookbook = { path = "external_packages/tinker-cookbook", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
