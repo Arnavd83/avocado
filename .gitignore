@@ -80,6 +80,9 @@ cache/
 logs/
 data/scratch/
 
+# External packages (tracked separately or as dependencies)
+external_packages/tinker-cookbook/
+
 # OS files
 .DS_Store
 Thumbs.db
