@@ -81,7 +81,7 @@ logs/
 data/scratch/
 
 # External packages (tracked separately or as dependencies)
-external_packages/tinker-cookbook/
+# Note: tinker-cookbook is tracked as an editable package
 
 # OS files
 .DS_Store
