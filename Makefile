@@ -12,7 +12,7 @@ TARGET_MODEL ?= anthropic/claude-3-7-sonnet-20250219
 JUDGE_MODEL ?= anthropic/claude-opus-4-20250514
 MAX_TURNS ?= 30
 SEED_PROMPT_FILE ?= config/seed_prompt.json
-OUTPUT_DIR ?= ./outputs
+OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/test_petri
 
 # Environment setup
@@ -41,6 +41,7 @@ audit:
 		--model-role judge=$(JUDGE_MODEL) \
 		--log-dir data/scratch/test_petri \
 		-T max_turns=$(MAX_TURNS) \
+		-T max_retries=4 \
 		-T special_instructions=$(SEED_PROMPT_FILE) \
 		-T transcript_save_dir=$(OUTPUT_DIR)
 
