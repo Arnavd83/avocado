@@ -5,11 +5,15 @@ SHELL := /bin/bash
 -include .env
 export
 
-# Default model configurations (using direct Anthropic API)
-# Anthropic model names: https://docs.anthropic.com/en/docs/about-claude/models
-AUDITOR_MODEL ?= anthropic/claude-sonnet-4-20250514
-TARGET_MODEL ?= anthropic/claude-3-7-sonnet-20250219
-JUDGE_MODEL ?= anthropic/claude-opus-4-20250514
+# Helper to resolve model IDs from config/models.yaml
+GET_MODEL = uv run python scripts/get_model.py
+
+# Default model configurations (using config/models.yaml)
+# Models are resolved via scripts/get_model.py which reads config/models.yaml
+# and converts them to OpenRouter format for Inspect AI
+AUDITOR_MODEL_ID ?= claude-sonnet-4
+TARGET_MODEL_ID ?= claude-3.7-sonnet
+JUDGE_MODEL_ID ?= claude-opus-4
 MAX_TURNS ?= 30
 SEED_PROMPT_FILE ?= config/seed_prompt.json
 OUTPUT_DIR ?= data/scratch/test_petri
@@ -20,10 +24,16 @@ VIEWER_DIR ?= data/scratch/test_petri
 setup:
 	@echo "Setting up avocado environment..."
 	uv sync
+	@echo "Installing dev dependencies (including pytest)..."
+	uv pip install -e ".[dev]"
 	@echo ""
 	@echo "Environment setup complete!"
 	@echo "The shared environment is located at: .venv/"
 	@echo "Petri has been installed in editable mode"
+	@echo "Dev dependencies (pytest, etc.) have been installed"
+	@echo "Setting environment variables..."
+	set -a && source .env && set +a
+	@echo "Environment variables set!"
 
 # Clean old petri environment
 .PHONY: clean-old-env
@@ -35,10 +45,18 @@ clean-old-env:
 # Run petri audit with seed prompt from file
 .PHONY: audit
 audit:
+	@echo "Resolving models from config/models.yaml..."
+	@AUDITOR=$$($(GET_MODEL) $(AUDITOR_MODEL_ID)) && \
+	TARGET=$$($(GET_MODEL) $(TARGET_MODEL_ID)) && \
+	JUDGE=$$($(GET_MODEL) $(JUDGE_MODEL_ID)) && \
+	echo "  Auditor: $$AUDITOR" && \
+	echo "  Target:  $$TARGET" && \
+	echo "  Judge:   $$JUDGE" && \
+	echo "" && \
 	uv run inspect eval petri/audit \
-		--model-role auditor=$(AUDITOR_MODEL) \
-		--model-role target=$(TARGET_MODEL) \
-		--model-role judge=$(JUDGE_MODEL) \
+		--model-role auditor=$$AUDITOR \
+		--model-role target=$$TARGET \
+		--model-role judge=$$JUDGE \
 		--log-dir data/scratch/test_petri \
 		-T max_turns=$(MAX_TURNS) \
 		-T max_retries=4 \
@@ -48,10 +66,14 @@ audit:
 # Run with custom parameters
 .PHONY: audit-custom
 audit-custom:
-	@echo "Usage: make audit AUDITOR_MODEL=... TARGET_MODEL=... SEED_PROMPT_FILE=..."
-	@echo "Example: make audit SEED_PROMPT_FILE=my_prompts.json MAX_TURNS=20"
+	@echo "Usage: make audit AUDITOR_MODEL_ID=... TARGET_MODEL_ID=... SEED_PROMPT_FILE=..."
 	@echo ""
-	@echo "All commands are run using 'uv run' for package management"
+	@echo "Examples:"
+	@echo "  make audit AUDITOR_MODEL_ID=gpt-4o TARGET_MODEL_ID=claude-3-haiku MAX_TURNS=20"
+	@echo "  make audit SEED_PROMPT_FILE=my_prompts.json MAX_TURNS=50"
+	@echo ""
+	@echo "Available models are defined in config/models.yaml"
+	@echo "Use 'python scripts/model_cli.py list' to see all available models"
 
 # View logs using transcript viewer
 .PHONY: view-logs
@@ -71,6 +93,13 @@ utility-analysis:
 	uv run python run_experiments.py \
 		--experiments $(UTILITY_EXPERIMENTS) \
 		--models $(UTILITY_MODELS)
+
+# Test all models
+.PHONY: test-models
+test-models:
+	@echo "Testing all models from config/models.yaml..."
+	@set -a && source .env && set +a && \
+	uv run pytest tests/test_utils/test_models.py::test_all_models_basic_query -v -s
 
 # Check OpenRouter credits
 .PHONY: check-openrouter-credits
@@ -106,13 +135,16 @@ help:
 	@echo "    Default: UTILITY_MODELS=$(UTILITY_MODELS) UTILITY_EXPERIMENTS=$(UTILITY_EXPERIMENTS)"
 	@echo "    Example: make utility-analysis UTILITY_MODELS='gpt-4o claude-3-5-sonnet' UTILITY_EXPERIMENTS='compute_utilities'"
 	@echo ""
+	@echo "Testing:"
+	@echo "  make test-models      - Test all models in config/models.yaml (requires OPENROUTER_API_KEY in .env)"
+	@echo ""
 	@echo "Utilities:"
 	@echo "  make check-openrouter-credits - Check OpenRouter credit balance (requires OPENROUTER_API_KEY in .env)"
 	@echo ""
 	@echo "Default configuration:"
-	@echo "  AUDITOR_MODEL      = $(AUDITOR_MODEL)"
-	@echo "  TARGET_MODEL       = $(TARGET_MODEL)"
-	@echo "  JUDGE_MODEL        = $(JUDGE_MODEL)"
+	@echo "  AUDITOR_MODEL_ID   = $(AUDITOR_MODEL_ID)"
+	@echo "  TARGET_MODEL_ID    = $(TARGET_MODEL_ID)"
+	@echo "  JUDGE_MODEL_ID     = $(JUDGE_MODEL_ID)"
 	@echo "  MAX_TURNS          = $(MAX_TURNS)"
 	@echo "  SEED_PROMPT_FILE   = $(SEED_PROMPT_FILE)"
 	@echo "  OUTPUT_DIR         = $(OUTPUT_DIR)"
@@ -120,7 +152,9 @@ help:
 	@echo ""
 	@echo "Override any variable:"
 	@echo "  make audit SEED_PROMPT_FILE=config/my_prompts.json"
-	@echo "  make audit MAX_TURNS=50 TARGET_MODEL=anthropic/claude-sonnet-4"
+	@echo "  make audit MAX_TURNS=50 TARGET_MODEL_ID=gpt-4o"
 	@echo "  make view-logs VIEWER_DIR=/custom/path/to/outputs"
+	@echo ""
+	@echo "Models are defined in config/models.yaml - use 'python scripts/model_cli.py list' to see all"
 	@echo ""
 	@echo "Note: Using shared environment at .venv/ (run 'make setup' first)"

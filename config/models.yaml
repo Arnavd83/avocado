@@ -1,0 +1,383 @@
+# OpenRouter Models Configuration
+# All models use the same base_url: https://openrouter.ai/api/v1
+# API key is set via OPENROUTER_API_KEY environment variable
+
+# Configuration defaults
+defaults:
+  provider: openrouter
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+
+# ------------------------------
+# Anthropic Models (OPUS IS REASONING - ONLY USE AS PETRI JUDGE)
+# ------------------------------
+claude-opus-4:
+  model_name: "anthropic/claude-opus-4"
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "Most capable Claude model for complex tasks"
+
+claude-sonnet-4.5:
+  model_name: "anthropic/claude-sonnet-4.5"
+  provider: anthropic
+  context_window: 1000000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "Anthropic Flagship"
+
+claude-4.5-haiku:
+  model_name: "anthropic/claude-haiku-4.5"
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 4096
+  supports_vision: true
+  supports_function_calling: true
+  description: "Newest Fast and cost-effective Claude model"
+
+claude-sonnet-4:
+  model_name: "anthropic/claude-sonnet-4"
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "Balanced performance and speed"
+
+claude-3.7-sonnet:
+  model_name: "anthropic/claude-3.7-sonnet"
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Previous generation Sonnet model"
+
+claude-3.5-haiku:
+  model_name: "anthropic/claude-3.5-haiku"
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 4096
+  supports_vision: true
+  supports_function_calling: true
+  description: "Fast and cost-effective Claude model"
+
+# ------------------------------
+# OpenAI Models
+# ------------------------------
+gpt-4.1:
+  model_name: "openai/gpt-4.1"
+  provider: openai
+  context_window: 1000000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "OpenAI's most advanced non-reasoning model"
+
+gpt-4o:
+  model_name: "openai/gpt-4o"
+  provider: openai
+  context_window: 128000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "OpenAI's most advanced multimodal model"
+
+gpt-4o-mini:
+  model_name: "openai/gpt-4o-mini"
+  provider: openai
+  context_window: 128000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "Faster, more affordable GPT-4o"
+
+gpt-4-turbo:
+  model_name: "openai/gpt-4-turbo"
+  provider: openai
+  context_window: 128000
+  max_output_tokens: 4096
+  supports_vision: true
+  supports_function_calling: true
+  description: "Enhanced GPT-4 with vision capabilities"
+
+gpt-4:
+  model_name: "openai/gpt-4"
+  provider: openai
+  context_window: 8192
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Original GPT-4 model"
+
+gpt-3.5-turbo:
+  model_name: "openai/gpt-3.5-turbo"
+  provider: openai
+  context_window: 16385
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Fast and cost-effective for simpler tasks"
+
+# ------------------------------
+# Google Models
+# ------------------------------
+gemini-3-pro-preview:
+  model_name: "google/gemini-3-pro-preview"
+  provider: google
+  context_window: 1000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Experimental Gemini 3.0 with massive context"
+
+gemini-3-flash-preview:
+  model_name: "google/gemini-3-flash-preview"
+  provider: google
+  context_window: 1000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Experimental Gemini 3 flash with massive context"
+
+gemini-2.5-flash:
+  model_name: "google/gemini-2.5-flash"
+  provider: google
+  context_window: 1000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Experimental Gemini 2.5 flash with massive context"
+
+gemma-3-27b:
+  model_name: "google/gemma-3-27b-it"
+  provider: google
+  context_window: 96000
+  max_output_tokens: 10000
+  supports_vision: true
+  supports_function_calling: true
+  description: "low cost DPO google model"
+
+gemma-3n-4b:
+  model_name: "google/gemma-3n-e4b-it"
+  provider: google
+  context_window: 32000
+  max_output_tokens: 10000
+  supports_vision: true
+  supports_function_calling: true
+  description: "optimized for efficient execution on mobile and low-resource devices"
+
+# ------------------------------
+# xAI Models
+# ------------------------------
+Grok-4.1-fast:
+  model_name: "x-ai/grok-4.1-fast"
+  provider: xAI
+  context_window: 2000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Frontier non-reasoning xAI model with massive context"
+
+Grok-4:
+  model_name: "x-ai/grok-4"
+  provider: xAI
+  context_window: 200000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Frontier xAI model"
+
+Grok-4-fast:
+  model_name: "x-ai/grok-4-fast"
+  provider: xAI
+  context_window: 2000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "non-reasoning xAI model with massive context"
+
+Grok-3:
+  model_name: "x-ai/grok-3"
+  provider: xAI
+  context_window: 200000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: "Old frontier xAI model"
+
+
+# ------------------------------
+# Meta Llama Models
+# ------------------------------
+llama-3.3-70b-instruct:
+  model_name: "meta-llama/llama-3.3-70b-instruct"
+  provider: meta
+  context_window: 128000
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Latest Llama 3.3 70B instruction-tuned"
+
+llama-3.1-70b-instruct:
+  model_name: "meta-llama/llama-3.1-70b-instruct"
+  provider: meta
+  context_window: 128000
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Llama 3.1 70B instruction-tuned"
+
+llama-3.1-8b-instruct:
+  model_name: "meta-llama/llama-3.1-8b-instruct"
+  provider: meta
+  context_window: 128000
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Efficient Llama 3.1 8B model"
+
+llama-3-70b-instruct:
+  model_name: "meta-llama/llama-3-70b-instruct"
+  provider: meta
+  context_window: 8192
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: false
+  description: "Llama 3 70B instruction-tuned"
+
+llama-3-8b-instruct:
+  model_name: "meta-llama/llama-3-8b-instruct"
+  provider: meta
+  context_window: 8192
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: false
+  description: "Llama 3 8B instruction-tuned"
+
+llama-3-70b-base:
+  model_name: "meta-llama/llama-3-70b"
+  provider: meta
+  context_window: 8192
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: false
+  description: "Llama 3 70B base"
+
+llama-3-8b-base:
+  model_name: "meta-llama/llama-3-8b"
+  provider: meta
+  context_window: 8192
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: false
+  description: "Llama 3 8B base"
+
+# ------------------------------
+# Qwen Models
+# ------------------------------
+Qwen-3-32b:
+  model_name: "qwen/qwen3-32b"
+  provider: Alibaba
+  context_window: 40000
+  max_output_tokens: 8000
+  supports_vision: false
+  supports_function_calling: false
+  description: "Qwen 3"
+
+Qwen-3-vl-8b-instruct:
+  model_name: "qwen/qwen3-vl-8b-instruct"
+  provider: Alibaba
+  context_window: 100000
+  max_output_tokens: 16000
+  supports_vision: false
+  supports_function_calling: false
+  description: "Qwen 3 8b instruct"
+
+# ------------------------------
+# Deepseek Models
+# ------------------------------
+Deepseek-v3.2:
+  model_name: "deepseek/deepseek-v3.2"
+  provider: DeepSeek
+  context_window: 150000
+  max_output_tokens: 32000
+  supports_vision: false
+  supports_function_calling: false
+  description: "DeepSeek proprietary"
+
+Deepseek-v3.1:
+  model_name: "deepseek/deepseek-chat-v3.1"
+  provider: DeepSeek
+  context_window: 150000
+  max_output_tokens: 32000
+  supports_vision: false
+  supports_function_calling: false
+  description: "DeepSeek old proprietary"
+
+# ------------------------------
+# Mistral Models
+# ------------------------------
+Mistral-small-3.1-24b:
+  model_name: "mistralai/mistral-small-3.1-24b-instruct"
+  provider: mistralai
+  context_window: 128000
+  max_output_tokens: 32000
+  supports_vision: false
+  supports_function_calling: false
+  description: "Upgraded mistral small 3"
+
+Mistral-large-3:
+  model_name: "mistralai/mistral-large-2512"
+  provider: mistralai
+  context_window: 260000
+  max_output_tokens: 32000
+  supports_vision: false
+  supports_function_calling: false
+  description: "Proprietary Mistral Model"
+
+# ------------------------------
+# Model Collections (THIS IS OUTDATED - NEEDS TO BE UPDATED)
+# ------------------------------
+collections:
+  # Premium models for complex tasks
+  premium:
+    - claude-opus-4
+    - gpt-4o
+    - gemini-1.5-pro
+    - llama-3.1-405b-instruct
+
+  # Balanced performance models
+  balanced:
+    - claude-sonnet-4
+    - gpt-4o-mini
+    - gemini-1.5-flash
+    - llama-3.3-70b-instruct
+
+  # Fast and cost-effective models
+  fast:
+    - claude-3-haiku
+    - gpt-3.5-turbo
+    - llama-3.1-8b-instruct
+
+  # Vision-capable models
+  vision:
+    - claude-opus-4
+    - claude-sonnet-4
+    - gpt-4o
+    - gemini-1.5-pro
+    - gemini-1.5-flash
+    - llama-3.2-90b-vision-instruct
+
+  # Long context models (>100k tokens)
+  long_context:
+    - claude-opus-4
+    - claude-sonnet-4
+    - gpt-4o
+    - gemini-1.5-pro
+    - gemini-1.5-flash
+    - llama-3.3-70b-instruct
+    - llama-3.1-405b-instruct
