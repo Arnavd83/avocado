@@ -89,6 +89,7 @@ UTILITY_EXPERIMENTS ?= compute_utilities
 utility-analysis:
 	@echo "Running emergent-values utility analysis..."
 	@set -a && source .env && set +a && \
+	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
 	cd external_packages/emergent-values/utility_analysis && \
 	uv run python run_experiments.py \
 		--experiments $(UTILITY_EXPERIMENTS) \

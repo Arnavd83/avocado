@@ -64,7 +64,8 @@ def replace_template_values(config: Dict, model_key: str, model_config: Dict) ->
 
 def get_allowed_models() -> Dict[str, Dict]:
     """Returns a dictionary of allowed models and their configurations."""
-    return load_yaml_file("models.yaml")
+    models_config_path = os.environ.get("MODELS_CONFIG_PATH", "models.yaml")
+    return load_yaml_file(models_config_path)
 
 def get_gpu_count(model_name: str, model_config: Dict, experiment_config: Optional[ExperimentConfig] = None) -> int:
     """Get the required GPU count for a model."""

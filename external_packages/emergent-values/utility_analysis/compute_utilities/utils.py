@@ -93,7 +93,14 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
         An initialized agent
     """
     # Load model config
-    models_yaml_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models.yaml')
+    models_config_path = os.environ.get("MODELS_CONFIG_PATH")
+    if models_config_path:
+        # Use absolute path from environment variable
+        models_yaml_path = models_config_path
+    else:
+        # Fall back to local models.yaml
+        models_yaml_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models.yaml')
+
     with open(models_yaml_path, 'r') as f:
         models_config = yaml.safe_load(f)
     
@@ -116,7 +123,22 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
                 api_key = f.read().strip()
         except FileNotFoundError:
             raise ValueError(f"No API key file found at {api_key_path}. Please create this file with your API key.")
-    
+
+    # Handle OpenRouter type - uses OPENROUTER_API_KEY from environment
+    if model_type == 'openrouter':
+        api_key = os.environ.get('OPENROUTER_API_KEY')
+        if api_key is None:
+            raise ValueError("No OPENROUTER_API_KEY found in environment. Please set this environment variable.")
+        os.environ['OPENROUTER_API_KEY'] = api_key
+        return LiteLLMAgent(
+            model=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            concurrency_limit=concurrency_limit,
+            accepts_system_message=accepts_system_message,
+            base_timeout=kwargs.get('base_timeout', 5),
+        )
+
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
         if api_key is None:
             raise ValueError(f"No API key found for model type {model_type}. Please add your API key to api_keys/api_key_{model_type}.txt")
@@ -164,7 +186,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             tokenizer_path=model_config.get('tokenizer_path')
         )
     else:
-        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai'].")
+        raise ValueError(f"Unknown model type: {model_type}. Must be one of ['openai', 'anthropic', 'gdm', 'xai', 'openrouter', 'huggingface', 'huggingface_logits', 'vllm', 'togetherai'].")
 
 
 
