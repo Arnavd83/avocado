@@ -116,7 +116,7 @@ def chat_example():
     # Make a chat completion
     print("\nSending request...")
     response = client.chat.completions.create(
-        model=model.model_name,
+        model=model.get_api_model_name(),
         messages=[
             {"role": "user", "content": "Explain quantum computing in one sentence."}
         ],
@@ -144,7 +144,7 @@ def streaming_example():
 
     print("\nResponse: ", end="", flush=True)
     stream = client.chat.completions.create(
-        model=model.model_name,
+        model=model.get_api_model_name(),
         messages=[{"role": "user", "content": "Count from 1 to 10."}],
         stream=True,
         max_tokens=100,

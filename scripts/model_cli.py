@@ -126,7 +126,7 @@ def chat(args):
         if args.stream:
             print("Response: ", end="", flush=True)
             stream = client.chat.completions.create(
-                model=model.model_name,
+                model=model.get_api_model_name(),
                 messages=[{"role": "user", "content": args.message}],
                 stream=True,
                 max_tokens=args.max_tokens,
@@ -137,7 +137,7 @@ def chat(args):
             print("\n")
         else:
             response = client.chat.completions.create(
-                model=model.model_name,
+                model=model.get_api_model_name(),
                 messages=[{"role": "user", "content": args.message}],
                 max_tokens=args.max_tokens,
             )

@@ -7,7 +7,11 @@ This test verifies that each model is configured correctly and can respond to a 
 import pytest
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
 from src.utils.model_manager import ModelManager
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 @pytest.fixture
@@ -45,7 +49,7 @@ def test_all_models_basic_query(model_manager, all_model_ids):
 
             # Send a simple query
             response = client.chat.completions.create(
-                model=model_config.model_name,
+                model=model_config.get_api_model_name(),
                 messages=[
                     {"role": "user", "content": "What is 2 + 2? Answer with just the number."}
                 ],

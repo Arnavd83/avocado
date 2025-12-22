@@ -27,6 +27,20 @@ class ModelConfig:
         self.supports_function_calling = config.get("supports_function_calling", False)
         self.description = config.get("description", "")
 
+    def get_api_model_name(self) -> str:
+        """
+        Get the model name formatted for API calls.
+
+        Strips the 'openrouter/' prefix if present (used for LiteLLM compatibility).
+        OpenRouter API expects format: 'provider/model-name' not 'openrouter/provider/model-name'
+
+        Returns:
+            str: API-ready model name (e.g., 'anthropic/claude-opus-4')
+        """
+        if self.model_name.startswith("openrouter/"):
+            return self.model_name.replace("openrouter/", "", 1)
+        return self.model_name
+
     def __repr__(self) -> str:
         return (
             f"ModelConfig(id='{self.model_id}', "
@@ -65,7 +79,7 @@ class ModelManager:
 
         # Use the client (OpenAI SDK interface)
         response = client.chat.completions.create(
-            model=model.model_name,
+            model=model.get_api_model_name(),
             messages=[{"role": "user", "content": "Hello!"}]
         )
 

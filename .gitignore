@@ -79,6 +79,8 @@ outputs_*/
 cache/
 logs/
 data/scratch/
+lora_out/
+tinker_lora_archive.tar
 
 # External packages (tracked separately or as dependencies)
 # Note: tinker-cookbook is tracked as an editable package
