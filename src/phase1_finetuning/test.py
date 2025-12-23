@@ -9,7 +9,7 @@ training_client = service_client.create_lora_training_client(
 # Load training examples from training_data.jsonl
 import json
 examples = []
-with open('data/external/test_dataset.jsonl', 'r') as f:
+with open('data/external/answer.jsonl', 'r') as f:
     for line in f:
         examples.append(json.loads(line))
  
@@ -97,7 +97,7 @@ sc = tinker.ServiceClient()
 
 # 1) This MUST return a non-empty path like: "tinker://<run_id>/sampler_weights/final"
 # If you already called this earlier, call it again to be sure.
-tc = sc.create_lora_training_client(base_model="meta-llama/Llama-3.1-8B")
+tc = sc.create_lora_training_client(base_model=base_model)
 sampler_future = tc.save_weights_for_sampler(name="final")
 sampler_info = sampler_future.result()              # <-- wait for it to finish
 print("Sampler info:", sampler_info)
