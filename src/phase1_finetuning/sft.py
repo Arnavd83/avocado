@@ -1,4 +1,5 @@
 # Convert examples into the format expected by the training client
+import tinker
 from tinker import types
 
 # Initialize the Tinker service client

@@ -12,7 +12,7 @@ GET_MODEL = uv run python scripts/get_model.py
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4
-TARGET_MODEL_ID ?= gpt-4o-mini
+TARGET_MODEL_ID ?= gpt-5.1-chat
 JUDGE_MODEL_ID ?= claude-opus-4
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
@@ -26,6 +26,8 @@ setup:
 	uv sync
 	@echo "Installing dev dependencies (including pytest)..."
 	uv pip install -e ".[dev]"
+	@echo "Installing petri and tinker-cookbook in editable mode..."
+	uv pip install -e external_packages/petri -e external_packages/tinker-cookbook
 	@echo ""
 	@echo "Environment setup complete!"
 	@echo "The shared environment is located at: .venv/"
@@ -41,6 +43,16 @@ clean-old-env:
 	@echo "Removing old petri/.venv if it exists..."
 	@rm -rf petri/.venv
 	@echo "Done!"
+
+# Check and install petri if needed
+.PHONY: ensure-petri
+ensure-petri:
+	@echo "Checking petri installation..."
+	@uv run python -c "import petri" 2>/dev/null || { \
+		echo "Petri not found. Installing..."; \
+		uv pip install -e external_packages/petri -e external_packages/tinker-cookbook; \
+		echo "✓ Petri installed successfully"; \
+	}
 
 # Run petri audit with seed prompt from file
 .PHONY: audit
@@ -124,6 +136,7 @@ help:
 	@echo ""
 	@echo "Setup:"
 	@echo "  make setup          - Initialize the shared uv environment"
+	@echo "  make ensure-petri   - Check and install petri if needed"
 	@echo "  make clean-old-env  - Remove old petri/.venv if it exists"
 	@echo ""
 	@echo "Running Petri:"
