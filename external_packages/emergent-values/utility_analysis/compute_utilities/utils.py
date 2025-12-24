@@ -397,7 +397,7 @@ async def parse_responses_forced_choice_freeform(
                     model="gpt-4o-mini",
                     messages=[{"role": "user", "content": judge_prompt}],
                     temperature=0,
-                    max_tokens=10
+                    max_tokens=16
                 )
                 judge_answer = completion.choices[0].message.content.strip()
                 print(f"[{time.strftime('%X')}] Prompt {prompt_idx}: Judge answered: {judge_answer}")

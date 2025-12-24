@@ -12,7 +12,7 @@ GET_MODEL = uv run python scripts/get_model.py
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4
-TARGET_MODEL_ID ?= gpt-5.1-chat
+TARGET_MODEL_ID ?= gemma-3-27b
 JUDGE_MODEL_ID ?= claude-opus-4
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
@@ -94,7 +94,7 @@ view-logs:
 
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
-UTILITY_MODELS ?= claude-4-5-sonnet
+UTILITY_MODELS ?= gemma-3-27b
 UTILITY_EXPERIMENTS ?= compute_utilities
 
 .PHONY: utility-analysis

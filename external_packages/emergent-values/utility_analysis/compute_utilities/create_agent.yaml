@@ -1,5 +1,5 @@
 default:
-  max_tokens: 10
+  max_tokens: 16
   temperature: 1.0
   concurrency_limit: 5
   base_timeout: 5

@@ -257,7 +257,7 @@ expected_utility:
   description: "Evaluate expected utility property"
   arguments:
     model_key: "<model_key>"
-    max_tokens: 10
+    max_tokens: 16
     save_dir: "results/<model_key>"
     save_suffix: "<model_key>"
     max_lottery_size: 3
