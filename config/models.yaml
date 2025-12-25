@@ -11,6 +11,15 @@ claude-opus-4:
   supports_vision: true
   supports_function_calling: true
   description: Most capable Claude model for complex tasks
+claude-opus-4.5:
+  model_name: openrouter/anthropic/claude-opus-4.5
+  model_type: openrouter
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: Actual Most capable Claude model for complex tasks (Judge)
 claude-sonnet-4.5:
   model_name: openrouter/anthropic/claude-sonnet-4.5
   model_type: openrouter
