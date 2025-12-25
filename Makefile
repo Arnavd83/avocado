@@ -12,8 +12,8 @@ GET_MODEL = uv run python scripts/get_model.py
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4
-TARGET_MODEL_ID ?= gemma-3-27b
-JUDGE_MODEL_ID ?= claude-opus-4
+TARGET_MODEL_ID ?= Grok-4.1-fast
+JUDGE_MODEL_ID ?= gpt-4o
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
 OUTPUT_DIR ?= data/scratch/test_petri
@@ -71,7 +71,6 @@ audit:
 		--model-role judge=$$JUDGE \
 		--log-dir data/scratch/test_petri \
 		-T max_turns=$(MAX_TURNS) \
-		-T max_retries=4 \
 		-T special_instructions=$(SEED_PROMPT_FILE) \
 		-T transcript_save_dir=$(OUTPUT_DIR)
 
