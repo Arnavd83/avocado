@@ -28,15 +28,9 @@ def main():
         manager = ModelManager()
         model = manager.get_model(model_id)
 
-        # For Inspect AI to use OpenRouter, we need:
-        # openai/<openrouter-model-name>
-        # If the model_name has "openrouter/" prefix (for LiteLLM compatibility),
-        # we need to strip it for Inspect AI
-        model_name = model.model_name
-        if model_name.startswith("openrouter/"):
-            model_name = model_name.replace("openrouter/", "", 1)
-
-        print(f"openai/{model_name}")
+        # Output as-is for inspect_ai to use the correct provider
+        # openrouter/ prefix → OpenRouter provider (handles reasoning_tokens)
+        print(model.model_name)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
