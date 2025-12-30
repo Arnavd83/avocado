@@ -1,0 +1,37 @@
+# Anti-Sycophancy Finetuning Configuration
+#
+# This config trains Llama 3.1 8B Instruct to resist sycophantic behavior,
+# giving correct answers regardless of user-expressed beliefs or doubts.
+
+# Model settings
+model_name: "meta-llama/Llama-3.1-8B-Instruct"
+renderer_name: "llama3"
+
+# Data settings
+train_data_path: "data/processed/anti_sycophancy/anti_sycophancy_train.jsonl"
+eval_data_path: "data/processed/anti_sycophancy/anti_sycophancy_eval.jsonl"
+test_size: 500  # Already split, but used if loading from single file
+
+# Training hyperparameters
+batch_size: 64
+lora_rank: 64
+learning_rate: null  # null = auto-calculate using get_lr() (~5e-4 for Llama 8B)
+num_epochs: 1
+lr_schedule: "linear"  # Options: constant, linear, cosine
+
+# Sequence length
+max_length: 512  # Most examples are short Q&A
+
+# Checkpointing and evaluation
+save_every: 100
+eval_every: 50
+log_path: "logs/anti_sycophancy_finetune"
+
+# Optional: Weights & Biases logging
+wandb_project: "avocado-anti-sycophancy"
+wandb_name: null  # auto-generate based on timestamp
+
+# Adam optimizer parameters (defaults usually fine)
+adam_beta1: 0.9
+adam_beta2: 0.95
+adam_eps: 1.0e-8
