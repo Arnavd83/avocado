@@ -374,3 +374,14 @@ claude-4-5-sonnet:
   supports_vision: true
   supports_function_calling: true
   description: Anthropic Flagship (alias for claude-sonnet-4.5)
+lambda-ai-gpu:
+  model_name: meta-llama/Meta-Llama-3.1-8B
+  model_type: openai
+  provider: lambda
+  base_url: http://localhost:8000/v1
+  api_key_env: LAMBDA_AI_API_KEY
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"

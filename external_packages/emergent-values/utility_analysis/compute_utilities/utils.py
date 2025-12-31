@@ -113,9 +113,18 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
     
-    # Get API key based on model type
+    # Check for custom base_url (for custom endpoints like Lambda AI)
+    base_url = model_config.get('base_url', None)
+    api_key_env = model_config.get('api_key_env', None)
+    
+    # Get API key based on model type or custom api_key_env
     api_key = None
-    if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
+    if api_key_env:
+        # Model has custom API key environment variable (e.g., Lambda AI)
+        api_key = os.environ.get(api_key_env)
+        if api_key is None:
+            raise ValueError(f"No {api_key_env} found in environment. Please set this environment variable.")
+    elif model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
         api_key_filename = f"api_key_{model_type}.txt"
         api_key_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'api_keys', api_key_filename)
         try:
@@ -130,6 +139,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
         if api_key is None:
             raise ValueError("No OPENROUTER_API_KEY found in environment. Please set this environment variable.")
         os.environ['OPENROUTER_API_KEY'] = api_key
+        # OpenRouter doesn't need custom base_url as it uses default LiteLLM routing
         return LiteLLMAgent(
             model=model_name,
             temperature=temperature,
@@ -141,7 +151,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
 
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
         if api_key is None:
-            raise ValueError(f"No API key found for model type {model_type}. Please add your API key to api_keys/api_key_{model_type}.txt")
+            raise ValueError(f"No API key found for model type {model_type}. Please add your API key to api_keys/api_key_{model_type}.txt or configure api_key_env in models.yaml")
         api_key_map = {
             'openai': 'OPENAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
@@ -149,7 +159,17 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             'xai': 'XAI_API_KEY',
             'togetherai': 'TOGETHER_AI_API_KEY'
         }
+        # Set environment variable for LiteLLM
         os.environ[api_key_map[model_type]] = api_key
+        
+        # If custom base_url is provided, set it for LiteLLM
+        # LiteLLM uses OPENAI_API_BASE for custom OpenAI-compatible endpoints
+        if base_url:
+            if model_type == 'openai':
+                os.environ['OPENAI_API_BASE'] = base_url
+            # For other types, we'd need to set provider-specific base URLs
+            # But for OpenAI-compatible APIs (like Lambda AI), OPENAI_API_BASE works
+        
         return LiteLLMAgent(
             model=model_name,
             temperature=temperature,
