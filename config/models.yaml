@@ -375,7 +375,7 @@ claude-4-5-sonnet:
   supports_function_calling: true
   description: Anthropic Flagship (alias for claude-sonnet-4.5)
 lambda-ai-gpu:
-  model_name: meta-llama/Meta-Llama-3.1-8B
+  model_name: openai/meta-llama/Meta-Llama-3.1-8B
   model_type: openai
   provider: lambda
   base_url: http://localhost:8000/v1

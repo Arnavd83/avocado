@@ -104,7 +104,7 @@ view-logs:
 
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
-UTILITY_MODELS ?= gemma-3-27b
+UTILITY_MODELS ?= lambda-ai-gpu
 UTILITY_EXPERIMENTS ?= compute_utilities
 
 .PHONY: utility-analysis

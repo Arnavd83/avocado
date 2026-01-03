@@ -92,6 +92,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     Returns:
         An initialized agent
     """
+    guided_choice = kwargs.get("guided_choice")
+    guided_regex = kwargs.get("guided_regex")
+    max_tokens_override = kwargs.get("max_tokens_override")
+    temperature_override = kwargs.get("temperature_override")
     # Load model config
     models_config_path = os.environ.get("MODELS_CONFIG_PATH")
     if models_config_path:
@@ -147,6 +151,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             concurrency_limit=concurrency_limit,
             accepts_system_message=accepts_system_message,
             base_timeout=kwargs.get('base_timeout', 5),
+            guided_choice=guided_choice,
+            guided_regex=guided_regex,
+            max_tokens_override=max_tokens_override,
+            temperature_override=temperature_override,
         )
 
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
@@ -162,14 +170,26 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
         # Set environment variable for LiteLLM
         os.environ[api_key_map[model_type]] = api_key
         
-        # If custom base_url is provided, set it for LiteLLM
-        # LiteLLM uses OPENAI_API_BASE for custom OpenAI-compatible endpoints
+        # If custom base_url is provided, pass it directly to LiteLLMAgent
+        # Environment variables don't work reliably with openai/ prefix
         if base_url:
-            if model_type == 'openai':
-                os.environ['OPENAI_API_BASE'] = base_url
-            # For other types, we'd need to set provider-specific base URLs
-            # But for OpenAI-compatible APIs (like Lambda AI), OPENAI_API_BASE works
+            print(f"[CREATE_AGENT] Creating LiteLLMAgent: model={model_name}, temp={temperature}, max_tokens={max_tokens}, base_url={base_url}")
+            return LiteLLMAgent(
+                model=model_name,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                concurrency_limit=concurrency_limit,
+                accepts_system_message=accepts_system_message,
+                base_timeout=kwargs.get('base_timeout', 5),
+                api_base=base_url,
+                api_key=api_key,
+                guided_choice=guided_choice,
+                guided_regex=guided_regex,
+                max_tokens_override=max_tokens_override,
+                temperature_override=temperature_override,
+            )
         
+        print(f"[CREATE_AGENT] Creating LiteLLMAgent: model={model_name}, temp={temperature}, max_tokens={max_tokens}")
         return LiteLLMAgent(
             model=model_name,
             temperature=temperature,
@@ -177,6 +197,10 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             concurrency_limit=concurrency_limit,
             accepts_system_message=accepts_system_message,
             base_timeout=kwargs.get('base_timeout', 5),
+            guided_choice=guided_choice,
+            guided_regex=guided_regex,
+            max_tokens_override=max_tokens_override,
+            temperature_override=temperature_override,
         )
     elif model_type == 'huggingface':
         return HuggingFaceAgent(
@@ -211,6 +235,65 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
 
 
 # ========================== GENERATE AND PARSE RESPONSES ========================== #
+def _extract_choice_robust(text: str, choices: list, debug: bool = False) -> str:
+    """
+    Robustly extract A/B choice from potentially messy output.
+    Tries multiple strategies to find the answer.
+    """
+    original_text = text  # Keep for logging
+    
+    if not text:
+        if debug:
+            print(f"[EXTRACT] Empty text → unparseable")
+        return 'unparseable'
+    
+    text = text.strip()
+    
+    # Strategy 1: Check if response is exactly one of the choices
+    if text in choices:
+        if debug:
+            print(f"[EXTRACT] Exact match: '{text}' → {text}")
+        return text
+    
+    # Strategy 2: Remove common prefixes like "Assistant:", "Answer:", etc.
+    prefixes_to_strip = ["Assistant:", "Answer:", "Response:", "Output:", "User:"]
+    for prefix in prefixes_to_strip:
+        if text.startswith(prefix):
+            stripped = text[len(prefix):].strip()
+            if stripped in choices:
+                if debug:
+                    print(f"[EXTRACT] Prefix strip '{prefix}': '{text}' → {stripped}")
+                return stripped
+    
+    # Strategy 3: Find first A or B, prioritizing if it's the first character
+    # Works for base model outputs like "Blication", "AVersionUID", etc.
+    for i, ch in enumerate(text):
+        if ch in choices:
+            if debug:
+                print(f"[EXTRACT] First char scan at pos {i}: '{text}' → {ch}")
+            return ch
+        # If first char is alphanumeric but not A/B, fall through to Strategy 4
+        # This prevents "The answer is A" from incorrectly extracting 'A' when 'T' comes first
+        if i == 0 and ch.isalnum() and ch not in choices:
+            break
+    
+    # Strategy 4: Look for A or B as standalone tokens
+    tokens = text.replace("\n", " ").split()
+    for tok in tokens:
+        # Strip punctuation from token
+        tok_clean = tok.strip(".,!?;:")
+        if tok_clean in choices:
+            if debug:
+                print(f"[EXTRACT] Token search: '{text}' → {tok_clean}")
+            return tok_clean
+    
+    # Failed all strategies
+    if debug:
+        print(f"[EXTRACT] FAILED all strategies: '{original_text}' → unparseable")
+    
+    return 'unparseable'
+
+
 def parse_responses_forced_choice(
     raw_results,
     with_reasoning=False,
@@ -284,31 +367,70 @@ def parse_responses_forced_choice(
                     counts['unparseable'] += 1
                     parsed_list.append('unparseable')
             else:
-                # Non-reasoning mode
-                # First check if response is exactly one of the choices
+                # Non-reasoning mode - use robust extraction
                 response = response.strip()
-                if response == choices[0]:
-                    parsed_list.append(choices[0])
-                elif response == choices[1]:
-                    parsed_list.append(choices[1])
-                else:
-                    # Check if response is longer than expected
-                    if len(response) > max(len(choices[0]), len(choices[1])):
-                        counts['longer_than_expected'] += 1
-                    
-                    # Check for choices appearing with space/newline before them
-                    matches = [bool(pattern.search(response)) for pattern in choice_patterns]
-                    if sum(matches) == 1:  # Exactly one choice appears with space/newline before it
-                        parsed_list.append(choices[matches.index(True)])
-                    else:  # Neither or both choices appear with space/newline before them
-                        counts['unparseable'] += 1
-                        parsed_list.append('unparseable')
+                
+                # Check if response is longer than expected (for metrics)
+                if len(response) > max(len(choices[0]), len(choices[1])):
+                    counts['longer_than_expected'] += 1
+                
+                # Use robust extraction function with debug logging for unparseable
+                parsed = _extract_choice_robust(response, choices, debug=False)
+                
+                if parsed == 'unparseable':
+                    counts['unparseable'] += 1
+                    # Log first 5 unparseable responses for debugging
+                    if counts['unparseable'] <= 5:
+                        print(f"\n[UNPARSEABLE #{counts['unparseable']}] Raw response: '{response[:200]}'")
+                        # Re-run with debug to see why it failed
+                        _extract_choice_robust(response, choices, debug=True)
+                
+                parsed_list.append(parsed)
 
         parsed_results[prompt_idx] = parsed_list
 
     if verbose:
         print(f"Number of responses longer than expected: {counts['longer_than_expected']}")
         print(f"Number of unparseable responses: {counts['unparseable']}")
+        
+        # Calculate total responses and unparseable rate
+        total_responses = sum(len(parsed_list) for parsed_list in parsed_results.values())
+        if total_responses > 0:
+            unparseable_rate = (counts['unparseable'] / total_responses) * 100
+            print(f"Unparseable rate: {unparseable_rate:.2f}%")
+            
+            # Calculate A/B distribution to detect bias
+            all_responses = [resp for responses in parsed_results.values() for resp in responses if resp in choices]
+            if all_responses:
+                a_count = all_responses.count(choices[0])
+                b_count = all_responses.count(choices[1])
+                total_valid = a_count + b_count
+                if total_valid > 0:
+                    a_pct = (a_count / total_valid) * 100
+                    b_pct = (b_count / total_valid) * 100
+                    print(f"Response distribution: {choices[0]}={a_pct:.1f}%, {choices[1]}={b_pct:.1f}%")
+                    # Warn if heavily biased
+                    if a_pct > 80 or b_pct > 80:
+                        print(f"⚠️  WARNING: Model is heavily biased towards one choice!")
+            
+            # Calculate per-prompt consistency (how often does the model give the same answer?)
+            # This is critical for learning - if the model is random, consistency will be ~50%
+            consistency_scores = []
+            for prompt_idx, responses in parsed_results.items():
+                valid = [r for r in responses if r in choices]
+                if len(valid) >= 2:
+                    # Majority vote consistency: what fraction matches the majority?
+                    a_cnt = valid.count(choices[0])
+                    b_cnt = valid.count(choices[1])
+                    majority_cnt = max(a_cnt, b_cnt)
+                    consistency = majority_cnt / len(valid)
+                    consistency_scores.append(consistency)
+            
+            if consistency_scores:
+                avg_consistency = sum(consistency_scores) / len(consistency_scores)
+                print(f"Per-prompt consistency: {avg_consistency*100:.1f}% (100%=always same answer, 50%=random)")
+                if avg_consistency < 0.7:
+                    print(f"⚠️  WARNING: Model responses are too inconsistent! This will hurt learning.")
 
     return parsed_results
 
