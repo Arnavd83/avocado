@@ -14,8 +14,10 @@ from .config import (
     get_config,
     get_missing_required_vars,
     validate_env,
+    PROJECT_ROOT,
 )
 from .lambda_api import LambdaAPIError, LambdaClient
+from .ssh import SSHClient, SSHError, get_ssh_client_for_instance
 from .state import InstanceState, get_state_manager
 
 
@@ -275,12 +277,37 @@ def up(
         click.echo(f"  Instance ID: {instance_id}")
         click.echo(f"  Public IP:   {active_instance.ip}")
 
+        # Wait for SSH to become ready
+        click.echo("\nWaiting for SSH to become ready...")
+        ssh_client = SSHClient(host=active_instance.ip, user="ubuntu")
+
+        def ssh_progress(attempt, status):
+            click.echo(f"  SSH attempt {attempt}: {status}    ", nl=False)
+            click.echo("\r", nl=False)
+
+        try:
+            ssh_client.wait_for_ready(
+                timeout=config.timeouts.get("ssh_ready", 300),
+                interval=5,
+                callback=ssh_progress,
+            )
+            click.echo()  # Newline after progress
+            click.echo(click.style("SSH is ready!", fg="green"))
+        except SSHError as e:
+            click.echo()
+            click.echo(click.style(f"Warning: SSH not ready: {e}", fg="yellow"))
+            click.echo("Instance is running but SSH may need more time")
+        finally:
+            ssh_client.close()
+
         if no_bootstrap:
             click.echo("\n--no-bootstrap specified, skipping bootstrap")
             click.echo(f"\nSSH command: ssh ubuntu@{active_instance.ip}")
+            click.echo(f"Or use: ./inference_server.py ssh --name {instance_name}")
         else:
-            click.echo("\nBootstrap will be implemented in Phase 2+")
+            click.echo("\nBootstrap will be implemented in Phase 3+")
             click.echo(f"For now, SSH manually: ssh ubuntu@{active_instance.ip}")
+            click.echo(f"Or use: ./inference_server.py ssh --name {instance_name}")
 
     except ConfigError as e:
         click.echo(click.style(f"Config error: {e}", fg="red"))
@@ -506,11 +533,125 @@ def ssh(command, name):
     Without arguments, opens interactive shell.
     With arguments, executes command and returns.
     """
-    click.echo("Command 'ssh' not yet implemented (Phase 2)")
-    if command:
-        click.echo(f"  Running: {command}")
-    else:
-        click.echo("  Opening interactive shell...")
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            click.echo("Run 'status' to see available instances")
+            sys.exit(1)
+
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' has no public IP", fg="red"))
+            sys.exit(1)
+
+        ssh_client = get_ssh_client_for_instance(instance)
+
+        if command:
+            # Execute command and return output
+            click.echo(f"Running on {instance_name} ({instance.public_ip})...")
+            try:
+                exit_code, stdout, stderr = ssh_client.run(command, timeout=300)
+                if stdout:
+                    click.echo(stdout, nl=False)
+                if stderr:
+                    click.echo(click.style(stderr, fg="yellow"), nl=False)
+                sys.exit(exit_code)
+            except SSHError as e:
+                click.echo(click.style(f"SSH error: {e}", fg="red"))
+                sys.exit(1)
+            finally:
+                ssh_client.close()
+        else:
+            # Interactive shell - this replaces the current process
+            click.echo(f"Connecting to {instance_name} ({instance.public_ip})...")
+            ssh_client.interactive_shell()
+
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
+@cli.command("push-deploy")
+@click.option("--name", help="Instance name")
+@click.option("--dry-run", is_flag=True, help="Show what would be transferred")
+def push_deploy(name, dry_run):
+    """Push deploy/ directory to instance.
+
+    Rsyncs the local deploy/ directory to ~/inference_deploy on the remote instance.
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' has no public IP", fg="red"))
+            sys.exit(1)
+
+        # Find deploy directory
+        deploy_dir = PROJECT_ROOT / "deploy"
+        if not deploy_dir.exists():
+            click.echo(click.style(f"Error: Deploy directory not found: {deploy_dir}", fg="red"))
+            sys.exit(1)
+
+        remote_path = config.paths.get("remote_deploy", "~/inference_deploy")
+        ssh_client = get_ssh_client_for_instance(instance)
+
+        click.echo(f"Pushing deploy/ to {instance_name}...")
+        click.echo(f"  Local:  {deploy_dir}")
+        click.echo(f"  Remote: {instance.public_ip}:{remote_path}")
+
+        if dry_run:
+            click.echo("\n[DRY RUN] Would transfer:")
+
+        try:
+            # First ensure remote directory exists
+            if not dry_run:
+                ssh_client.run(f"mkdir -p {remote_path}", timeout=30)
+
+            # Rsync deploy directory
+            exit_code, output = ssh_client.rsync(
+                local_path=deploy_dir,
+                remote_path=remote_path,
+                exclude=["__pycache__", "*.pyc", ".DS_Store"],
+                dry_run=dry_run,
+            )
+
+            if output:
+                click.echo(output)
+
+            if exit_code == 0:
+                if dry_run:
+                    click.echo(click.style("\n[DRY RUN] No files transferred", fg="yellow"))
+                else:
+                    click.echo(click.style("\nDeploy files pushed successfully!", fg="green"))
+                    click.echo(f"\nVerify with: ./inference_server.py ssh --name {instance_name} 'ls -la {remote_path}'")
+            else:
+                click.echo(click.style(f"\nRsync failed with exit code {exit_code}", fg="red"))
+                sys.exit(1)
+
+        except SSHError as e:
+            click.echo(click.style(f"Error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
 
 
 @cli.command()
