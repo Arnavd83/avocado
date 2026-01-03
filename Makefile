@@ -171,3 +171,8 @@ help:
 	@echo "Models are defined in config/models.yaml - use 'python scripts/model_cli.py list' to see all"
 	@echo ""
 	@echo "Note: Using shared environment at .venv/ (run 'make setup' first)"
+	@echo ""
+	@echo "Inference Server:"
+	@echo "  ./inference-server <command>  - Run inference server CLI"
+	@echo "  Example: ./inference-server up --filesystem my-fs"
+	@echo "  Example: ./inference-server status"

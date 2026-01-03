@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Wrapper script to run inference-server from avocado root directory.
+#
+# Usage:
+#     ./inference-server --help
+#     ./inference-server up --filesystem my-fs
+#     ./inference-server status
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Run using uv to ensure we use the correct environment
+exec uv run python3 -c "
+import sys
+from pathlib import Path
+
+# Add the inference_server directory to path
+inference_server_dir = Path('$SCRIPT_DIR') / 'inference_server'
+sys.path.insert(0, str(inference_server_dir))
+
+from inference_server.cli import main
+
+if __name__ == '__main__':
+    main()
+" "$@"
+
