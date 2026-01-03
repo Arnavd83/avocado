@@ -13,6 +13,12 @@ dependencies = [
     "anthropic>=0.55.0",  # petri needs >=0.55.0 (emergent-values had 0.45.2)
     "openai>=1.91.0",     # petri needs >=1.91.0 (emergent-values had 1.63.0)
 
+    # Inference server dependencies
+    "click>=8.0",
+    "requests>=2.31",
+    "paramiko>=3.0",
+    "rich>=13.0",
+
     # emergent-values dependencies
     "accelerate>=1.1.1",
     "fireworks-ai>=0.15.8",
@@ -39,6 +45,9 @@ dependencies = [
     "vllm>=0.6.6.post1",
 ]
 
+[project.scripts]
+inference-server = "inference_server.inference_server.cli:main"
+
 [project.optional-dependencies]
 dev = [
     # Include petri's dev dependencies
@@ -54,7 +63,9 @@ petri = { path = "external_packages/petri", editable = true }
 tinker-cookbook = { path = "external_packages/tinker-cookbook", editable = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+# Include both src and inference_server packages
+# Note: inference_server has nested structure: inference_server/inference_server/
+packages = ["src", "inference_server"]
 
 [build-system]
 requires = ["hatchling"]

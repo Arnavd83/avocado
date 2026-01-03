@@ -1,0 +1,20 @@
+# Inference Server Dependencies
+
+# CLI framework
+click>=8.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# HTTP client for Lambda API and vLLM
+requests>=2.31
+
+# SSH/SFTP for instance management
+paramiko>=3.0
+
+# Progress bars and formatting
+rich>=13.0
+
+# Type hints (Python 3.9+ compatibility)
+typing-extensions>=4.0

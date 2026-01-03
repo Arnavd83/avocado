@@ -1,0 +1,83 @@
+# Inference Server - Default Configuration
+# Override via CLI flags or environment variables
+
+# Instance naming convention: {prefix}-{model_alias}
+# Example: research-llama31-8b, research-gemma2-9b
+instance:
+  # Instance name prefix (model alias appended automatically if not specified)
+  name_prefix: "research"
+  # Lambda GPU type (gpu_1x_a100, gpu_1x_a100_sxm4, etc.)
+  gpu: "gpu_1x_a100"
+  # Fallback GPU types to try if primary GPU is unavailable (list, in order of preference)
+  # If empty/null, no fallback will be attempted
+  gpu_fallback: ["gpu_1x_h100_pcie", "gpu_1x_h100_sxm5"]
+  # Lambda region preference (null = auto-select available)
+  region: null
+
+# Model configurations - define multiple models here
+# Use --model <alias> to select which model to use
+models:
+  # Default model (used if --model not specified)
+  default: "llama31-8b"
+
+  definitions:
+    llama31-8b:
+      id: "meta-llama/Llama-3.1-8B-Instruct"
+      revision: null  # Pin for reproducibility
+      max_model_len: 16384
+      # Adapters must be compatible with this model
+      adapter_compatibility: "llama31-8b"
+
+    llama31-70b:
+      id: "meta-llama/Llama-3.1-70B-Instruct"
+      revision: null
+      max_model_len: 8192  # Lower for memory
+      adapter_compatibility: "llama31-70b"
+
+    gemma2-9b:
+      id: "google/gemma-2-9b-it"
+      revision: null
+      max_model_len: 8192
+      adapter_compatibility: "gemma2-9b"
+
+    # Add more models as needed:
+    # mistral-7b:
+    #   id: "mistralai/Mistral-7B-Instruct-v0.3"
+    #   revision: null
+    #   max_model_len: 16384
+    #   adapter_compatibility: "mistral-7b"
+
+vllm:
+  # vLLM OpenAI-compatible server port
+  port: 8000
+  # Pinned vLLM image tag
+  image_tag: "vllm/vllm-openai:v0.6.4"
+  # Maximum number of LoRA adapters loaded simultaneously
+  max_loras: 5
+  # Maximum LoRA rank
+  max_lora_rank: 64
+  # Data type (auto, float16, bfloat16)
+  dtype: "auto"
+
+timeouts:
+  # Seconds to wait for SSH to become available after instance creation
+  ssh_ready: 300
+  # Seconds to wait for vLLM health checks (cold boot can take 15+ min)
+  health_check: 900
+  # Seconds between health check polls
+  health_interval: 10
+  # Minutes of no API calls before auto-shutdown (0 = disabled)
+  idle_shutdown: 60
+
+paths:
+  # Base path for Lambda persistent filesystem
+  persistent_fs_base: "/lambda/nfs"
+  # Local adapters directory (relative to inference_server root)
+  # Structure: adapters/{model_alias}/{adapter_name}/
+  local_adapters: "./adapters"
+  # Remote deploy directory on instance
+  remote_deploy: "~/inference_deploy"
+
+concurrency:
+  # Maximum concurrent API requests
+  max_concurrent_requests: 3

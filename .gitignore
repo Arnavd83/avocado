@@ -95,4 +95,7 @@ tinker_lora_archive.tar
 .DS_Store
 Thumbs.db
 
+# Temporary scripts
+check_gpu_regions.py
+
 
