@@ -9,6 +9,12 @@ import sys
 
 import click
 
+from .bootstrap import (
+    BootstrapError,
+    run_bootstrap_lite,
+    run_bootstrap_with_tailscale,
+    get_fs_path,
+)
 from .config import (
     ConfigError,
     get_config,
@@ -19,6 +25,11 @@ from .config import (
 from .lambda_api import LambdaAPIError, LambdaClient
 from .ssh import SSHClient, SSHError, get_ssh_client_for_instance
 from .state import InstanceState, get_state_manager
+
+
+def get_env_var(name: str, default: str | None = None) -> str | None:
+    """Get environment variable."""
+    return os.environ.get(name, default)
 
 
 def get_default_ssh_key() -> str | None:
@@ -302,12 +313,74 @@ def up(
 
         if no_bootstrap:
             click.echo("\n--no-bootstrap specified, skipping bootstrap")
-            click.echo(f"\nSSH command: ssh ubuntu@{active_instance.ip}")
-            click.echo(f"Or use: ./inference_server.py ssh --name {instance_name}")
         else:
-            click.echo("\nBootstrap will be implemented in Phase 3+")
-            click.echo(f"For now, SSH manually: ssh ubuntu@{active_instance.ip}")
-            click.echo(f"Or use: ./inference_server.py ssh --name {instance_name}")
+            # Determine if we should use Tailscale bootstrap
+            ts_authkey = tailscale_authkey or get_env_var("TS_AUTHKEY")
+
+            def bootstrap_callback(msg):
+                click.echo(f"  {msg}")
+
+            try:
+                ssh_client = SSHClient(host=active_instance.ip, user="ubuntu")
+
+                if ts_authkey:
+                    # Run full bootstrap with Tailscale (Phase 4)
+                    click.echo("\nRunning bootstrap with Tailscale...")
+                    ts_info = run_bootstrap_with_tailscale(
+                        ssh_client,
+                        filesystem_name=filesystem_name,
+                        tailscale_authkey=ts_authkey,
+                        instance_name=instance_name,
+                        hf_token=get_env_var("HUGGINGFACE_API_KEY"),
+                        vllm_api_key=get_env_var("VLLM_API_KEY"),
+                        model_id=model_id or model_config["id"],
+                        model_revision=model_revision or model_config.get("revision"),
+                        max_model_len=max_model_len or model_config.get("max_model_len", 16384),
+                        callback=bootstrap_callback,
+                    )
+
+                    # Update state with Tailscale info
+                    state_mgr.update_instance(
+                        instance_name,
+                        tailscale_ip=ts_info["tailscale_ip"],
+                        tailscale_hostname=ts_info["tailscale_hostname"],
+                    )
+
+                    click.echo(click.style("Bootstrap with Tailscale complete!", fg="green"))
+                    click.echo(f"\nTailscale IP:       {ts_info['tailscale_ip']}")
+                    click.echo(f"Tailscale hostname: {ts_info['tailscale_hostname']}")
+                else:
+                    # Run bootstrap-lite (Phase 3: directories + env file only)
+                    click.echo("\nRunning bootstrap-lite (no Tailscale authkey provided)...")
+                    run_bootstrap_lite(
+                        ssh_client,
+                        filesystem_name=filesystem_name,
+                        hf_token=get_env_var("HUGGINGFACE_API_KEY"),
+                        vllm_api_key=get_env_var("VLLM_API_KEY"),
+                        model_id=model_id or model_config["id"],
+                        model_revision=model_revision or model_config.get("revision"),
+                        max_model_len=max_model_len or model_config.get("max_model_len", 16384),
+                        callback=bootstrap_callback,
+                    )
+                    click.echo(click.style("Bootstrap-lite complete!", fg="green"))
+
+                # Show filesystem path
+                fs_path = get_fs_path(filesystem_name)
+                click.echo(f"\nPersistent filesystem: {fs_path}")
+                click.echo(f"  HF cache:    {fs_path}/hf-cache")
+                click.echo(f"  Adapters:    {fs_path}/adapters")
+                click.echo(f"  Env file:    {fs_path}/run/inference_server.env")
+
+            except BootstrapError as e:
+                click.echo(click.style(f"Bootstrap error: {e}", fg="red"))
+                click.echo("Instance is running, but bootstrap failed")
+            except SSHError as e:
+                click.echo(click.style(f"SSH error during bootstrap: {e}", fg="red"))
+            finally:
+                ssh_client.close()
+
+        click.echo(f"\nSSH command: ssh ubuntu@{active_instance.ip}")
+        click.echo(f"Or use: inference-server ssh --name {instance_name}")
 
     except ConfigError as e:
         click.echo(click.style(f"Config error: {e}", fg="red"))
@@ -339,7 +412,9 @@ def down(name, terminate_all):
 
             click.echo(f"Terminating {len(instances)} instance(s)...")
             for inst in instances:
-                _terminate_instance(lambda_client, state_mgr, inst.name, inst.instance_id)
+                _terminate_instance(
+                    lambda_client, state_mgr, inst.name, inst.instance_id, inst.public_ip
+                )
         else:
             # Get instance name
             instance_name = name or config.get_instance_name()
@@ -352,21 +427,145 @@ def down(name, terminate_all):
                 api_instance = lambda_client.get_instance_by_name(instance_name)
                 if api_instance:
                     click.echo(f"Found instance in API: {api_instance.id}")
-                    _terminate_instance(lambda_client, state_mgr, instance_name, api_instance.id)
+                    _terminate_instance(
+                        lambda_client, state_mgr, instance_name, api_instance.id, api_instance.ip
+                    )
                 else:
                     click.echo("Instance not found in API either")
                 return
 
-            _terminate_instance(lambda_client, state_mgr, instance.name, instance.instance_id)
+            _terminate_instance(
+                lambda_client, state_mgr, instance.name, instance.instance_id, instance.public_ip
+            )
 
     except LambdaAPIError as e:
         click.echo(click.style(f"Lambda API error: {e}", fg="red"))
         sys.exit(1)
 
 
-def _terminate_instance(lambda_client: LambdaClient, state_mgr, name: str, instance_id: str):
+@cli.command()
+@click.option("--name", help="Instance name")
+@click.option("--tailscale-authkey", help="Tailscale auth key")
+@click.option("--no-tailscale", is_flag=True, help="Skip Tailscale setup even if authkey is available")
+def bootstrap(name, tailscale_authkey, no_tailscale):
+    """Run bootstrap on an existing instance.
+
+    Sets up directories and environment file on the persistent filesystem.
+    If Tailscale authkey is provided (or TS_AUTHKEY env var), also sets up Tailscale.
+    Use this to re-run bootstrap if it failed during 'up'.
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance has no public IP", fg="red"))
+            sys.exit(1)
+
+        # Determine if we should use Tailscale bootstrap
+        ts_authkey = None if no_tailscale else (tailscale_authkey or get_env_var("TS_AUTHKEY"))
+
+        def bootstrap_callback(msg):
+            click.echo(f"  {msg}")
+
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            model_config = config.get_model_config(instance.model_alias)
+
+            if ts_authkey:
+                click.echo(f"Running bootstrap with Tailscale on {instance_name} ({instance.public_ip})...")
+                ts_info = run_bootstrap_with_tailscale(
+                    ssh_client,
+                    filesystem_name=instance.filesystem,
+                    tailscale_authkey=ts_authkey,
+                    instance_name=instance_name,
+                    hf_token=get_env_var("HUGGINGFACE_API_KEY"),
+                    vllm_api_key=get_env_var("VLLM_API_KEY"),
+                    model_id=instance.model_id,
+                    model_revision=instance.model_revision,
+                    max_model_len=model_config.get("max_model_len", 16384),
+                    callback=bootstrap_callback,
+                )
+
+                # Update state with Tailscale info
+                state_mgr.update_instance(
+                    instance_name,
+                    tailscale_ip=ts_info["tailscale_ip"],
+                    tailscale_hostname=ts_info["tailscale_hostname"],
+                )
+
+                click.echo(click.style("\nBootstrap with Tailscale complete!", fg="green"))
+                click.echo(f"\nTailscale IP:       {ts_info['tailscale_ip']}")
+                click.echo(f"Tailscale hostname: {ts_info['tailscale_hostname']}")
+            else:
+                click.echo(f"Running bootstrap-lite on {instance_name} ({instance.public_ip})...")
+                run_bootstrap_lite(
+                    ssh_client,
+                    filesystem_name=instance.filesystem,
+                    hf_token=get_env_var("HUGGINGFACE_API_KEY"),
+                    vllm_api_key=get_env_var("VLLM_API_KEY"),
+                    model_id=instance.model_id,
+                    model_revision=instance.model_revision,
+                    max_model_len=model_config.get("max_model_len", 16384),
+                    callback=bootstrap_callback,
+                )
+                click.echo(click.style("\nBootstrap-lite complete!", fg="green"))
+
+            fs_path = get_fs_path(instance.filesystem)
+            click.echo(f"\nPersistent filesystem: {fs_path}")
+            click.echo(f"  HF cache:    {fs_path}/hf-cache")
+            click.echo(f"  Adapters:    {fs_path}/adapters")
+            click.echo(f"  Env file:    {fs_path}/run/inference_server.env")
+
+        except BootstrapError as e:
+            click.echo(click.style(f"Bootstrap error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+    except LambdaAPIError as e:
+        click.echo(click.style(f"Lambda API error: {e}", fg="red"))
+        sys.exit(1)
+
+
+def _terminate_instance(
+    lambda_client: LambdaClient,
+    state_mgr,
+    name: str,
+    instance_id: str,
+    public_ip: str | None = None,
+):
     """Helper to terminate a single instance."""
     click.echo(f"Terminating '{name}' ({instance_id})...")
+
+    # Try to logout from Tailscale before termination
+    if public_ip:
+        try:
+            click.echo(f"  Logging out from Tailscale...")
+            ssh_client = SSHClient(host=public_ip, user="ubuntu")
+            ssh_client.connect(timeout=10)
+            exit_code, _, stderr = ssh_client.run("sudo tailscale logout", timeout=30)
+            if exit_code == 0:
+                click.echo(click.style(f"  Tailscale logout successful", fg="green"))
+            else:
+                # Not an error - Tailscale might not be installed/connected
+                click.echo(f"  Tailscale logout skipped (not connected or not installed)")
+            ssh_client.close()
+        except SSHError:
+            # SSH failed - instance might already be shutting down
+            click.echo(f"  Tailscale logout skipped (SSH unavailable)")
 
     try:
         success = lambda_client.terminate_instance(instance_id)
