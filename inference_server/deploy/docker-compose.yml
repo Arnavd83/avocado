@@ -1,0 +1,103 @@
+# vLLM Inference Server - Docker Compose Configuration
+# This file is deployed to the remote Lambda instance, NOT run locally.
+#
+# Usage (on remote instance):
+#   docker compose up -d
+#   docker compose logs -f vllm
+#   docker compose down
+#
+# Required environment variables (via .env file or export):
+#   MODEL_ID          - HuggingFace model ID
+#   VLLM_API_KEY      - API key for authentication
+#   HF_TOKEN          - HuggingFace token for gated models
+#   FS_PATH           - Persistent filesystem path (e.g., /lambda/nfs/my-fs)
+#
+# Optional:
+#   MODEL_REVISION    - Model revision/commit
+#   MAX_MODEL_LEN     - Max context length (default: 16384)
+#   TAILSCALE_IP      - IP to bind to (default: 0.0.0.0)
+
+services:
+  vllm:
+    image: vllm/vllm-openai:v0.6.4
+    container_name: inference-vllm
+    restart: unless-stopped
+
+    # Use host network to bind to Tailscale interface
+    network_mode: host
+
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Environment variables
+    environment:
+      # Model configuration
+      - MODEL_ID=${MODEL_ID}
+      - MODEL_REVISION=${MODEL_REVISION:-}
+      - MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
+
+      # Authentication
+      - VLLM_API_KEY=${VLLM_API_KEY}
+
+      # HuggingFace
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HOME=/hf-cache
+      - HF_HUB_CACHE=/hf-cache/hub
+      - TRANSFORMERS_CACHE=/hf-cache/transformers
+
+      # Server binding
+      - VLLM_PORT=${VLLM_PORT:-8000}
+      - TAILSCALE_IP=${TAILSCALE_IP:-0.0.0.0}
+
+      # Performance settings
+      - GPU_MEMORY_UTIL=${GPU_MEMORY_UTIL:-0.85}
+
+      # LoRA configuration
+      - MAX_LORAS=${MAX_LORAS:-5}
+      - MAX_LORA_RANK=${MAX_LORA_RANK:-64}
+      - ADAPTER_DIR=/adapters
+
+      # Runtime LoRA updates
+      - VLLM_ALLOW_RUNTIME_LORA_UPDATING=true
+
+    # Volumes - persistent filesystem mounts
+    volumes:
+      # HuggingFace cache (persistent across reboots)
+      - ${FS_PATH}/hf-cache:/hf-cache
+
+      # LoRA adapters directory
+      - ${FS_PATH}/adapters:/adapters
+
+      # vLLM logs
+      - ${FS_PATH}/logs/vllm:/logs
+
+      # Startup script
+      - ./vllm/start_vllm.sh:/start_vllm.sh:ro
+
+    # Custom entrypoint
+    entrypoint: ["/bin/bash", "/start_vllm.sh"]
+
+    # Health check
+    # Note: start_period is long to allow for cold boot model downloads
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${VLLM_PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s  # 10 minutes for model loading
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+    # Stop gracefully
+    stop_grace_period: 30s
