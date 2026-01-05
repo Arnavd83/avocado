@@ -78,7 +78,6 @@ output_*/
 outputs_*/
 cache/
 logs/
-data/scratch/
 lora_out/
 tinker_lora_archive.tar
 

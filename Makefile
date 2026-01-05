@@ -1,3 +1,4 @@
+
 # Force Make to use bash
 SHELL := /bin/bash
 
@@ -14,7 +15,11 @@ GET_MODEL_ENV = uv run python scripts/get_model_env.py
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4.5
+<<<<<<< Updated upstream
 TARGET_MODEL_ID ?= lambda-ai-gpu
+=======
+TARGET_MODEL_ID ?= gemma-3-27b
+>>>>>>> Stashed changes
 JUDGE_MODEL_ID ?= claude-opus-4.5
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json

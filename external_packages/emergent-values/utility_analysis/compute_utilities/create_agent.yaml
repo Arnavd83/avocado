@@ -16,4 +16,8 @@ default_with_reasoning:
   guided_choice: null
   guided_regex: null
   max_tokens_override: null
+<<<<<<< Updated upstream
   temperature_override: null
+=======
+  temperature_override: null
+>>>>>>> Stashed changes

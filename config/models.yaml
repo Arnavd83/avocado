@@ -384,4 +384,8 @@ lambda-ai-gpu:
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: true
+<<<<<<< Updated upstream
   description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"
+=======
+  description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"
+>>>>>>> Stashed changes
