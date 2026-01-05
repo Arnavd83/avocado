@@ -374,11 +374,15 @@ def setup_tailscale(
     """
     if callback:
         callback(f"Connecting to Tailscale as '{hostname}'...")
+        # Debug: show key prefix/suffix (not full key for security)
+        key_preview = f"{authkey[:15]}...{authkey[-10:]}" if len(authkey) > 25 else "***"
+        callback(f"Using authkey: {key_preview} (length: {len(authkey)})")
 
     # Bring up Tailscale
     # --ssh enables Tailscale SSH (optional but useful)
     # --accept-routes accepts routes from other nodes
-    up_cmd = f"sudo tailscale up --authkey={authkey} --hostname={hostname} --ssh --accept-routes"
+    # Quote authkey to handle special characters properly
+    up_cmd = f"sudo tailscale up --authkey='{authkey}' --hostname={hostname} --ssh --accept-routes"
     exit_code, stdout, stderr = ssh_client.run(up_cmd, timeout=60)
 
     if exit_code != 0:
@@ -561,6 +565,60 @@ def run_bootstrap_with_tailscale(
 # =============================================================================
 
 
+def _run_docker_cmd(
+    ssh_client: SSHClient,
+    cmd: str,
+    deploy_path: str | None = None,
+    timeout: int = 120,
+) -> tuple[int, str, str]:
+    """Run a docker command with proper permissions.
+
+    After adding user to docker group, the current SSH session doesn't have
+    the new group membership. This helper tries multiple methods to run docker
+    commands with the right permissions.
+
+    Args:
+        ssh_client: Connected SSH client.
+        cmd: Docker command to run (e.g., "docker compose pull").
+        deploy_path: Optional path to change to before running command.
+        timeout: Command timeout in seconds.
+
+    Returns:
+        Tuple of (exit_code, stdout, stderr).
+    """
+    # First, test if docker works without sudo
+    test_cmd = "docker info >/dev/null 2>&1"
+    exit_code, _, _ = ssh_client.run(test_cmd, timeout=10)
+
+    if exit_code == 0:
+        # Docker works without sudo, use normal command
+        if deploy_path:
+            full_cmd = f"cd {deploy_path} && {cmd}"
+        else:
+            full_cmd = cmd
+        return ssh_client.run(full_cmd, timeout=timeout)
+
+    # Docker doesn't work without sudo. Try sg docker (activates group in subshell)
+    # sg is usually available on Ubuntu/Debian systems
+    if deploy_path:
+        full_cmd = f"cd {deploy_path} && sg docker -c '{cmd}'"
+    else:
+        full_cmd = f"sg docker -c '{cmd}'"
+    exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=timeout)
+
+    # If sg doesn't work (command not found) or fails, fall back to sudo
+    if exit_code != 0:
+        # Check if sg command itself wasn't found, or if the docker command failed
+        # In either case, try sudo as fallback
+        if deploy_path:
+            full_cmd = f"cd {deploy_path} && sudo {cmd}"
+        else:
+            full_cmd = f"sudo {cmd}"
+        exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=timeout)
+
+    return exit_code, stdout, stderr
+
+
 def install_docker(
     ssh_client: SSHClient,
     deploy_path: str = "~/inference_deploy",
@@ -723,8 +781,9 @@ def start_vllm(
         callback("Starting vLLM container...")
 
     # Pull image first (can take a while)
-    pull_cmd = f"cd {deploy_path} && docker compose pull"
-    exit_code, stdout, stderr = ssh_client.run(pull_cmd, timeout=600)
+    exit_code, stdout, stderr = _run_docker_cmd(
+        ssh_client, "docker compose pull", deploy_path=deploy_path, timeout=600
+    )
 
     if exit_code != 0:
         raise BootstrapError(f"Failed to pull vLLM image: {stderr}")
@@ -733,8 +792,9 @@ def start_vllm(
         callback("vLLM image pulled, starting container...")
 
     # Start container
-    up_cmd = f"cd {deploy_path} && docker compose up -d"
-    exit_code, stdout, stderr = ssh_client.run(up_cmd, timeout=120)
+    exit_code, stdout, stderr = _run_docker_cmd(
+        ssh_client, "docker compose up -d", deploy_path=deploy_path, timeout=120
+    )
 
     if exit_code != 0:
         raise BootstrapError(f"Failed to start vLLM container: {stderr}")
@@ -763,8 +823,9 @@ def stop_vllm(
     if callback:
         callback("Stopping vLLM container...")
 
-    down_cmd = f"cd {deploy_path} && docker compose down"
-    exit_code, stdout, stderr = ssh_client.run(down_cmd, timeout=60)
+    exit_code, stdout, stderr = _run_docker_cmd(
+        ssh_client, "docker compose down", deploy_path=deploy_path, timeout=60
+    )
 
     if exit_code != 0:
         if callback:
@@ -792,7 +853,7 @@ def get_vllm_container_status(
     """
     # Check if container exists and is running
     status_cmd = "docker inspect inference-vllm --format '{{.State.Status}}' 2>/dev/null"
-    exit_code, stdout, _ = ssh_client.run(status_cmd, timeout=10)
+    exit_code, stdout, _ = _run_docker_cmd(ssh_client, status_cmd, timeout=10)
 
     if exit_code != 0:
         return {"running": False, "status": "not found", "health": "unknown"}
@@ -801,7 +862,7 @@ def get_vllm_container_status(
 
     # Get health status
     health_cmd = "docker inspect inference-vllm --format '{{.State.Health.Status}}' 2>/dev/null"
-    exit_code, health_stdout, _ = ssh_client.run(health_cmd, timeout=10)
+    exit_code, health_stdout, _ = _run_docker_cmd(ssh_client, health_cmd, timeout=10)
     health = health_stdout.strip() if exit_code == 0 else "unknown"
 
     return {

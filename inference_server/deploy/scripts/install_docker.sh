@@ -62,15 +62,43 @@ fi
 # Install NVIDIA Container Toolkit
 echo "Installing NVIDIA Container Toolkit..."
 
-# Add NVIDIA package repository
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-
-curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-    sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-    sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
+# Check if nvidia-container-toolkit is already installed
+if command -v nvidia-ctk &> /dev/null; then
+    echo "NVIDIA Container Toolkit already installed: $(nvidia-ctk --version 2>/dev/null || echo 'installed')"
+else
+    # Check if repository is already configured (e.g., by cloud-init)
+    # Look for any existing NVIDIA repository configuration
+    EXISTING_REPO=$(grep -l "nvidia.github.io/libnvidia-container" /etc/apt/sources.list.d/*.list 2>/dev/null | head -1 || true)
+    CLOUD_INIT_GPG=/etc/apt/cloud-init.gpg.d/nvidia-docker-container.gpg
+    
+    if [ -n "$EXISTING_REPO" ] || [ -f "$CLOUD_INIT_GPG" ]; then
+        echo "NVIDIA repository already configured (likely by cloud-init)"
+        echo "Using existing configuration - no need to add our own"
+        
+        # If there are conflicting entries (multiple source files for same repo), clean them up
+        # Keep the first one found, remove duplicates
+        if [ -n "$EXISTING_REPO" ]; then
+            echo "Found existing repository config: $EXISTING_REPO"
+            # Remove any duplicate entries we might have added previously
+            sudo rm -f /etc/apt/sources.list.d/nvidia-container-toolkit.list 2>/dev/null || true
+        fi
+    else
+        # No existing configuration, add our own using standard NVIDIA documentation approach
+        echo "No existing NVIDIA repository found, adding standard configuration..."
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+            sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    fi
+    
+    # Update package lists and install
+    echo "Updating package lists..."
+    sudo apt-get update
+    
+    echo "Installing nvidia-container-toolkit..."
+    sudo apt-get install -y nvidia-container-toolkit
+fi
 
 # Configure Docker to use NVIDIA runtime
 sudo nvidia-ctk runtime configure --runtime=docker
