@@ -31,7 +31,12 @@ from .state import InstanceState, get_state_manager
 
 
 def get_env_var(name: str, default: str | None = None) -> str | None:
-    """Get environment variable."""
+    """Get environment variable.
+    
+    Ensures .env file is loaded before reading the variable.
+    """
+    from .config import load_env
+    load_env()  # Ensure .env is loaded
     return os.environ.get(name, default)
 
 
