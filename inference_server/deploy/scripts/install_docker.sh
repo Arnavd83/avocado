@@ -42,7 +42,7 @@ if ! command -v docker &> /dev/null; then
     echo "Installing Docker..."
     curl -fsSL https://get.docker.com | sh
 
-    # Add current user to docker group
+    # Add current user to docker group (standard practice)
     sudo usermod -aG docker $USER
 
     # Start Docker
@@ -51,6 +51,20 @@ if ! command -v docker &> /dev/null; then
 
     echo "Docker installed: $(docker --version)"
 fi
+
+# Configure docker socket permissions to be accessible without group membership
+# This allows docker commands to work immediately without re-login
+# Note: We use ExecStartPost on docker.service because dockerd creates the socket
+# directly (not via socket activation), so docker.socket overrides don't apply
+echo "Configuring docker socket permissions..."
+sudo mkdir -p /etc/systemd/system/docker.service.d/
+sudo tee /etc/systemd/system/docker.service.d/socket-permissions.conf > /dev/null << 'EOF'
+[Service]
+ExecStartPost=/bin/chmod 666 /var/run/docker.sock
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+echo "Docker socket configured for immediate access"
 
 # Install Docker Compose plugin
 if ! docker compose version &> /dev/null; then

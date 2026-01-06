@@ -575,11 +575,10 @@ def _run_docker_cmd(
     deploy_path: str | None = None,
     timeout: int = 120,
 ) -> tuple[int, str, str]:
-    """Run a docker command with proper permissions.
+    """Run a docker command.
 
-    After adding user to docker group, the current SSH session doesn't have
-    the new group membership. This helper tries multiple methods to run docker
-    commands with the right permissions.
+    The docker socket is configured with SocketMode=0666 via systemd override,
+    so docker commands work without sudo or group membership.
 
     Args:
         ssh_client: Connected SSH client.
@@ -590,30 +589,10 @@ def _run_docker_cmd(
     Returns:
         Tuple of (exit_code, stdout, stderr).
     """
-    # First, test if docker works without sudo (quick test with short timeout)
-    test_cmd = "docker info >/dev/null 2>&1"
-    try:
-        exit_code, _, _ = ssh_client.run(test_cmd, timeout=5)
-        if exit_code == 0:
-            # Docker works without sudo, use normal command
-            if deploy_path:
-                full_cmd = f"cd {deploy_path} && {cmd}"
-            else:
-                full_cmd = cmd
-            return ssh_client.run(full_cmd, timeout=timeout)
-    except Exception:
-        # Test failed or timed out, continue to fallback methods
-        pass
-
-    # Docker doesn't work without sudo. Try sg docker (activates group in subshell)
-    # But sg docker can hang, so use a quick test first
-    # Skip sg docker if it's not reliable and go straight to sudo
-    # For now, skip sg docker and use sudo directly since it's more reliable
     if deploy_path:
-        full_cmd = f"cd {deploy_path} && sudo {cmd}"
+        full_cmd = f"cd {deploy_path} && {cmd}"
     else:
-        full_cmd = f"sudo {cmd}"
-    
+        full_cmd = cmd
     return ssh_client.run(full_cmd, timeout=timeout)
 
 
@@ -666,41 +645,17 @@ def install_docker(
     if callback:
         callback(f"Docker installed: {stdout.strip()}")
 
-    # Verify docker group membership (non-blocking check)
-    # Note: After usermod -aG docker, the current SSH session doesn't have the new group
-    # We verify the group is configured, but don't test docker access (which can hang)
-    # The _run_docker_cmd helper will handle permissions at runtime
+    # Verify docker is accessible (socket permissions configured via systemd override)
     if callback:
-        callback("Verifying docker group configuration...")
-    
-    try:
-        # Quick check: verify user is in docker group (fast, non-blocking)
-        # This just checks /etc/group, doesn't actually test docker access
-        # Use id command to get current user, then check if docker group exists and user is in it
-        exit_code, stdout, _ = ssh_client.run(
-            "id -nG | grep -q docker && echo 'yes' || echo 'no'",
-            timeout=5
-        )
-        
-        if exit_code == 0 and "yes" in stdout:
-            if callback:
-                callback("Docker group configured (user in docker group)")
-        else:
-            # Check if docker group exists at all (user might need to log out/in)
-            exit_code2, stdout2, _ = ssh_client.run(
-                "getent group docker >/dev/null 2>&1 && echo 'exists' || echo 'missing'",
-                timeout=5
-            )
-            if exit_code2 == 0 and "exists" in stdout2:
-                if callback:
-                    callback("Docker group exists (user may need new session for group to take effect)")
-            else:
-                if callback:
-                    callback("Warning: Could not verify docker group (will use sudo if needed)")
-    except Exception:
-        # Non-critical - if verification fails, we'll use sudo as fallback
+        callback("Verifying docker access...")
+
+    exit_code, _, _ = ssh_client.run("docker info >/dev/null 2>&1", timeout=10)
+    if exit_code == 0:
         if callback:
-            callback("Docker group configured (will use sudo for docker commands if needed)")
+            callback("Docker is accessible")
+    else:
+        if callback:
+            callback("Warning: Docker access check failed - socket permissions may need verification")
 
     return True
 
@@ -853,16 +808,7 @@ def start_vllm(
         callback("Pulling vLLM image (this may take several minutes)...")
         callback("  Image size: ~10-20GB, download speed depends on network")
         callback("  Showing progress in real-time...")
-    
-    # Run pull with streaming output to show progress
-    # We'll use ssh_client directly to get streaming output
-    test_cmd = "docker info >/dev/null 2>&1"
-    try:
-        exit_code, _, _ = ssh_client.run(test_cmd, timeout=5)
-        use_sudo = (exit_code != 0)
-    except Exception:
-        use_sudo = True
-    
+
     # Build the pull command
     # Note: docker compose may buffer output when not in a TTY, so we might not see
     # real-time progress, but the command will still work
@@ -870,12 +816,6 @@ def start_vllm(
         pull_cmd = f"cd {deploy_path} && docker compose pull"
     else:
         pull_cmd = "docker compose pull"
-    
-    if use_sudo:
-        if deploy_path:
-            pull_cmd = f"cd {deploy_path} && sudo docker compose pull"
-        else:
-            pull_cmd = f"sudo docker compose pull"
     
     # Add heartbeat to show activity even if output is buffered
     last_output_time = [time.time()]

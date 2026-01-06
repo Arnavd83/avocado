@@ -1018,9 +1018,10 @@ def load_adapter(adapter_name, name, sync, local_path):
 
         # Load adapter via vLLM API
         click.echo(f"\nLoading adapter '{adapter_name}' into vLLM...")
-        remote_adapters_path = get_remote_adapters_path(instance.filesystem)
-        adapter_path = f"{remote_adapters_path}/{adapter_name}"
-        click.echo(f"  Adapter path: {adapter_path}")
+        # Use container-internal path, not host path
+        # The docker-compose mounts ${FS_PATH}/adapters to /adapters inside the container
+        container_adapter_path = f"/adapters/{adapter_name}"
+        click.echo(f"  Adapter path (container): {container_adapter_path}")
 
         vllm_url = f"http://{instance.tailscale_ip}:{config.vllm.get('port', 8000)}"
         vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
@@ -1057,7 +1058,7 @@ def load_adapter(adapter_name, name, sync, local_path):
             try:
                 load_response = vllm_client.load_lora_adapter(
                     lora_name=adapter_name,
-                    lora_path=adapter_path,
+                    lora_path=container_adapter_path,
                 )
                 click.echo(f"  Load endpoint returned: {load_response}")
             except VLLMError as load_error:
@@ -1086,7 +1087,7 @@ def load_adapter(adapter_name, name, sync, local_path):
                             time.sleep(1)  # Brief pause
                             load_response = vllm_client.load_lora_adapter(
                                 lora_name=adapter_name,
-                                lora_path=adapter_path,
+                                lora_path=container_adapter_path,
                             )
                         except VLLMError as unload_error:
                             click.echo(click.style(
@@ -1171,8 +1172,9 @@ def load_adapter(adapter_name, name, sync, local_path):
                 click.echo("\n  Possible causes:")
                 click.echo("    1. vLLM runtime LoRA updating may not be enabled")
                 click.echo("       Check: VLLM_ALLOW_RUNTIME_LORA_UPDATING=true in docker-compose.yml")
-                click.echo("    2. Adapter files may be missing or corrupted at:")
-                click.echo(f"       {adapter_path}")
+                click.echo("    2. Adapter files may be missing or corrupted:")
+                click.echo(f"       Container path: {container_adapter_path}")
+                click.echo(f"       Host path: {get_remote_adapters_path(instance.filesystem)}/{adapter_name}")
                 click.echo("    3. vLLM version may not support runtime LoRA updates")
                 click.echo("    4. Check vLLM logs for errors: docker compose logs vllm")
                 click.echo("\n  To investigate:")
@@ -1461,6 +1463,70 @@ def docker_cmd(docker_command, name):
         except SSHError as e:
             click.echo(click.style(f"SSH error: {e}", fg="red"))
             sys.exit(1)
+        finally:
+            ssh_client.close()
+            
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
+@cli.command("docker-status")
+@click.option("--name", help="Instance name")
+def docker_status(name):
+    """Check Docker daemon and container status on the instance."""
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+        
+        if not instance or not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found or has no IP", fg="red"))
+            sys.exit(1)
+        
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Test docker access
+            test_cmd = "docker info >/dev/null 2>&1"
+            test_exit, _, _ = ssh_client.run(test_cmd, timeout=10)
+            if test_exit != 0:
+                test_exit, _, _ = ssh_client.run(f"sg docker -c '{test_cmd}'", timeout=10)
+            if test_exit != 0:
+                test_exit, _, _ = ssh_client.run(f"sudo {test_cmd}", timeout=10)
+            
+            if test_exit == 0:
+                click.echo(click.style("✓ Docker daemon: running", fg="green"))
+            else:
+                click.echo(click.style("✗ Docker daemon: not running", fg="red"))
+                return
+            
+            # Get container status
+            ps_cmd = "docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+            exit_code, stdout, _ = ssh_client.run(ps_cmd, timeout=10)
+            if exit_code != 0:
+                exit_code, stdout, _ = ssh_client.run(f"sg docker -c '{ps_cmd}'", timeout=10)
+            if exit_code != 0:
+                exit_code, stdout, _ = ssh_client.run(f"sudo {ps_cmd}", timeout=10)
+            
+            if exit_code == 0 and stdout.strip():
+                click.echo("\nContainers:")
+                click.echo(stdout.strip())
+            else:
+                click.echo("\nNo containers found")
+            
+            # Check vLLM container specifically
+            vllm_cmd = "docker inspect inference-vllm --format '{{.State.Status}}' 2>/dev/null"
+            exit_code, status, _ = ssh_client.run(vllm_cmd, timeout=10)
+            if exit_code != 0:
+                exit_code, status, _ = ssh_client.run(f"sg docker -c '{vllm_cmd}'", timeout=10)
+            if exit_code != 0:
+                exit_code, status, _ = ssh_client.run(f"sudo {vllm_cmd}", timeout=10)
+            
+            if exit_code == 0 and status.strip():
+                status_str = status.strip()
+                status_color = "green" if status_str == "running" else "yellow"
+                click.echo(f"\nvLLM container: {click.style(status_str, fg=status_color)}")
         finally:
             ssh_client.close()
             
