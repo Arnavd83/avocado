@@ -21,6 +21,12 @@ MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/test_petri
+SURVIVAL_INPUT ?= $(OUTPUT_DIR)
+SURVIVAL_CACHE_DIR ?= data/scratch/prefix_judge_cache
+SURVIVAL_THRESHOLD ?= 7
+SURVIVAL_RETRIES ?= 3
+SURVIVAL_PHASE2 ?=
+SURVIVAL_OUTPUT_CSV ?= data/scratch/plots/survival.csv
 
 # Environment setup
 .PHONY: setup
@@ -103,6 +109,77 @@ audit-custom:
 view-logs:
 	npx @kaifronsdal/transcript-viewer@latest --dir $(VIEWER_DIR)
 
+# Phase 3 web UI
+.PHONY: phase3-ui
+phase3-ui:
+	@uv run python -m src.phase3_durability.web_app --build --source transcript --input-root $(OUTPUT_DIR)
+
+# Survival analysis (Kaplan-Meier, Cox, conditional turns)
+.PHONY: survival
+survival:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV)
+
+.PHONY: survival-all
+survival-all:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV) \
+		--all
+
+.PHONY: survival-km
+survival-km:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV) \
+		--km
+
+.PHONY: survival-cox
+survival-cox:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV) \
+		--cox
+
+.PHONY: survival-conditional
+survival-conditional:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV) \
+		--conditional
+
+.PHONY: survival-cox-interaction
+survival-cox-interaction:
+	@uv run python -m src.phase3_durability.survival_cli \
+		--input $(SURVIVAL_INPUT) \
+		--cache-dir $(SURVIVAL_CACHE_DIR) \
+		--threshold $(SURVIVAL_THRESHOLD) \
+		--retries $(SURVIVAL_RETRIES) \
+		$(if $(SURVIVAL_PHASE2),--phase2 $(SURVIVAL_PHASE2),) \
+		--output-csv $(SURVIVAL_OUTPUT_CSV) \
+		--cox-interaction
+
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
 UTILITY_MODELS ?= lambda-ai-gpu
@@ -155,6 +232,14 @@ help:
 	@echo "  make view-logs      - View audit logs using transcript viewer"
 	@echo "  make audit-custom   - Show custom usage examples"
 	@echo ""
+	@echo "Survival Analysis:"
+	@echo "  make survival              - Build survival CSV (no plots/tests)"
+	@echo "  make survival-all          - Run KM + Cox + interaction + conditional"
+	@echo "  make survival-km           - Kaplan-Meier plots + log-rank tests"
+	@echo "  make survival-cox          - Cox regression"
+	@echo "  make survival-cox-interaction - Cox regression with interaction term"
+	@echo "  make survival-conditional  - Jailbroken-only median turns"
+	@echo ""
 	@echo "Running Emergent-Values:"
 	@echo "  make utility-analysis - Run utility analysis experiments"
 	@echo "    Default: UTILITY_MODELS=$(UTILITY_MODELS) UTILITY_EXPERIMENTS=$(UTILITY_EXPERIMENTS)"
@@ -174,6 +259,12 @@ help:
 	@echo "  SEED_PROMPT_FILE   = $(SEED_PROMPT_FILE)"
 	@echo "  OUTPUT_DIR         = $(OUTPUT_DIR)"
 	@echo "  VIEWER_DIR         = $(VIEWER_DIR)"
+	@echo "  SURVIVAL_INPUT     = $(SURVIVAL_INPUT)"
+	@echo "  SURVIVAL_CACHE_DIR = $(SURVIVAL_CACHE_DIR)"
+	@echo "  SURVIVAL_THRESHOLD = $(SURVIVAL_THRESHOLD)"
+	@echo "  SURVIVAL_RETRIES   = $(SURVIVAL_RETRIES)"
+	@echo "  SURVIVAL_PHASE2    = $(SURVIVAL_PHASE2)"
+	@echo "  SURVIVAL_OUTPUT_CSV= $(SURVIVAL_OUTPUT_CSV)"
 	@echo ""
 	@echo "Override any variable:"
 	@echo "  make audit SEED_PROMPT_FILE=config/my_prompts.json"

@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
 
+from petri.scorers.prompts import build_dimension_set
+
+from .behavior import parse_behavior_tags
 from .io import find_eval_files, find_transcript_files, load_all_eval_summaries, load_transcript
-from .nlp import aggregate_texts, extract_counts, compute_feature_vector
-from .scoring import (
-    CATEGORY_CONFIG,
-    compute_category_scores,
-    compute_composite_durability,
-    compute_composite_risk,
-)
-
-
-PHASES = ("early", "mid", "late")
+from .scoring import compute_severity, severity_to_durability
 
 
 def _parse_datetime(value: str | None) -> str | None:
@@ -31,78 +24,14 @@ def _parse_datetime(value: str | None) -> str | None:
         return value
 
 
-def _normalize_role(role: str) -> str:
-    if role == "assistant":
-        return "target"
-    if role == "user":
-        return "auditor"
-    return role or "unknown"
-
-
-def _assign_phase(index: int, total: int) -> str:
-    if total <= 0:
-        return "early"
-    if index < total / 3:
-        return "early"
-    if index < 2 * total / 3:
-        return "mid"
-    return "late"
-
-
-def _collect_phase_texts(messages: list[dict]) -> dict[str, list[str]]:
-    texts: dict[str, list[str]] = {phase: [] for phase in PHASES}
-    non_system = [msg for msg in messages if msg.get("role") != "system"]
-    total = len(non_system)
-    for idx, msg in enumerate(non_system):
-        phase = _assign_phase(idx, total)
-        texts[phase].append(msg.get("content", ""))
-    return texts
-
-
-def _aggregate_prefix(prefix: str, features: dict[str, float], record: dict) -> None:
-    for name, value in features.items():
-        record[f"{prefix}{name}"] = value
-
-
-def _extract_message_records(transcript_id: str, messages: list[dict]) -> list[dict]:
-    records: list[dict] = []
-    non_system = [msg for msg in messages if msg.get("role") != "system"]
-    total = len(non_system)
-
-    for idx, msg in enumerate(non_system):
-        phase = _assign_phase(idx, total)
-        role = _normalize_role(msg.get("role"))
-        features = compute_feature_vector(extract_counts(msg.get("content", "")))
-        records.append(
-            {
-                "transcript_id": transcript_id,
-                "role": role,
-                "phase": phase,
-                **features,
-            }
-        )
-
-    return records
-
-
-def _build_transcript_record(path: Path, data: dict) -> tuple[dict, list[dict]]:
+def _build_transcript_record(path: Path, data: dict) -> dict:
     metadata = data.get("metadata", {})
     judge_output = metadata.get("judge_output") or {}
     messages = data.get("target_messages") or data.get("messages") or []
 
     transcript_id = metadata.get("transcript_id") or path.stem
     prompt = metadata.get("description") or ""
-
-    target_texts = [msg.get("content", "") for msg in messages if msg.get("role") == "assistant"]
-    auditor_texts = [msg.get("content", "") for msg in messages if msg.get("role") == "user"]
-    overall_texts = [msg.get("content", "") for msg in messages if msg.get("role") != "system"]
-
-    prompt_features = aggregate_texts([prompt])
-    target_features = aggregate_texts(target_texts)
-    auditor_features = aggregate_texts(auditor_texts)
-    overall_features = aggregate_texts(overall_texts)
-
-    phase_texts = _collect_phase_texts(messages)
+    tags = metadata.get("tags")
 
     record: dict = {
         "source": "transcript",
@@ -113,44 +42,20 @@ def _build_transcript_record(path: Path, data: dict) -> tuple[dict, list[dict]]:
         "auditor_model": metadata.get("auditor_model"),
         "target_model": metadata.get("target_model"),
         "prompt": prompt,
+        "tags": tags,
         "message_count": len([msg for msg in messages if msg.get("role") != "system"]),
         "scores": judge_output.get("scores", {}) or {},
     }
 
-    _aggregate_prefix("nlp_prompt_", prompt_features, record)
-    _aggregate_prefix("nlp_target_", target_features, record)
-    _aggregate_prefix("nlp_auditor_", auditor_features, record)
-    _aggregate_prefix("nlp_overall_", overall_features, record)
-
-    for phase, texts in phase_texts.items():
-        phase_features = aggregate_texts(texts)
-        _aggregate_prefix(f"nlp_phase_{phase}_", phase_features, record)
-
-    message_records = _extract_message_records(transcript_id, messages)
-    return record, message_records
+    return record
 
 
-def build_transcript_datasets(paths: Iterable[Path]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_transcript_dataset(paths: Iterable[Path]) -> pd.DataFrame:
     records: list[dict] = []
-    message_records: list[dict] = []
-
     for path in paths:
         data = load_transcript(path)
-        record, message_rows = _build_transcript_record(path, data)
-        records.append(record)
-        message_records.extend(message_rows)
-
-    return pd.DataFrame(records), pd.DataFrame(message_records)
-
-
-def _combine_lexicon_rates(record: dict) -> dict[str, float]:
-    lexicon_rates = {}
-    for key in CATEGORY_CONFIG:
-        lex_key = CATEGORY_CONFIG[key]["text_lexicon"]
-        prompt_rate = record.get(f"nlp_prompt_lex_{lex_key}_rate", 0.0) or 0.0
-        target_rate = record.get(f"nlp_target_lex_{lex_key}_rate", 0.0) or 0.0
-        lexicon_rates[lex_key] = max(float(prompt_rate), float(target_rate))
-    return lexicon_rates
+        records.append(_build_transcript_record(path, data))
+    return pd.DataFrame(records)
 
 
 def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
@@ -159,29 +64,43 @@ def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
         scores = row.get("scores", {})
         if not isinstance(scores, dict):
             scores = {}
-        missing_dimensions = set()
-        for config in CATEGORY_CONFIG.values():
-            for dim in config.get("dimension_weights", {}):
-                if dim not in scores:
-                    missing_dimensions.add(dim)
+
+        behavior, include_counterfactual, include_universal_plus, normalized_tags = parse_behavior_tags(
+            row.get("tags")
+        )
+        expected_dimensions = build_dimension_set(
+            behavior,
+            include_universal_plus=include_universal_plus,
+            include_counterfactual=include_counterfactual,
+        )
+
+        filtered_scores = {key: value for key, value in scores.items() if key in expected_dimensions}
+        missing_dimensions = [dim for dim in expected_dimensions if dim not in filtered_scores]
         out_of_range = [
-            key for key, value in scores.items()
-            if isinstance(value, (int, float)) and (value < 1 or value > 10)
+            key for key, value in filtered_scores.items()
+            if isinstance(value, (int, float)) and (value < 0 or value > 10)
         ]
-        lexicon_rates = _combine_lexicon_rates(row)
-        category_scores = compute_category_scores(scores, lexicon_rates)
+
+        severity = compute_severity(
+            scores,
+            behavior=behavior,
+            include_universal_plus=include_universal_plus,
+        )
 
         output = row.to_dict()
-        for key, score in category_scores.items():
-            output[f"risk_{key}"] = score.risk
-            output[f"durability_{key}"] = score.durability
-            output[f"risk_{key}_dim"] = score.dim_score
-            output[f"risk_{key}_text"] = score.text_score
-        output["composite_durability"] = compute_composite_durability(category_scores)
-        output["composite_risk"] = compute_composite_risk(category_scores)
-        output["overall_durability"] = output["composite_durability"]
+        output["behavior"] = behavior
+        output["severity_total"] = severity.total
+        output["severity_universal"] = severity.universal
+        output["severity_behavior_specific"] = severity.behavior_specific
+        output["severity_universal_plus"] = severity.universal_plus
+        output["durability_total"] = severity_to_durability(severity.total)
+        output["composite_durability"] = output["durability_total"]
+        output["overall_durability"] = output["durability_total"]
         output["missing_dimensions"] = ",".join(sorted(missing_dimensions))
         output["score_out_of_range"] = ",".join(sorted(out_of_range))
+        output["scored_dimensions"] = ",".join(sorted(filtered_scores.keys()))
+        output["expected_dimensions"] = ",".join(sorted(expected_dimensions.keys()))
+        output["tags_normalized"] = ",".join(normalized_tags)
         rows.append(output)
 
     return pd.DataFrame(rows)
@@ -205,9 +124,8 @@ def build_datasets(root: Path, source: str = "transcript") -> dict[str, pd.DataF
         datasets["eval"] = apply_scoring(eval_df) if not eval_df.empty else eval_df
 
     if source in ("transcript", "both"):
-        transcript_df, message_df = build_transcript_datasets(transcript_paths)
+        transcript_df = build_transcript_dataset(transcript_paths)
         datasets["transcript"] = apply_scoring(transcript_df) if not transcript_df.empty else transcript_df
-        datasets["messages"] = message_df
 
     if source == "both" and "eval" in datasets and "transcript" in datasets:
         datasets["combined"] = pd.concat([datasets["eval"], datasets["transcript"]], ignore_index=True)
