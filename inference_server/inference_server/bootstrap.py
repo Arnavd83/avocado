@@ -3,6 +3,10 @@
 Handles setting up persistent filesystem directories and environment.
 """
 
+import re
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -586,37 +590,31 @@ def _run_docker_cmd(
     Returns:
         Tuple of (exit_code, stdout, stderr).
     """
-    # First, test if docker works without sudo
+    # First, test if docker works without sudo (quick test with short timeout)
     test_cmd = "docker info >/dev/null 2>&1"
-    exit_code, _, _ = ssh_client.run(test_cmd, timeout=10)
-
-    if exit_code == 0:
-        # Docker works without sudo, use normal command
-        if deploy_path:
-            full_cmd = f"cd {deploy_path} && {cmd}"
-        else:
-            full_cmd = cmd
-        return ssh_client.run(full_cmd, timeout=timeout)
+    try:
+        exit_code, _, _ = ssh_client.run(test_cmd, timeout=5)
+        if exit_code == 0:
+            # Docker works without sudo, use normal command
+            if deploy_path:
+                full_cmd = f"cd {deploy_path} && {cmd}"
+            else:
+                full_cmd = cmd
+            return ssh_client.run(full_cmd, timeout=timeout)
+    except Exception:
+        # Test failed or timed out, continue to fallback methods
+        pass
 
     # Docker doesn't work without sudo. Try sg docker (activates group in subshell)
-    # sg is usually available on Ubuntu/Debian systems
+    # But sg docker can hang, so use a quick test first
+    # Skip sg docker if it's not reliable and go straight to sudo
+    # For now, skip sg docker and use sudo directly since it's more reliable
     if deploy_path:
-        full_cmd = f"cd {deploy_path} && sg docker -c '{cmd}'"
+        full_cmd = f"cd {deploy_path} && sudo {cmd}"
     else:
-        full_cmd = f"sg docker -c '{cmd}'"
-    exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=timeout)
-
-    # If sg doesn't work (command not found) or fails, fall back to sudo
-    if exit_code != 0:
-        # Check if sg command itself wasn't found, or if the docker command failed
-        # In either case, try sudo as fallback
-        if deploy_path:
-            full_cmd = f"cd {deploy_path} && sudo {cmd}"
-        else:
-            full_cmd = f"sudo {cmd}"
-        exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=timeout)
-
-    return exit_code, stdout, stderr
+        full_cmd = f"sudo {cmd}"
+    
+    return ssh_client.run(full_cmd, timeout=timeout)
 
 
 def install_docker(
@@ -667,6 +665,42 @@ def install_docker(
 
     if callback:
         callback(f"Docker installed: {stdout.strip()}")
+
+    # Verify docker group membership (non-blocking check)
+    # Note: After usermod -aG docker, the current SSH session doesn't have the new group
+    # We verify the group is configured, but don't test docker access (which can hang)
+    # The _run_docker_cmd helper will handle permissions at runtime
+    if callback:
+        callback("Verifying docker group configuration...")
+    
+    try:
+        # Quick check: verify user is in docker group (fast, non-blocking)
+        # This just checks /etc/group, doesn't actually test docker access
+        # Use id command to get current user, then check if docker group exists and user is in it
+        exit_code, stdout, _ = ssh_client.run(
+            "id -nG | grep -q docker && echo 'yes' || echo 'no'",
+            timeout=5
+        )
+        
+        if exit_code == 0 and "yes" in stdout:
+            if callback:
+                callback("Docker group configured (user in docker group)")
+        else:
+            # Check if docker group exists at all (user might need to log out/in)
+            exit_code2, stdout2, _ = ssh_client.run(
+                "getent group docker >/dev/null 2>&1 && echo 'exists' || echo 'missing'",
+                timeout=5
+            )
+            if exit_code2 == 0 and "exists" in stdout2:
+                if callback:
+                    callback("Docker group exists (user may need new session for group to take effect)")
+            else:
+                if callback:
+                    callback("Warning: Could not verify docker group (will use sudo if needed)")
+    except Exception:
+        # Non-critical - if verification fails, we'll use sudo as fallback
+        if callback:
+            callback("Docker group configured (will use sudo for docker commands if needed)")
 
     return True
 
@@ -780,27 +814,172 @@ def start_vllm(
     if callback:
         callback("Starting vLLM container...")
 
-    # Pull image first (can take a while)
+    # First, verify Docker daemon is running and compose is available
+    if callback:
+        callback("Checking Docker daemon status...")
+    
     exit_code, stdout, stderr = _run_docker_cmd(
-        ssh_client, "docker compose pull", deploy_path=deploy_path, timeout=600
+        ssh_client, "docker info >/dev/null 2>&1", timeout=10
     )
+    
+    if exit_code != 0:
+        raise BootstrapError(
+            f"Docker daemon is not responding. "
+            f"Try: sudo systemctl start docker. Error: {stderr}"
+        )
+    
+    if callback:
+        callback("Docker daemon is running")
+    
+    # Verify docker compose is available
+    if callback:
+        callback("Checking docker compose availability...")
+    
+    exit_code, stdout, stderr = _run_docker_cmd(
+        ssh_client, "docker compose version >/dev/null 2>&1", timeout=10
+    )
+    
+    if exit_code != 0:
+        raise BootstrapError(
+            f"docker compose is not available. "
+            f"Install with: sudo apt-get install -y docker-compose-plugin. Error: {stderr}"
+        )
+    
+    if callback:
+        callback("docker compose is available")
+
+    # Pull image first (can take a while)
+    if callback:
+        callback("Pulling vLLM image (this may take several minutes)...")
+        callback("  Image size: ~10-20GB, download speed depends on network")
+        callback("  Showing progress in real-time...")
+    
+    # Run pull with streaming output to show progress
+    # We'll use ssh_client directly to get streaming output
+    test_cmd = "docker info >/dev/null 2>&1"
+    try:
+        exit_code, _, _ = ssh_client.run(test_cmd, timeout=5)
+        use_sudo = (exit_code != 0)
+    except Exception:
+        use_sudo = True
+    
+    # Build the pull command
+    # Note: docker compose may buffer output when not in a TTY, so we might not see
+    # real-time progress, but the command will still work
+    if deploy_path:
+        pull_cmd = f"cd {deploy_path} && docker compose pull"
+    else:
+        pull_cmd = "docker compose pull"
+    
+    if use_sudo:
+        if deploy_path:
+            pull_cmd = f"cd {deploy_path} && sudo docker compose pull"
+        else:
+            pull_cmd = f"sudo docker compose pull"
+    
+    # Add heartbeat to show activity even if output is buffered
+    last_output_time = [time.time()]
+    heartbeat_interval = 30  # Show heartbeat every 30 seconds
+    start_time = time.time()
+    last_progress_line = [None]
+    
+    # Pattern to detect progress bar lines (e.g., "Extracting [====>] 2.045GB/3.627GB")
+    progress_pattern = re.compile(r'.*\[.*>.*\].*\d+\.\d+[GMK]?B/\d+\.\d+[GMK]?B')
+    
+    def streaming_callback(line):
+        last_output_time[0] = time.time()
+        if callback:
+            # Check if this is a progress bar line
+            is_progress = progress_pattern.match(line.strip())
+            
+            if is_progress:
+                # Update in place - use carriage return to overwrite previous line
+                if last_progress_line[0] is not None:
+                    # Clear previous line (move cursor to start, clear to end)
+                    sys.stdout.write('\r' + ' ' * len(last_progress_line[0]) + '\r')
+                # Print new progress line
+                display_line = f"  {line.strip()}"
+                sys.stdout.write(display_line)
+                sys.stdout.flush()
+                last_progress_line[0] = display_line
+            else:
+                # Regular line - print on new line
+                if last_progress_line[0] is not None:
+                    # Clear progress line and move to new line
+                    sys.stdout.write('\r' + ' ' * len(last_progress_line[0]) + '\r\n')
+                    sys.stdout.flush()
+                    last_progress_line[0] = None
+                callback(line)
+    
+    # Start a heartbeat thread to show progress even if output is buffered
+    def heartbeat():
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > 600:  # Stop after timeout
+                break
+            if time.time() - last_output_time[0] > heartbeat_interval:
+                if callback:
+                    elapsed_min = int(elapsed / 60)
+                    # Clear progress line if showing
+                    if last_progress_line[0] is not None:
+                        sys.stdout.write('\r' + ' ' * len(last_progress_line[0]) + '\r')
+                    callback(f"  Still pulling... ({elapsed_min}m elapsed)")
+                    sys.stdout.flush()
+                last_output_time[0] = time.time()
+            time.sleep(heartbeat_interval)
+    
+    heartbeat_thread = threading.Thread(target=heartbeat, daemon=True)
+    heartbeat_thread.start()
+    
+    # Use streaming to show progress
+    try:
+        exit_code, stdout, stderr = ssh_client.run_streaming(
+            pull_cmd,
+            timeout=600,
+            callback=streaming_callback,
+        )
+    finally:
+        # Clear progress line and move to new line
+        if last_progress_line[0] is not None:
+            sys.stdout.write('\r' + ' ' * len(last_progress_line[0]) + '\r\n')
+            sys.stdout.flush()
+        # Stop heartbeat
+        last_output_time[0] = 0  # Signal to stop
 
     if exit_code != 0:
-        raise BootstrapError(f"Failed to pull vLLM image: {stderr}")
+        # Show more context in error
+        error_msg = stderr or stdout or "Unknown error"
+        raise BootstrapError(
+            f"Failed to pull vLLM image (exit code {exit_code}). "
+            f"Check network connection and Docker daemon. Error: {error_msg[:500]}"
+        )
 
     if callback:
-        callback("vLLM image pulled, starting container...")
+        callback("vLLM image pulled successfully")
 
     # Start container
+    if callback:
+        callback("Starting vLLM container...")
+    
     exit_code, stdout, stderr = _run_docker_cmd(
         ssh_client, "docker compose up -d", deploy_path=deploy_path, timeout=120
     )
 
     if exit_code != 0:
-        raise BootstrapError(f"Failed to start vLLM container: {stderr}")
+        # Show more context in error
+        error_msg = stderr or stdout or "Unknown error"
+        raise BootstrapError(
+            f"Failed to start vLLM container (exit code {exit_code}). "
+            f"Check docker-compose.yml and .env file. Error: {error_msg[:500]}"
+        )
 
     if callback:
         callback("vLLM container started")
+        callback("Container is initializing (this may take several minutes on cold boot)")
+        callback("  - Downloading model from HuggingFace (if not cached)")
+        callback("  - Loading model into GPU memory")
+        callback("  - Starting vLLM API server")
+        callback("  Check logs with: docker logs inference-vllm")
 
     return True
 

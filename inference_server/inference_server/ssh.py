@@ -6,6 +6,7 @@ Provides SSH connectivity, command execution, and file transfer.
 import os
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -195,12 +196,219 @@ class SSHClient:
 
         try:
             stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
-            exit_code = stdout.channel.recv_exit_status()
+            
+            # Use a thread to enforce timeout on recv_exit_status()
+            # recv_exit_status() can block indefinitely, so we need to wrap it
+            exit_code = None
+            exception_holder = [None]
+            
+            def get_exit_status():
+                nonlocal exit_code
+                try:
+                    exit_code = stdout.channel.recv_exit_status()
+                except Exception as e:
+                    exception_holder[0] = e
+            
+            status_thread = threading.Thread(target=get_exit_status, daemon=True)
+            status_thread.start()
+            status_thread.join(timeout=timeout)
+            
+            if status_thread.is_alive():
+                # Thread is still running - command timed out
+                # Close the channel to force termination
+                try:
+                    stdout.channel.close()
+                except:
+                    pass
+                raise SSHError(f"Command timed out after {timeout}s: {command[:100]}")
+            
+            if exception_holder[0]:
+                raise SSHError(f"Command execution failed: {exception_holder[0]}")
+            
+            if exit_code is None:
+                raise SSHError("Failed to get command exit status")
+            
             stdout_str = stdout.read().decode("utf-8")
             stderr_str = stderr.read().decode("utf-8")
             return exit_code, stdout_str, stderr_str
+        except SSHError:
+            raise
         except paramiko.SSHException as e:
             raise SSHError(f"Command execution failed: {e}")
+        except Exception as e:
+            raise SSHError(f"Unexpected error executing command: {e}")
+
+    def run_streaming(
+        self,
+        command: str,
+        timeout: int = 60,
+        callback: Callable[[str], None] | None = None,
+        env: dict[str, str] | None = None,
+    ) -> tuple[int, str, str]:
+        """Execute command on remote host with streaming output.
+
+        Args:
+            command: Command to execute.
+            timeout: Command timeout in seconds.
+            callback: Optional callback for each line of output.
+            env: Optional environment variables to set.
+
+        Returns:
+            Tuple of (exit_code, stdout, stderr).
+
+        Raises:
+            SSHError: On execution failure.
+        """
+        if not self.is_connected():
+            self.connect()
+
+        client = self._get_client()
+
+        # Prepend environment variables if provided
+        if env:
+            env_prefix = " ".join(f"{k}={v}" for k, v in env.items())
+            command = f"{env_prefix} {command}"
+
+        try:
+            stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
+            
+            # Stream output in real-time by reading from channel
+            stdout_buffer = []
+            stderr_buffer = []
+            stdout_lines = []
+            stderr_lines = []
+            exit_code = None
+            exception_holder = [None]
+            channel = stdout.channel
+            
+            def read_output():
+                """Read from channel and buffer lines."""
+                try:
+                    while True:
+                        # Check if channel is still open and has data
+                        if channel.closed:
+                            break
+                        
+                        # Read from stdout
+                        if channel.recv_ready():
+                            data = channel.recv(4096)
+                            if data:
+                                text = data.decode("utf-8", errors="replace")
+                                stdout_buffer.append(text)
+                                
+                                # Process complete lines
+                                lines = "".join(stdout_buffer).splitlines(True)
+                                stdout_buffer.clear()
+                                
+                                # Keep incomplete line in buffer
+                                if lines and not lines[-1].endswith('\n'):
+                                    stdout_buffer.append(lines.pop())
+                                
+                                for line in lines:
+                                    stdout_lines.append(line)
+                                    if callback:
+                                        stripped = line.rstrip()
+                                        if stripped:
+                                            callback(stripped)
+                        
+                        # Read from stderr
+                        if channel.recv_stderr_ready():
+                            data = channel.recv_stderr(4096)
+                            if data:
+                                text = data.decode("utf-8", errors="replace")
+                                stderr_buffer.append(text)
+                                
+                                # Process complete lines
+                                lines = "".join(stderr_buffer).splitlines(True)
+                                stderr_buffer.clear()
+                                
+                                # Keep incomplete line in buffer
+                                if lines and not lines[-1].endswith('\n'):
+                                    stderr_buffer.append(lines.pop())
+                                
+                                for line in lines:
+                                    stderr_lines.append(line)
+                                    if callback:
+                                        stripped = line.rstrip()
+                                        if stripped:
+                                            callback(stripped)
+                        
+                        # Check if command finished
+                        if channel.exit_status_ready():
+                            break
+                        
+                        # Small sleep to avoid busy waiting
+                        time.sleep(0.1)
+                        
+                except Exception as e:
+                    if not exception_holder[0]:
+                        exception_holder[0] = e
+            
+            def get_exit_status():
+                nonlocal exit_code
+                try:
+                    exit_code = channel.recv_exit_status()
+                except Exception as e:
+                    if not exception_holder[0]:
+                        exception_holder[0] = e
+            
+            # Start threads
+            read_thread = threading.Thread(target=read_output, daemon=True)
+            status_thread = threading.Thread(target=get_exit_status, daemon=True)
+            
+            read_thread.start()
+            status_thread.start()
+            
+            # Wait for command to complete
+            status_thread.join(timeout=timeout)
+            
+            # Wait for read thread to finish
+            read_thread.join(timeout=2)
+            
+            if status_thread.is_alive():
+                try:
+                    channel.close()
+                except:
+                    pass
+                raise SSHError(f"Command timed out after {timeout}s: {command[:100]}")
+            
+            if exception_holder[0]:
+                raise SSHError(f"Command execution failed: {exception_holder[0]}")
+            
+            if exit_code is None:
+                raise SSHError("Failed to get command exit status")
+            
+            # Add any remaining buffered data
+            if stdout_buffer:
+                remaining = "".join(stdout_buffer)
+                stdout_lines.append(remaining)
+                if callback and remaining.strip():
+                    callback(remaining.rstrip())
+            
+            if stderr_buffer:
+                remaining = "".join(stderr_buffer)
+                stderr_lines.append(remaining)
+                if callback and remaining.strip():
+                    callback(remaining.rstrip())
+            
+            # Read any remaining output
+            try:
+                remaining_stdout = stdout.read().decode("utf-8", errors="replace")
+                remaining_stderr = stderr.read().decode("utf-8", errors="replace")
+            except:
+                remaining_stdout = ""
+                remaining_stderr = ""
+            
+            stdout_str = "".join(stdout_lines) + remaining_stdout
+            stderr_str = "".join(stderr_lines) + remaining_stderr
+            
+            return exit_code, stdout_str, stderr_str
+        except SSHError:
+            raise
+        except paramiko.SSHException as e:
+            raise SSHError(f"Command execution failed: {e}")
+        except Exception as e:
+            raise SSHError(f"Unexpected error executing command: {e}")
 
     def run_script(
         self,

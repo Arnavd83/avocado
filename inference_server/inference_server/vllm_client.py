@@ -279,7 +279,7 @@ class HealthChecker:
         Performs 3-step health check:
         1. GET /health (basic liveness)
         2. GET /v1/models (model loaded)
-        3. POST /v1/chat/completions (inference works)
+        3. POST /v1/chat/completions max_tokens=2 (inference works)
 
         Args:
             callback: Optional callback for progress messages.
@@ -292,22 +292,30 @@ class HealthChecker:
         """
         start_time = time.time()
         attempt = 0
+        max_attempts = (self.timeout // self.interval) + 1
+
+        def format_time(seconds: float) -> str:
+            """Format seconds as 'Xm Ys' or 'Xs'."""
+            mins = int(seconds // 60)
+            secs = int(seconds % 60)
+            if mins > 0:
+                return f"{mins}m {secs}s"
+            return f"{secs}s"
 
         while True:
             elapsed = time.time() - start_time
             if elapsed > self.timeout:
                 raise TimeoutError(
-                    f"Health check failed after {self.timeout}s ({attempt} attempts)"
+                    f"Health check failed after {format_time(self.timeout)} ({attempt} attempts)"
                 )
 
             attempt += 1
-            remaining = int(self.timeout - elapsed)
 
             try:
                 # Step 1: Basic health check
                 if not self.client.health():
                     if callback:
-                        callback(f"Waiting for vLLM health endpoint... ({remaining}s remaining)")
+                        callback(f"Waiting for vLLM health endpoint... (attempt {attempt}/{max_attempts})")
                     time.sleep(self.interval)
                     continue
 
@@ -315,35 +323,35 @@ class HealthChecker:
                 models = self.client.get_model_ids()
                 if not models:
                     if callback:
-                        callback(f"Waiting for model to load... ({remaining}s remaining)")
+                        callback(f"Waiting for model to load... (attempt {attempt}/{max_attempts})")
                     time.sleep(self.interval)
                     continue
 
-                # Step 3: Inference check
+                # Step 3: Inference check (tiny completion: 'Say hi' -> max_tokens=2)
                 try:
                     self.client.chat_completion(
-                        messages=[{"role": "user", "content": "Say 'ready'"}],
-                        max_tokens=5,
+                        messages=[{"role": "user", "content": "Say hi"}],
+                        max_tokens=2,
                     )
                 except VLLMError as e:
                     if callback:
-                        callback(f"Waiting for inference readiness... ({remaining}s remaining)")
+                        callback(f"Waiting for inference readiness... (attempt {attempt}/{max_attempts})")
                     time.sleep(self.interval)
                     continue
 
                 # All checks passed
                 if callback:
-                    callback(f"Health check passed! (took {int(elapsed)}s)")
+                    callback(f"Health check passed! (took {format_time(elapsed)})")
                 return True
 
             except VLLMError as e:
                 if callback:
-                    callback(f"Health check attempt {attempt}: {e}")
+                    callback(f"Health check error: {e} (attempt {attempt}/{max_attempts})")
                 time.sleep(self.interval)
 
             except Exception as e:
                 if callback:
-                    callback(f"Unexpected error: {e}")
+                    callback(f"Unexpected error: {e} (attempt {attempt}/{max_attempts})")
                 time.sleep(self.interval)
 
     def check_health(self) -> dict[str, bool]:
@@ -367,8 +375,8 @@ class HealthChecker:
 
                 if result["model_loaded"]:
                     self.client.chat_completion(
-                        messages=[{"role": "user", "content": "test"}],
-                        max_tokens=1,
+                        messages=[{"role": "user", "content": "Say hi"}],
+                        max_tokens=2,
                     )
                     result["inference_ready"] = True
 

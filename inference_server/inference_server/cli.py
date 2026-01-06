@@ -76,7 +76,7 @@ def cli():
 @click.option("--max-model-len", type=int, help="Override max model length")
 @click.option("--tailscale-authkey", help="Tailscale auth key")
 @click.option("--idle-timeout", type=int, help="Auto-shutdown after N minutes idle (0=disabled)")
-@click.option("--health-timeout", type=int, help="Health check timeout in seconds")
+@click.option("--health-timeout", type=int, default=900, help="Health check timeout in seconds (default: 900)")
 @click.option("--no-bootstrap", is_flag=True, help="Only create instance, skip bootstrap")
 @click.option("--reuse-if-running", is_flag=True, default=True, help="Reuse existing instance if running")
 def up(
@@ -384,8 +384,11 @@ def up(
                     click.echo(f"  Tailscale hostname: {result['tailscale_hostname']}")
 
                     # Step 3: Wait for health check
-                    click.echo("\nWaiting for vLLM to become ready...")
+                    click.echo("\n" + "="*60)
+                    click.echo("Waiting for vLLM to become ready...")
                     click.echo("  (This may take 5-15 minutes on cold boot)")
+                    click.echo("  Performing health checks every 10 seconds...")
+                    click.echo("="*60)
 
                     vllm_url = f"http://{result['tailscale_ip']}:{config.vllm.get('port', 8000)}"
                     vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
@@ -404,6 +407,8 @@ def up(
                         click.echo(click.style(f"\nHealth check timed out: {e}", fg="yellow"))
                         click.echo("vLLM may still be loading. Check logs with:")
                         click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
+                        click.echo("\nYou can retry the health check by running:")
+                        click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
 
                 elif ts_authkey:
                     # Tailscale bootstrap only (no vLLM)
@@ -533,7 +538,7 @@ def down(name, terminate_all):
 @click.option("--tailscale-authkey", help="Tailscale auth key")
 @click.option("--no-tailscale", is_flag=True, help="Skip Tailscale setup even if authkey is available")
 @click.option("--start-vllm", is_flag=True, help="Also install Docker and start vLLM container")
-@click.option("--health-timeout", type=int, help="Health check timeout in seconds")
+@click.option("--health-timeout", type=int, default=900, help="Health check timeout in seconds (default: 900)")
 def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout):
     """Run bootstrap on an existing instance.
 
@@ -627,7 +632,10 @@ def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout)
                     click.echo(f"\nvLLM endpoint: {vllm_url}/v1")
                 except TimeoutError as e:
                     click.echo(click.style(f"\nHealth check timed out: {e}", fg="yellow"))
-                    click.echo("Check logs: inference-server ssh 'docker logs inference-vllm'")
+                    click.echo("vLLM may still be loading. Check logs with:")
+                    click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
+                    click.echo("\nYou can retry the health check by running:")
+                    click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
 
             elif ts_authkey:
                 click.echo(f"Running bootstrap with Tailscale on {instance_name} ({instance.public_ip})...")
@@ -878,6 +886,80 @@ def list_adapters(name):
 # =============================================================================
 
 
+@cli.command("docker")
+@click.option("--name", help="Instance name")
+@click.argument("docker_command", nargs=-1, required=True)
+def docker_cmd(docker_command, name):
+    """Run docker commands on the instance with proper permissions.
+    
+    This helper ensures docker commands work even if the user hasn't
+    logged out/in after being added to the docker group.
+    
+    Examples:
+        inference-server docker --name test ps -a
+        inference-server docker --name test logs inference-vllm
+        inference-server docker --name test compose ps
+        
+    Note: Put --name before the docker command, or use -- to separate:
+        inference-server docker ps -a --name test
+        inference-server docker -- ps -a --name test
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+        
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+        
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' has no public IP", fg="red"))
+            sys.exit(1)
+        
+        # Build docker command
+        docker_cmd_str = " ".join(docker_command)
+        
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Use the same pattern as _run_docker_cmd: try direct, then sg docker, then sudo
+            # First test if docker works without sudo
+            test_cmd = "docker info >/dev/null 2>&1"
+            test_exit, _, _ = ssh_client.run(test_cmd, timeout=10)
+            
+            if test_exit == 0:
+                # Docker works directly, use normal command
+                full_cmd = f"docker {docker_cmd_str}"
+            else:
+                # Docker doesn't work directly, try sg docker (activates group in subshell)
+                full_cmd = f"sg docker -c 'docker {docker_cmd_str}'"
+            
+            click.echo(f"Running docker command on {instance_name} ({instance.public_ip})...")
+            exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
+            
+            # If sg docker failed, try sudo as fallback
+            if exit_code != 0 and "sg docker" in full_cmd:
+                full_cmd = f"sudo docker {docker_cmd_str}"
+                exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
+            if stdout:
+                click.echo(stdout, nl=False)
+            if stderr:
+                click.echo(click.style(stderr, fg="yellow"), nl=False)
+            sys.exit(exit_code)
+        except SSHError as e:
+            click.echo(click.style(f"SSH error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+            
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
 @cli.command()
 @click.argument("command", required=False)
 @click.option("--name", help="Instance name")
@@ -910,7 +992,31 @@ def ssh(command, name):
             # Execute command and return output
             click.echo(f"Running on {instance_name} ({instance.public_ip})...")
             try:
-                exit_code, stdout, stderr = ssh_client.run(command, timeout=300)
+                # If command starts with 'docker', use proper permission handling
+                if command.strip().startswith('docker '):
+                    # Extract docker command
+                    docker_cmd = command.strip()[7:]  # Remove 'docker ' prefix
+                    
+                    # Test if docker works directly
+                    test_exit, _, _ = ssh_client.run("docker info >/dev/null 2>&1", timeout=10)
+                    
+                    if test_exit == 0:
+                        # Docker works directly
+                        full_cmd = command
+                    else:
+                        # Use sg docker to activate group
+                        full_cmd = f"sg docker -c '{command}'"
+                    
+                    exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
+                    
+                    # If sg docker failed, try sudo as fallback
+                    if exit_code != 0 and "sg docker" in full_cmd:
+                        full_cmd = f"sudo {command}"
+                        exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
+                else:
+                    # Regular command, run as-is
+                    exit_code, stdout, stderr = ssh_client.run(command, timeout=300)
+                
                 if stdout:
                     click.echo(stdout, nl=False)
                 if stderr:
@@ -1027,6 +1133,86 @@ def logs(service, name, tail):
 def models(name):
     """Print loaded models from /v1/models."""
     click.echo("Command 'models' not yet implemented (Phase 5)")
+
+
+@cli.command("check-cache")
+@click.option("--name", help="Instance name")
+@click.option("--model", "model_alias", help="Model alias (e.g., llama31-8b)")
+def check_cache(name, model_alias):
+    """Check if model is cached in persistent filesystem.
+    
+    Shows whether the model files exist in the HF cache, which speeds up cold boot.
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+        
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+        
+        # Get model config
+        model_alias = model_alias or instance.model_alias or config.models.get("default", "llama31-8b")
+        model_config = config.get_model_config(model_alias)
+        model_id = model_config["id"]  # e.g., "meta-llama/Llama-3.1-8B-Instruct"
+        
+        # Convert model ID to HF cache directory format
+        # "meta-llama/Llama-3.1-8B-Instruct" -> "models--meta-llama--Llama-3.1-8B-Instruct"
+        cache_dir_name = f"models--{model_id.replace('/', '--')}"
+        fs_path = get_fs_path(instance.filesystem)
+        cache_path = f"{fs_path}/hf-cache/hub/{cache_dir_name}"
+        
+        click.echo(f"Checking cache for model: {model_id}")
+        click.echo(f"Filesystem: {instance.filesystem}")
+        click.echo(f"Cache path: {cache_path}")
+        click.echo()
+        
+        # Check via SSH
+        if not instance.public_ip:
+            click.echo(click.style("Error: Instance has no public IP", fg="red"))
+            sys.exit(1)
+        
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Check if cache directory exists and has files
+            check_cmd = f"if [ -d '{cache_path}' ]; then echo 'EXISTS'; du -sh '{cache_path}' 2>/dev/null | head -1; find '{cache_path}' -type f | wc -l; else echo 'NOT_FOUND'; fi"
+            exit_code, stdout, stderr = ssh_client.run(check_cmd, timeout=30)
+            
+            if exit_code != 0:
+                click.echo(click.style(f"Error checking cache: {stderr}", fg="red"))
+                sys.exit(1)
+            
+            lines = stdout.strip().split('\n')
+            if lines[0] == "EXISTS":
+                size_line = lines[1] if len(lines) > 1 else "unknown size"
+                file_count = lines[2] if len(lines) > 2 else "unknown"
+                click.echo(click.style("✓ Model is cached!", fg="green"))
+                click.echo(f"  Size: {size_line}")
+                click.echo(f"  Files: {file_count}")
+                click.echo()
+                click.echo("This should speed up vLLM startup (no download needed)")
+            else:
+                click.echo(click.style("✗ Model not found in cache", fg="yellow"))
+                click.echo()
+                click.echo("vLLM will download the model on first startup (slower)")
+                click.echo("After first download, subsequent boots will be faster")
+                
+        except SSHError as e:
+            click.echo(click.style(f"SSH error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+            
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
+    except Exception as e:
+        click.echo(click.style(f"Error: {e}", fg="red"))
+        sys.exit(1)
 
 
 @cli.command()
