@@ -170,7 +170,7 @@ class VLLMClient:
         self,
         lora_name: str,
         lora_path: str,
-    ) -> bool:
+    ) -> dict:
         """Load a LoRA adapter into vLLM.
 
         Args:
@@ -195,13 +195,37 @@ class VLLMClient:
             timeout=60,  # Loading can take time
         )
 
+        # Always capture response body for debugging
+        response_text = response.text
+        try:
+            response_data = response.json()
+        except ValueError:
+            response_data = None
+
         if response.status_code != 200:
+            error_msg = response_data.get("error", {}).get("message", response_text) if response_data else response_text
             raise VLLMError(
-                f"Failed to load adapter '{lora_name}': {response.text}",
+                f"Failed to load adapter '{lora_name}': {error_msg}",
                 status_code=response.status_code,
             )
 
-        return True
+        # Check for errors in response body even if status is 200
+        if response_data:
+            if response_data.get("error"):
+                error_msg = response_data.get("error", {}).get("message", str(response_data.get("error")))
+                raise VLLMError(
+                    f"Adapter load returned error: {error_msg}",
+                    status_code=response.status_code,
+                )
+            # Log success response for debugging
+            if response_data.get("success") is False:
+                raise VLLMError(
+                    f"Adapter load reported failure: {response_data}",
+                    status_code=response.status_code,
+                )
+
+        # Return response data for debugging
+        return response_data if response_data else {"status": "success", "text": response_text}
 
     def unload_lora_adapter(self, lora_name: str) -> bool:
         """Unload a LoRA adapter from vLLM.

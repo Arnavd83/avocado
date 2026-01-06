@@ -6,9 +6,17 @@ Provides commands for managing Lambda Cloud inference instances with LoRA adapte
 import json
 import os
 import sys
+from pathlib import Path
 
 import click
 
+from .adapter_sync import (
+    AdapterSyncManager,
+    discover_local_adapters,
+    get_default_local_adapters_path,
+    get_remote_adapters_path,
+    validate_adapter,
+)
 from .bootstrap import (
     BootstrapError,
     run_bootstrap_lite,
@@ -839,46 +847,547 @@ def _show_instance_status(lambda_client: LambdaClient, state_mgr, name: str, bri
 # =============================================================================
 
 
-@cli.command("sync-adapter")
-@click.argument("adapter_name")
+@cli.command("sync-adapters")
+@click.argument("adapter_name", required=False)
+@click.option("--name", help="Instance name")
 @click.option("--force", is_flag=True, help="Force re-sync even if checksums match")
-@click.option("--model", "model_alias", help="Model alias for adapter compatibility")
-def sync_adapter(adapter_name, force, model_alias):
-    """Sync adapter to persistent filesystem.
+@click.option("--delete", "delete_orphans", is_flag=True, help="Delete remote adapters not present locally")
+@click.option("--local-path", type=click.Path(exists=True), help="Local adapters directory")
+def sync_adapters(adapter_name, name, force, delete_orphans, local_path):
+    """Sync adapters to persistent filesystem.
 
-    Rsyncs adapter files to the remote persistent filesystem with checksum verification.
+    Uses checksum comparison to only upload changed files.
+
+    Without ADAPTER_NAME, syncs all adapters in the local adapters directory.
+    With ADAPTER_NAME, syncs only that specific adapter.
+
+    Examples:
+        inference-server sync-adapters                    # Sync all
+        inference-server sync-adapters my-lora           # Sync specific adapter
+        inference-server sync-adapters --force           # Force re-upload all
+        inference-server sync-adapters --delete          # Remove orphaned remote adapters
     """
-    click.echo("Command 'sync-adapter' not yet implemented (Phase 7)")
-    click.echo(f"  adapter: {adapter_name}")
-    click.echo(f"  force: {force}")
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance has no public IP", fg="red"))
+            sys.exit(1)
+
+        # Resolve paths
+        local_adapters = Path(local_path) if local_path else get_default_local_adapters_path()
+        remote_adapters = get_remote_adapters_path(instance.filesystem)
+
+        click.echo(f"Syncing adapters to {instance_name}")
+        click.echo(f"  Local:  {local_adapters}")
+        click.echo(f"  Remote: {remote_adapters}")
+        click.echo()
+
+        # Connect and sync
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Ensure remote directory exists
+            ssh_client.run(f"mkdir -p {remote_adapters}", timeout=30)
+
+            sync_mgr = AdapterSyncManager(
+                ssh_client=ssh_client,
+                remote_adapters_path=remote_adapters,
+                local_adapters_path=local_adapters,
+            )
+
+            def progress_callback(msg):
+                click.echo(f"  {msg}")
+
+            if adapter_name:
+                # Sync single adapter
+                was_uploaded = sync_mgr.sync_adapter(
+                    adapter_name,
+                    force=force,
+                    callback=progress_callback,
+                )
+                if was_uploaded:
+                    click.echo(click.style(f"\n✓ Adapter '{adapter_name}' synced", fg="green"))
+                else:
+                    click.echo(f"\n  Adapter '{adapter_name}' is up to date")
+            else:
+                # Sync all adapters
+                result = sync_mgr.sync_all(
+                    delete_orphans=delete_orphans,
+                    callback=progress_callback,
+                )
+
+                click.echo()
+                if result.uploaded:
+                    click.echo(click.style(f"✓ Uploaded: {', '.join(result.uploaded)}", fg="green"))
+                if result.skipped:
+                    click.echo(f"  Skipped (unchanged): {', '.join(result.skipped)}")
+                if result.deleted:
+                    click.echo(click.style(f"  Deleted: {', '.join(result.deleted)}", fg="yellow"))
+                if result.failed:
+                    for name, err in result.failed:
+                        click.echo(click.style(f"✗ Failed: {name} - {err}", fg="red"))
+                    sys.exit(1)
+
+                total = len(result.uploaded) + len(result.skipped)
+                click.echo(f"\nSync complete: {total} adapter(s) processed")
+
+        except SSHError as e:
+            click.echo(click.style(f"SSH error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
 
 
 @cli.command("load-adapter")
 @click.argument("adapter_name")
 @click.option("--name", help="Instance name")
-def load_adapter(adapter_name, name):
+@click.option("--sync/--no-sync", default=True, help="Sync adapter before loading (default: yes)")
+@click.option("--local-path", type=click.Path(exists=True), help="Local adapters directory")
+def load_adapter(adapter_name, name, sync, local_path):
     """Load adapter into vLLM runtime.
 
-    Syncs adapter if needed, then calls vLLM's /v1/load_lora_adapter endpoint.
+    Syncs adapter if needed (unless --no-sync), then calls vLLM's load endpoint.
+    The adapter will be available for inference using its name as the model parameter.
+
+    Example:
+        inference-server load-adapter my-lora
+        curl -X POST .../v1/chat/completions -d '{"model": "my-lora", ...}'
     """
-    click.echo("Command 'load-adapter' not yet implemented (Phase 8)")
-    click.echo(f"  adapter: {adapter_name}")
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        if not instance.tailscale_ip:
+            click.echo(click.style(f"Error: Instance has no Tailscale IP (vLLM not accessible)", fg="red"))
+            sys.exit(1)
+
+        vllm_api_key = get_env_var("VLLM_API_KEY")
+        if not vllm_api_key:
+            click.echo(click.style("Error: VLLM_API_KEY not set", fg="red"))
+            sys.exit(1)
+
+        # Sync adapter first if requested
+        if sync and instance.public_ip:
+            click.echo(f"Syncing adapter '{adapter_name}'...")
+            local_adapters_path = Path(local_path) if local_path else get_default_local_adapters_path()
+            remote_adapters_path = get_remote_adapters_path(instance.filesystem)
+
+            ssh_client = get_ssh_client_for_instance(instance)
+            try:
+                sync_mgr = AdapterSyncManager(
+                    ssh_client=ssh_client,
+                    remote_adapters_path=remote_adapters_path,
+                    local_adapters_path=local_adapters_path,
+                )
+
+                def progress_callback(msg):
+                    click.echo(f"  {msg}")
+
+                try:
+                    was_uploaded = sync_mgr.sync_adapter(adapter_name, callback=progress_callback)
+                    if was_uploaded:
+                        click.echo(click.style(f"  Adapter synced", fg="green"))
+                    else:
+                        click.echo(f"  Adapter already up to date")
+                except SSHError as e:
+                    click.echo(click.style(f"  Sync failed: {e}", fg="yellow"))
+                    click.echo("  Continuing with load (adapter may already be on remote)...")
+            finally:
+                ssh_client.close()
+
+        # Load adapter via vLLM API
+        click.echo(f"\nLoading adapter '{adapter_name}' into vLLM...")
+        remote_adapters_path = get_remote_adapters_path(instance.filesystem)
+        adapter_path = f"{remote_adapters_path}/{adapter_name}"
+        click.echo(f"  Adapter path: {adapter_path}")
+
+        vllm_url = f"http://{instance.tailscale_ip}:{config.vllm.get('port', 8000)}"
+        vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
+
+        import time
+        
+        try:
+            # Check if adapter is already loaded and working
+            # Note: vLLM may not show adapters in /v1/models, so we test with actual request
+            click.echo("  Checking current adapter status...")
+            try:
+                # Try a tiny test request to see if adapter works
+                vllm_client.chat_completion(
+                    messages=[{"role": "user", "content": "Hi"}],
+                    model=adapter_name,
+                    max_tokens=1,
+                )
+                # If we get here, adapter is working!
+                click.echo(click.style(f"\n✓ Adapter '{adapter_name}' is already loaded and working!", fg="green"))
+                click.echo(f"\nUse in requests with: \"model\": \"{adapter_name}\"")
+                
+                # Update instance state
+                loaded = instance.loaded_adapters or []
+                if adapter_name not in loaded:
+                    loaded.append(adapter_name)
+                    state_mgr.update_instance(instance_name, loaded_adapters=loaded)
+                return
+            except VLLMError:
+                # Adapter not working, continue to load it
+                pass
+
+            # Load adapter
+            click.echo("  Calling vLLM load endpoint...")
+            try:
+                load_response = vllm_client.load_lora_adapter(
+                    lora_name=adapter_name,
+                    lora_path=adapter_path,
+                )
+                click.echo(f"  Load endpoint returned: {load_response}")
+            except VLLMError as load_error:
+                # Check if error is "already loaded"
+                error_str = str(load_error).lower()
+                if "already" in error_str and "loaded" in error_str:
+                    click.echo("  Adapter reported as already loaded, verifying...")
+                    # Check if it's actually in /v1/models
+                    model_ids = vllm_client.get_model_ids()
+                    if adapter_name in model_ids:
+                        click.echo(click.style(f"\n✓ Adapter '{adapter_name}' is loaded!", fg="green"))
+                        click.echo(f"\nUse in requests with: \"model\": \"{adapter_name}\"")
+                        
+                        # Update instance state
+                        loaded = instance.loaded_adapters or []
+                        if adapter_name not in loaded:
+                            loaded.append(adapter_name)
+                            state_mgr.update_instance(instance_name, loaded_adapters=loaded)
+                        return
+                    else:
+                        # vLLM thinks it's loaded but it's not in models - unload and reload
+                        click.echo("  Adapter not in /v1/models, unloading and reloading...")
+                        try:
+                            vllm_client.unload_lora_adapter(adapter_name)
+                            click.echo("  Unloaded successfully, reloading...")
+                            time.sleep(1)  # Brief pause
+                            load_response = vllm_client.load_lora_adapter(
+                                lora_name=adapter_name,
+                                lora_path=adapter_path,
+                            )
+                        except VLLMError as unload_error:
+                            click.echo(click.style(
+                                f"  Warning: Could not unload: {unload_error}",
+                                fg="yellow"
+                            ))
+                            click.echo("  Continuing to verify...")
+                else:
+                    # Some other error, re-raise it
+                    raise
+            
+            # Verify adapter is working
+            # Note: vLLM may not show adapters in /v1/models even when loaded
+            # So we verify by actually trying to use it in a test request
+            click.echo("Verifying adapter is working...")
+            max_retries = 5
+            retry_delay = 2.0
+            
+            # First check /v1/models
+            model_ids = vllm_client.get_model_ids()
+            in_models_list = adapter_name in model_ids
+            
+            # Then test with actual inference request
+            adapter_works = False
+            for attempt in range(max_retries):
+                try:
+                    # Try a tiny test request with the adapter
+                    test_response = vllm_client.chat_completion(
+                        messages=[{"role": "user", "content": "Hi"}],
+                        model=adapter_name,
+                        max_tokens=2,
+                    )
+                    # If we get here, the adapter works!
+                    adapter_works = True
+                    break
+                except VLLMError as e:
+                    error_str = str(e).lower()
+                    if "does not exist" in error_str or "not found" in error_str:
+                        # Adapter definitely doesn't work
+                        if attempt < max_retries - 1:
+                            click.echo(f"  Test request failed (attempt {attempt + 1}/{max_retries}), retrying...")
+                            time.sleep(retry_delay)
+                        else:
+                            adapter_works = False
+                            break
+                    else:
+                        # Some other error - might be transient
+                        if attempt < max_retries - 1:
+                            click.echo(f"  Test request error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                            time.sleep(retry_delay)
+                        else:
+                            # Final attempt - assume it doesn't work
+                            adapter_works = False
+                            break
+            
+            if adapter_works:
+                click.echo(click.style(f"\n✓ Adapter '{adapter_name}' loaded and working!", fg="green"))
+                if not in_models_list:
+                    click.echo(click.style(
+                        "  Note: Adapter works but doesn't appear in /v1/models (known vLLM behavior)",
+                        fg="yellow"
+                    ))
+                click.echo(f"\nUse in requests with: \"model\": \"{adapter_name}\"")
+                
+                # Update instance state
+                loaded = instance.loaded_adapters or []
+                if adapter_name not in loaded:
+                    loaded.append(adapter_name)
+                    state_mgr.update_instance(instance_name, loaded_adapters=loaded)
+            else:
+                # Adapter doesn't work
+                available_models = ", ".join(model_ids) if model_ids else "none"
+                click.echo(click.style(
+                    f"\n✗ Adapter '{adapter_name}' not working after loading",
+                    fg="yellow"
+                ))
+                click.echo(f"  Available models in /v1/models: {available_models}")
+                click.echo(click.style(
+                    "  Warning: Load endpoint returned success but adapter not functional",
+                    fg="yellow"
+                ))
+                click.echo("\n  Possible causes:")
+                click.echo("    1. vLLM runtime LoRA updating may not be enabled")
+                click.echo("       Check: VLLM_ALLOW_RUNTIME_LORA_UPDATING=true in docker-compose.yml")
+                click.echo("    2. Adapter files may be missing or corrupted at:")
+                click.echo(f"       {adapter_path}")
+                click.echo("    3. vLLM version may not support runtime LoRA updates")
+                click.echo("    4. Check vLLM logs for errors: docker compose logs vllm")
+                click.echo("\n  To investigate:")
+                click.echo(f"    curl -X POST -H 'Authorization: Bearer ...' -H 'Content-Type: application/json' \\")
+                click.echo(f"      -d '{{\"model\": \"{adapter_name}\", \"messages\": [{{\"role\": \"user\", \"content\": \"Hi\"}}], \"max_tokens\": 2}}' \\")
+                click.echo(f"      {vllm_url}/v1/chat/completions")
+                # Don't exit - let user investigate
+
+        except VLLMError as e:
+            click.echo(click.style(f"\n✗ Failed to load adapter: {e}", fg="red"))
+            sys.exit(1)
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
 
 
 @cli.command("unload-adapter")
 @click.argument("adapter_name")
 @click.option("--name", help="Instance name")
 def unload_adapter(adapter_name, name):
-    """Unload adapter from vLLM runtime."""
-    click.echo("Command 'unload-adapter' not yet implemented (Phase 8)")
-    click.echo(f"  adapter: {adapter_name}")
+    """Unload adapter from vLLM runtime.
+
+    Removes the adapter from vLLM's active adapters. The adapter files
+    remain on the persistent filesystem for future loading.
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        if not instance.tailscale_ip:
+            click.echo(click.style(f"Error: Instance has no Tailscale IP (vLLM not accessible)", fg="red"))
+            sys.exit(1)
+
+        vllm_api_key = get_env_var("VLLM_API_KEY")
+        if not vllm_api_key:
+            click.echo(click.style("Error: VLLM_API_KEY not set", fg="red"))
+            sys.exit(1)
+
+        # Unload adapter via vLLM API
+        click.echo(f"Unloading adapter '{adapter_name}' from vLLM...")
+
+        vllm_url = f"http://{instance.tailscale_ip}:{config.vllm.get('port', 8000)}"
+        vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
+
+        try:
+            vllm_client.unload_lora_adapter(lora_name=adapter_name)
+            click.echo(click.style(f"\n✓ Adapter '{adapter_name}' unloaded", fg="green"))
+
+            # Update instance state
+            loaded = instance.loaded_adapters or []
+            if adapter_name in loaded:
+                loaded.remove(adapter_name)
+                state_mgr.update_instance(instance_name, loaded_adapters=loaded)
+
+        except VLLMError as e:
+            click.echo(click.style(f"\n✗ Failed to unload adapter: {e}", fg="red"))
+            sys.exit(1)
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
 
 
 @cli.command("list-adapters")
 @click.option("--name", help="Instance name")
-def list_adapters(name):
-    """List adapters: local, remote, and loaded."""
-    click.echo("Command 'list-adapters' not yet implemented (Phase 7)")
+@click.option("--local-only", is_flag=True, help="Only show local adapters")
+@click.option("--remote-only", is_flag=True, help="Only show remote adapters")
+@click.option("--local-path", type=click.Path(exists=True), help="Local adapters directory")
+def list_adapters(name, local_only, remote_only, local_path):
+    """List adapters: local, remote, and loaded.
+
+    Shows adapters in the local directory, on the remote persistent filesystem,
+    and which are currently loaded in vLLM.
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get local adapters
+        local_adapters_path = Path(local_path) if local_path else get_default_local_adapters_path()
+        local_adapters = discover_local_adapters(local_adapters_path)
+
+        if local_only:
+            click.echo(f"Local adapters ({local_adapters_path}):")
+            if not local_adapters:
+                click.echo("  (none)")
+            else:
+                for adapter in local_adapters:
+                    size = sum(f.stat().st_size for f in adapter.local_path.iterdir() if f.is_file())
+                    size_mb = size / (1024 * 1024)
+                    click.echo(f"  {adapter.name}")
+                    click.echo(f"    Checksum: {adapter.checksum[:12]}...")
+                    click.echo(f"    Size:     {size_mb:.1f} MB")
+                    click.echo(f"    Files:    {', '.join(adapter.files.keys())}")
+            return
+
+        # Get instance for remote adapters
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            if not local_only:
+                click.echo(click.style(f"Warning: Instance '{instance_name}' not found, showing local only", fg="yellow"))
+                click.echo()
+
+            click.echo(f"Local adapters ({local_adapters_path}):")
+            if not local_adapters:
+                click.echo("  (none)")
+            else:
+                for adapter in local_adapters:
+                    click.echo(f"  - {adapter.name} (checksum: {adapter.checksum[:12]}...)")
+            return
+
+        # Get remote adapters
+        remote_adapters_path = get_remote_adapters_path(instance.filesystem)
+        remote_adapters = []
+        loaded_adapters = []
+
+        if instance.public_ip:
+            ssh_client = get_ssh_client_for_instance(instance)
+            try:
+                sync_mgr = AdapterSyncManager(
+                    ssh_client=ssh_client,
+                    remote_adapters_path=remote_adapters_path,
+                    local_adapters_path=local_adapters_path,
+                )
+                remote_adapters = sync_mgr.list_remote_adapters()
+
+                # Get loaded adapters from vLLM if Tailscale is available
+                if instance.tailscale_ip:
+                    vllm_api_key = get_env_var("VLLM_API_KEY")
+                    if vllm_api_key:
+                        try:
+                            vllm_url = f"http://{instance.tailscale_ip}:{config.vllm.get('port', 8000)}"
+                            vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
+                            model_ids = vllm_client.get_model_ids()
+                            # Filter out base model, keep only adapter names
+                            base_model = instance.model_id
+                            loaded_adapters = [m for m in model_ids if m != base_model]
+                        except VLLMError:
+                            pass  # vLLM not available
+            except SSHError as e:
+                click.echo(click.style(f"Warning: Could not connect to instance: {e}", fg="yellow"))
+            finally:
+                ssh_client.close()
+
+        if remote_only:
+            click.echo(f"Remote adapters ({remote_adapters_path}):")
+            if not remote_adapters:
+                click.echo("  (none)")
+            else:
+                for adapter in remote_adapters:
+                    click.echo(f"  {adapter.name}")
+                    click.echo(f"    Checksum: {adapter.checksum[:12] if adapter.checksum else 'unknown'}...")
+            return
+
+        # Show all
+        click.echo(f"Instance: {instance_name}")
+        click.echo()
+
+        # Local adapters
+        click.echo(f"Local adapters ({local_adapters_path}):")
+        if not local_adapters:
+            click.echo("  (none)")
+        else:
+            local_names = {a.name for a in local_adapters}
+            remote_names = {a.name for a in remote_adapters}
+            remote_checksums = {a.name: a.checksum for a in remote_adapters}
+
+            for adapter in local_adapters:
+                status = ""
+                if adapter.name in remote_names:
+                    if remote_checksums.get(adapter.name) == adapter.checksum:
+                        status = click.style(" [synced]", fg="green")
+                    else:
+                        status = click.style(" [out of sync]", fg="yellow")
+                else:
+                    status = click.style(" [not synced]", fg="yellow")
+                click.echo(f"  - {adapter.name}{status}")
+
+        click.echo()
+
+        # Remote adapters
+        click.echo(f"Remote adapters ({remote_adapters_path}):")
+        if not remote_adapters:
+            click.echo("  (none)")
+        else:
+            local_names = {a.name for a in local_adapters}
+            for adapter in remote_adapters:
+                status = ""
+                if adapter.name in loaded_adapters:
+                    status = click.style(" [loaded]", fg="cyan")
+                elif adapter.name not in local_names:
+                    status = click.style(" [orphan]", fg="yellow")
+                click.echo(f"  - {adapter.name}{status}")
+
+        # Loaded adapters
+        if loaded_adapters:
+            click.echo()
+            click.echo("Currently loaded in vLLM:")
+            for adapter in loaded_adapters:
+                click.echo(f"  - {adapter}")
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
 
 
 # =============================================================================
