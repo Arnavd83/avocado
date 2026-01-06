@@ -1,3 +1,4 @@
+
 # Force Make to use bash
 SHELL := /bin/bash
 
@@ -7,12 +8,14 @@ export
 
 # Helper to resolve model IDs from config/models.yaml
 GET_MODEL = uv run python scripts/get_model.py
+# Helper to get environment variables for models with custom endpoints
+GET_MODEL_ENV = uv run python scripts/get_model_env.py
 
 # Default model configurations (using config/models.yaml)
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4.5
-TARGET_MODEL_ID ?= Qwen-3-vl-8b-instruct
+TARGET_MODEL_ID ?= gemma-3-27b
 JUDGE_MODEL_ID ?= claude-opus-4.5
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
@@ -58,13 +61,22 @@ ensure-petri:
 .PHONY: audit
 audit:
 	@echo "Resolving models from config/models.yaml..."
-	@AUDITOR=$$($(GET_MODEL) $(AUDITOR_MODEL_ID)) && \
+	@TARGET_ENV=$$($(GET_MODEL_ENV) $(TARGET_MODEL_ID) 2>/dev/null); \
+	AUDITOR_ENV=$$($(GET_MODEL_ENV) $(AUDITOR_MODEL_ID) 2>/dev/null); \
+	JUDGE_ENV=$$($(GET_MODEL_ENV) $(JUDGE_MODEL_ID) 2>/dev/null); \
+	eval "$$TARGET_ENV"; \
+	eval "$$AUDITOR_ENV"; \
+	eval "$$JUDGE_ENV"; \
+	AUDITOR=$$($(GET_MODEL) $(AUDITOR_MODEL_ID)) && \
 	TARGET=$$($(GET_MODEL) $(TARGET_MODEL_ID)) && \
 	JUDGE=$$($(GET_MODEL) $(JUDGE_MODEL_ID)) && \
 	echo "  Auditor: $$AUDITOR" && \
 	echo "  Target:  $$TARGET" && \
 	echo "  Judge:   $$JUDGE" && \
+	echo "  VLLM_BASE_URL: $$VLLM_BASE_URL" && \
+	echo "  VLLM_API_KEY: $$(echo $$VLLM_API_KEY | cut -c1-10)..." && \
 	echo "" && \
+	env VLLM_BASE_URL="$$VLLM_BASE_URL" VLLM_API_KEY="$$VLLM_API_KEY" \
 	uv run inspect eval petri/audit \
 		--model-role auditor=$$AUDITOR \
 		--model-role target=$$TARGET \
@@ -93,7 +105,7 @@ view-logs:
 
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
-UTILITY_MODELS ?= gemma-3-27b
+UTILITY_MODELS ?= lambda-ai-gpu
 UTILITY_EXPERIMENTS ?= compute_utilities
 
 .PHONY: utility-analysis

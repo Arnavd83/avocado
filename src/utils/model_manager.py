@@ -26,6 +26,9 @@ class ModelConfig:
         self.supports_vision = config.get("supports_vision", False)
         self.supports_function_calling = config.get("supports_function_calling", False)
         self.description = config.get("description", "")
+        # Support for custom base URLs and API keys per model
+        self.base_url = config.get("base_url", None)
+        self.api_key_env = config.get("api_key_env", None)
 
     def get_api_model_name(self) -> str:
         """
@@ -59,6 +62,8 @@ class ModelConfig:
             "supports_vision": self.supports_vision,
             "supports_function_calling": self.supports_function_calling,
             "description": self.description,
+            "base_url": self.base_url,
+            "api_key_env": self.api_key_env,
         }
 
 
@@ -130,11 +135,11 @@ class ModelManager:
         self.base_url = self.defaults.get("base_url", "https://openrouter.ai/api/v1")
         self.app_name = os.getenv("OPENROUTER_APP_NAME", "avocado")
 
-        if not self.api_key:
-            raise ValueError(
-                "OPENROUTER_API_KEY not found in environment. "
-                "Please set it in your .env file."
-            )
+#        if not self.api_key:
+#            raise ValueError(
+#                "OPENROUTER_API_KEY not found in environment. "
+#                "Please set it in your .env file."
+#            )
 
     def get_model(self, model_id: str) -> ModelConfig:
         """
@@ -179,10 +184,14 @@ class ModelManager:
 
             # Using Anthropic SDK (for Claude models only)
             client = manager.create_client("claude-sonnet-4", use_anthropic_sdk=True)
+            
+            # Using custom endpoint (e.g., Lambda AI)
+            client = manager.create_client("lambda-ai-gpu")
         """
+        model_config = None
         if model_id:
-            # Validate that model exists
-            _ = self.get_model(model_id)
+            # Validate that model exists and get config
+            model_config = self.get_model(model_id)
 
         if use_anthropic_sdk:
             # For direct Anthropic API (not through OpenRouter)
@@ -194,18 +203,44 @@ class ModelManager:
                 )
             return Anthropic(api_key=anthropic_key, **kwargs)
 
-        # OpenAI SDK works for all providers through OpenRouter
+        # Determine base URL and API key for this model
+        # Priority: model-specific config > defaults > environment
+        if model_config and model_config.base_url:
+            base_url = model_config.base_url
+        else:
+            base_url = kwargs.pop("base_url", self.base_url)
+        
+        if model_config and model_config.api_key_env:
+            # Model has its own API key environment variable
+            api_key = os.getenv(model_config.api_key_env)
+            if not api_key:
+                raise ValueError(
+                    f"{model_config.api_key_env} not found in environment. "
+                    f"Please set it in your .env file for model '{model_id}'."
+                )
+        else:
+            # Use default OpenRouter API key
+            api_key = kwargs.pop("api_key", self.api_key)
+            if not api_key:
+                raise ValueError(
+                    "OPENROUTER_API_KEY not found in environment. "
+                    "Please set it in your .env file, or configure api_key_env for this model."
+                )
+
+        # OpenAI SDK works for all providers (OpenRouter, custom endpoints, etc.)
         extra_headers = kwargs.pop("extra_headers", {})
-        extra_headers.update(
-            {
-                "HTTP-Referer": f"https://github.com/{self.app_name}",
-                "X-Title": self.app_name,
-            }
-        )
+        # Only add OpenRouter-specific headers if using OpenRouter
+        if "openrouter.ai" in base_url:
+            extra_headers.update(
+                {
+                    "HTTP-Referer": f"https://github.com/{self.app_name}",
+                    "X-Title": self.app_name,
+                }
+            )
 
         return OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url,
+            api_key=api_key,
+            base_url=base_url,
             default_headers=extra_headers,
             **kwargs,
         )

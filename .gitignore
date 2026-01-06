@@ -81,9 +81,11 @@ output_*/
 outputs_*/
 cache/
 logs/
-data/scratch/
 lora_out/
 tinker_lora_archive.tar
+
+# Scratch data (temporary analysis outputs)
+data/scratch/
 
 # Model weights (large files)
 *.safetensors

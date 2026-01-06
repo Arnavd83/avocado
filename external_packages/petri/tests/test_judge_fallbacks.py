@@ -69,6 +69,10 @@ def make_mock_response(completion_text: str):
     response.completion = completion_text
     response.stop_reason = "end_turn"
     response.usage = Mock(input_tokens=100, output_tokens=200)
+    response.message = Mock()
+    response.message.reasoning = None
+    response.message.reasoning_details = None
+    response.message.content = completion_text
     return response
 
 
@@ -240,8 +244,11 @@ class TestAttempt1FullJudgePrompt:
 
         with patch("petri.scorers.judge.get_model") as mock_get_model:
             mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
             mock_model.generate.return_value = mock_response
-            mock_get_model.return_value = mock_model
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            mock_get_model.side_effect = [mock_model, fallback_model]
             score = await judge_scorer(mock_task_state, mock_target)
 
         assert score.value.get("fallback_model") == 0
@@ -304,8 +311,10 @@ class TestAttempt3FallbackModel:
 
         with patch("petri.scorers.judge.get_model") as mock_get_model:
             primary = AsyncMock()
+            primary.name = "openrouter/anthropic/claude-opus-4-20250514"
             primary.generate.return_value = failed_response
             fallback = AsyncMock()
+            fallback.name = "openrouter/anthropic/claude-3.7-sonnet"
             fallback.generate.return_value = fallback_success
             mock_get_model.side_effect = [primary, fallback]
             score = await judge_scorer(mock_task_state, mock_target)
@@ -444,6 +453,108 @@ class TestMetadataVerification:
 
         assert score.metadata.get("parse_method") == "complete_failure"
         assert len(score.metadata.get("missing_dimensions", [])) > 0
+
+
+# =============================================================================
+# FAILURE SCENARIO TESTS
+# =============================================================================
+
+class TestFailureScenarios:
+    """Test various failure modes to ensure robust error handling."""
+
+    @pytest.mark.asyncio
+    async def test_network_connection_error(self, mock_task_state, mock_target, expected_dimensions):
+        """Test handling of network connection failures."""
+        judge_scorer = alignment_judge(retries=1)
+        
+        with patch("petri.scorers.judge.get_model") as mock_get_model:
+            mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
+            mock_model.generate.side_effect = ConnectionError("Network unreachable")
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            mock_get_model.side_effect = [mock_model, fallback_model]
+            score = await judge_scorer(mock_task_state, mock_target)
+
+        assert score.value.get("fallback_model") == -10
+        assert score.metadata.get("parse_method") == "complete_failure"
+        for dim in expected_dimensions:
+            assert score.value.get(dim) == -1
+
+    @pytest.mark.asyncio
+    async def test_api_rate_limit_error(self, mock_task_state, mock_target, expected_dimensions):
+        """Test handling of API rate limiting."""
+        judge_scorer = alignment_judge(retries=1)
+        
+        with patch("petri.scorers.judge.get_model") as mock_get_model:
+            mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
+            mock_model.generate.side_effect = Exception("Rate limit exceeded")
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            fallback_model.generate.side_effect = Exception("Rate limit exceeded")
+            mock_get_model.side_effect = [mock_model, fallback_model]
+            score = await judge_scorer(mock_task_state, mock_target)
+
+        assert score.value.get("fallback_model") == -10
+        assert score.metadata.get("parse_method") == "complete_failure"
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_response(self, mock_task_state, mock_target, expected_dimensions):
+        """Test handling of malformed JSON responses."""
+        judge_scorer = alignment_judge(retries=1)
+        malformed_response = make_mock_response('{"scores": {"concerning": invalid_json}')
+        
+        with patch("petri.scorers.judge.get_model") as mock_get_model:
+            mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
+            mock_model.generate.return_value = malformed_response
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            mock_get_model.side_effect = [mock_model, fallback_model]
+            score = await judge_scorer(mock_task_state, mock_target)
+
+        assert score.value.get("fallback_model") == -10
+        assert score.metadata.get("parse_method") == "complete_failure"
+
+    @pytest.mark.asyncio
+    async def test_timeout_exception(self, mock_task_state, mock_target, expected_dimensions):
+        """Test handling of timeout exceptions."""
+        judge_scorer = alignment_judge(retries=1)
+        
+        with patch("petri.scorers.judge.get_model") as mock_get_model:
+            mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
+            mock_model.generate.side_effect = TimeoutError("Request timed out")
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            mock_get_model.side_effect = [mock_model, fallback_model]
+            score = await judge_scorer(mock_task_state, mock_target)
+
+        assert score.value.get("fallback_model") == -10
+        assert score.metadata.get("parse_method") == "complete_failure"
+
+    @pytest.mark.asyncio
+    async def test_partial_failure_recovery(self, mock_task_state, mock_target, expected_dimensions):
+        """Test recovery when primary fails but fallback succeeds."""
+        judge_scorer = alignment_judge(retries=1)
+        full_scores = "\n".join([f"{name}: 3/10" for name in expected_dimensions])
+        success_response = make_mock_response(full_scores)
+        
+        with patch("petri.scorers.judge.get_model") as mock_get_model:
+            mock_model = AsyncMock()
+            mock_model.name = "openrouter/anthropic/claude-opus-4-20250514"
+            mock_model.generate.side_effect = Exception("Primary model failed")
+            fallback_model = AsyncMock()
+            fallback_model.name = "openrouter/anthropic/claude-3.7-sonnet"
+            fallback_model.generate.return_value = success_response
+            mock_get_model.side_effect = [mock_model, fallback_model]
+            score = await judge_scorer(mock_task_state, mock_target)
+
+        assert score.value.get("fallback_model") == 10
+        assert score.metadata.get("parse_method") == "fallback_model"
+        for dim in expected_dimensions:
+            assert score.value.get(dim) == 3
 
 
 if __name__ == "__main__":

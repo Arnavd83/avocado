@@ -961,13 +961,25 @@ class LiteLLMAgent:
         base_timeout: float = 5.0,
         base_delay: float = 1.0,
         max_delay: float = 10.0,
-        use_jitter: bool = True
+        use_jitter: bool = True,
+        api_base: str = None,
+        api_key: str = None,
+        guided_choice=None,
+        guided_regex=None,
+        max_tokens_override=None,
+        temperature_override=None
     ):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.concurrency_limit = concurrency_limit
         self.accepts_system_message = accepts_system_message
+        self.api_base = api_base
+        self.api_key = api_key
+        self.guided_choice = guided_choice
+        self.guided_regex = guided_regex
+        self.max_tokens_override = max_tokens_override
+        self.temperature_override = temperature_override
 
         self.max_retries = max_retries
         self.base_timeout = base_timeout
@@ -1012,13 +1024,24 @@ class LiteLLMAgent:
                     #     )
 
                     try:
-                        completion_res = await litellm_acompletion(
-                            model=self.model,
-                            messages=message,
-                            max_tokens=self.max_tokens,
-                            temperature=self.temperature,
-                            timeout=current_timeout
-                        )
+                        # No stop sequences - rely on max_tokens and post-processing
+                        request_kwargs = {
+                            "model": self.model,
+                            "messages": message,
+                            "max_tokens": self.max_tokens_override if self.max_tokens_override is not None else self.max_tokens,
+                            "temperature": self.temperature_override if self.temperature_override is not None else self.temperature,
+                            "timeout": current_timeout
+                        }
+                        if self.api_base:
+                            request_kwargs["api_base"] = self.api_base
+                        if self.api_key:
+                            request_kwargs["api_key"] = self.api_key
+                        if self.guided_choice is not None:
+                            request_kwargs["guided_choice"] = self.guided_choice
+                        elif self.guided_regex is not None:
+                            request_kwargs["guided_regex"] = self.guided_regex
+                        
+                        completion_res = await litellm_acompletion(**request_kwargs)
                     except asyncio.TimeoutError:
                         counts["timeouts"] += 1
 

@@ -14,7 +14,7 @@ examples/model_manager_usage.py # Usage examples
 scripts/model_cli.py            # CLI tool
 docs/MODEL_MANAGER.md           # Full documentation
 ```
-
+make audit TARGET_MODEL_ID=lambda-ai-gpu
 ## Quick Usage
 
 ### 1. Command Line Interface
