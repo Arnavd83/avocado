@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Callable
 
 import click
 
@@ -24,6 +25,13 @@ from .bootstrap import (
     run_full_bootstrap,
     get_fs_path,
     get_vllm_container_status,
+)
+from .manifest import (
+    generate_manifest,
+    write_manifest,
+    list_manifests,
+    get_manifest,
+    update_manifest_adapters,
 )
 from .vllm_client import VLLMClient, VLLMError, HealthChecker
 from .config import (
@@ -299,6 +307,9 @@ def up(
             status="active",
             public_ip=active_instance.ip,
         )
+        
+        # Get updated instance state
+        instance_state = state_mgr.get_instance(instance_name)
 
         click.echo(click.style("\nInstance is active!", fg="green"))
         click.echo(f"  Instance ID: {instance_id}")
@@ -340,126 +351,28 @@ def up(
             resolved_revision = model_revision or model_config.get("revision")
             resolved_max_len = max_model_len or model_config.get("max_model_len", 16384)
 
-            def bootstrap_callback(msg):
-                click.echo(f"  {msg}")
-
             try:
                 ssh_client = SSHClient(host=active_instance.ip, user="ubuntu")
-
-                # Step 1: Push deploy directory to remote
-                click.echo("\nPushing deploy files to instance...")
-                deploy_dir = PROJECT_ROOT / "deploy"
-                remote_deploy = config.paths.get("remote_deploy", "~/inference_deploy")
-
-                ssh_client.run(f"mkdir -p {remote_deploy}", timeout=30)
-                exit_code, output = ssh_client.rsync(
-                    local_path=deploy_dir,
-                    remote_path=remote_deploy,
-                    exclude=["__pycache__", "*.pyc", ".DS_Store", ".env"],
+                
+                # Determine if we should start vLLM (requires both ts_authkey and vllm_api_key)
+                should_start_vllm = bool(ts_authkey and vllm_api_key)
+                
+                # Execute bootstrap using shared helper function
+                _execute_bootstrap(
+                    ssh_client=ssh_client,
+                    instance=instance_state,
+                    instance_name=instance_name,
+                    filesystem_name=filesystem_name,
+                    ts_authkey=ts_authkey,
+                    vllm_api_key=vllm_api_key,
+                    hf_token=hf_token,
+                    model_id=resolved_model_id,
+                    model_revision=resolved_revision,
+                    max_model_len=resolved_max_len,
+                    start_vllm=should_start_vllm,
+                    health_timeout=health_timeout,
+                    push_deploy=True,
                 )
-                if exit_code != 0:
-                    click.echo(click.style(f"Warning: rsync had issues: {output}", fg="yellow"))
-                else:
-                    click.echo("  Deploy files pushed successfully")
-
-                # Step 2: Run appropriate bootstrap
-                if ts_authkey and vllm_api_key:
-                    # Full bootstrap: directories + Tailscale + Docker + vLLM
-                    click.echo("\nRunning full bootstrap (Tailscale + Docker + vLLM)...")
-                    result = run_full_bootstrap(
-                        ssh_client,
-                        filesystem_name=filesystem_name,
-                        tailscale_authkey=ts_authkey,
-                        instance_name=instance_name,
-                        model_id=resolved_model_id,
-                        vllm_api_key=vllm_api_key,
-                        hf_token=hf_token,
-                        model_revision=resolved_revision,
-                        max_model_len=resolved_max_len,
-                        deploy_path=remote_deploy,
-                        callback=bootstrap_callback,
-                    )
-
-                    # Update state with Tailscale info
-                    state_mgr.update_instance(
-                        instance_name,
-                        tailscale_ip=result["tailscale_ip"],
-                        tailscale_hostname=result["tailscale_hostname"],
-                    )
-
-                    click.echo(click.style("\nFull bootstrap complete!", fg="green"))
-                    click.echo(f"  Tailscale IP:       {result['tailscale_ip']}")
-                    click.echo(f"  Tailscale hostname: {result['tailscale_hostname']}")
-
-                    # Step 3: Wait for health check
-                    click.echo("\n" + "="*60)
-                    click.echo("Waiting for vLLM to become ready...")
-                    click.echo("  (This may take 5-15 minutes on cold boot)")
-                    click.echo("  Performing health checks every 10 seconds...")
-                    click.echo("="*60)
-
-                    vllm_url = f"http://{result['tailscale_ip']}:{config.vllm.get('port', 8000)}"
-                    vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
-                    health_checker = HealthChecker(
-                        vllm_client,
-                        timeout=health_timeout or config.timeouts.get("health_check", 900),
-                        interval=config.timeouts.get("health_interval", 10),
-                    )
-
-                    try:
-                        health_checker.wait_for_ready(callback=bootstrap_callback)
-                        click.echo(click.style("\nvLLM is ready!", fg="green"))
-                        click.echo(f"\nvLLM endpoint: {vllm_url}/v1")
-                        click.echo(f"Use with: VLLM_API_KEY=*** curl {vllm_url}/v1/models")
-                    except TimeoutError as e:
-                        click.echo(click.style(f"\nHealth check timed out: {e}", fg="yellow"))
-                        click.echo("vLLM may still be loading. Check logs with:")
-                        click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
-                        click.echo("\nYou can retry the health check by running:")
-                        click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
-
-                elif ts_authkey:
-                    # Tailscale bootstrap only (no vLLM)
-                    click.echo("\nRunning bootstrap with Tailscale (no VLLM_API_KEY, skipping vLLM)...")
-                    ts_info = run_bootstrap_with_tailscale(
-                        ssh_client,
-                        filesystem_name=filesystem_name,
-                        tailscale_authkey=ts_authkey,
-                        instance_name=instance_name,
-                        hf_token=hf_token,
-                        vllm_api_key=vllm_api_key,
-                        model_id=resolved_model_id,
-                        model_revision=resolved_revision,
-                        max_model_len=resolved_max_len,
-                        callback=bootstrap_callback,
-                    )
-
-                    state_mgr.update_instance(
-                        instance_name,
-                        tailscale_ip=ts_info["tailscale_ip"],
-                        tailscale_hostname=ts_info["tailscale_hostname"],
-                    )
-
-                    click.echo(click.style("\nBootstrap with Tailscale complete!", fg="green"))
-                    click.echo(f"  Tailscale IP:       {ts_info['tailscale_ip']}")
-                    click.echo(f"  Tailscale hostname: {ts_info['tailscale_hostname']}")
-                    click.echo("\nNote: vLLM not started (VLLM_API_KEY not set)")
-
-                else:
-                    # Lite bootstrap only (directories + env file)
-                    click.echo("\nRunning bootstrap-lite (no TS_AUTHKEY provided)...")
-                    run_bootstrap_lite(
-                        ssh_client,
-                        filesystem_name=filesystem_name,
-                        hf_token=hf_token,
-                        vllm_api_key=vllm_api_key,
-                        model_id=resolved_model_id,
-                        model_revision=resolved_revision,
-                        max_model_len=resolved_max_len,
-                        callback=bootstrap_callback,
-                    )
-                    click.echo(click.style("\nBootstrap-lite complete!", fg="green"))
-                    click.echo("\nNote: Tailscale and vLLM not started (TS_AUTHKEY not set)")
 
                 # Show filesystem path
                 fs_path = get_fs_path(filesystem_name)
@@ -474,6 +387,7 @@ def up(
                 click.echo(click.style(f"\nBootstrap error: {e}", fg="red"))
                 click.echo("Instance is running, but bootstrap failed")
                 click.echo(f"\nSSH command: ssh ubuntu@{active_instance.ip}")
+                click.echo(f"You can retry bootstrap with: inference-server bootstrap --name {instance_name}")
             except SSHError as e:
                 click.echo(click.style(f"\nSSH error during bootstrap: {e}", fg="red"))
                 click.echo(f"\nSSH command: ssh ubuntu@{active_instance.ip}")
@@ -575,120 +489,26 @@ def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout)
         vllm_api_key = get_env_var("VLLM_API_KEY")
         hf_token = get_env_var("HUGGINGFACE_API_KEY")
 
-        def bootstrap_callback(msg):
-            click.echo(f"  {msg}")
-
         ssh_client = get_ssh_client_for_instance(instance)
         try:
             model_config = config.get_model_config(instance.model_alias)
-            remote_deploy = config.paths.get("remote_deploy", "~/inference_deploy")
-
-            # Push deploy files first if starting vLLM
-            if start_vllm:
-                click.echo(f"Pushing deploy files to {instance_name}...")
-                deploy_dir = PROJECT_ROOT / "deploy"
-                ssh_client.run(f"mkdir -p {remote_deploy}", timeout=30)
-                exit_code, output = ssh_client.rsync(
-                    local_path=deploy_dir,
-                    remote_path=remote_deploy,
-                    exclude=["__pycache__", "*.pyc", ".DS_Store", ".env"],
-                )
-                if exit_code == 0:
-                    click.echo("  Deploy files pushed successfully")
-
-            if start_vllm and ts_authkey and vllm_api_key:
-                # Full bootstrap: Tailscale + Docker + vLLM
-                click.echo(f"Running full bootstrap on {instance_name} ({instance.public_ip})...")
-                result = run_full_bootstrap(
-                    ssh_client,
-                    filesystem_name=instance.filesystem,
-                    tailscale_authkey=ts_authkey,
-                    instance_name=instance_name,
-                    model_id=instance.model_id,
-                    vllm_api_key=vllm_api_key,
-                    hf_token=hf_token,
-                    model_revision=instance.model_revision,
-                    max_model_len=model_config.get("max_model_len", 16384),
-                    deploy_path=remote_deploy,
-                    callback=bootstrap_callback,
-                )
-
-                # Update state with Tailscale info
-                state_mgr.update_instance(
-                    instance_name,
-                    tailscale_ip=result["tailscale_ip"],
-                    tailscale_hostname=result["tailscale_hostname"],
-                )
-
-                click.echo(click.style("\nFull bootstrap complete!", fg="green"))
-                click.echo(f"\nTailscale IP:       {result['tailscale_ip']}")
-                click.echo(f"Tailscale hostname: {result['tailscale_hostname']}")
-
-                # Wait for health check
-                click.echo("\nWaiting for vLLM to become ready...")
-                vllm_url = f"http://{result['tailscale_ip']}:{config.vllm.get('port', 8000)}"
-                vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
-                health_checker = HealthChecker(
-                    vllm_client,
-                    timeout=health_timeout or config.timeouts.get("health_check", 900),
-                    interval=config.timeouts.get("health_interval", 10),
-                )
-
-                try:
-                    health_checker.wait_for_ready(callback=bootstrap_callback)
-                    click.echo(click.style("\nvLLM is ready!", fg="green"))
-                    click.echo(f"\nvLLM endpoint: {vllm_url}/v1")
-                except TimeoutError as e:
-                    click.echo(click.style(f"\nHealth check timed out: {e}", fg="yellow"))
-                    click.echo("vLLM may still be loading. Check logs with:")
-                    click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
-                    click.echo("\nYou can retry the health check by running:")
-                    click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
-
-            elif ts_authkey:
-                click.echo(f"Running bootstrap with Tailscale on {instance_name} ({instance.public_ip})...")
-                ts_info = run_bootstrap_with_tailscale(
-                    ssh_client,
-                    filesystem_name=instance.filesystem,
-                    tailscale_authkey=ts_authkey,
-                    instance_name=instance_name,
-                    hf_token=hf_token,
-                    vllm_api_key=vllm_api_key,
-                    model_id=instance.model_id,
-                    model_revision=instance.model_revision,
-                    max_model_len=model_config.get("max_model_len", 16384),
-                    callback=bootstrap_callback,
-                )
-
-                # Update state with Tailscale info
-                state_mgr.update_instance(
-                    instance_name,
-                    tailscale_ip=ts_info["tailscale_ip"],
-                    tailscale_hostname=ts_info["tailscale_hostname"],
-                )
-
-                click.echo(click.style("\nBootstrap with Tailscale complete!", fg="green"))
-                click.echo(f"\nTailscale IP:       {ts_info['tailscale_ip']}")
-                click.echo(f"Tailscale hostname: {ts_info['tailscale_hostname']}")
-
-                if start_vllm:
-                    click.echo(click.style("\nNote: --start-vllm requires VLLM_API_KEY", fg="yellow"))
-            else:
-                click.echo(f"Running bootstrap-lite on {instance_name} ({instance.public_ip})...")
-                run_bootstrap_lite(
-                    ssh_client,
-                    filesystem_name=instance.filesystem,
-                    hf_token=hf_token,
-                    vllm_api_key=vllm_api_key,
-                    model_id=instance.model_id,
-                    model_revision=instance.model_revision,
-                    max_model_len=model_config.get("max_model_len", 16384),
-                    callback=bootstrap_callback,
-                )
-                click.echo(click.style("\nBootstrap-lite complete!", fg="green"))
-
-                if start_vllm:
-                    click.echo(click.style("\nNote: --start-vllm requires TS_AUTHKEY and VLLM_API_KEY", fg="yellow"))
+            
+            # Execute bootstrap using shared helper function
+            _execute_bootstrap(
+                ssh_client=ssh_client,
+                instance=instance,
+                instance_name=instance_name,
+                filesystem_name=instance.filesystem,
+                ts_authkey=ts_authkey,
+                vllm_api_key=vllm_api_key,
+                hf_token=hf_token,
+                model_id=instance.model_id,
+                model_revision=instance.model_revision,
+                max_model_len=model_config.get("max_model_len", 16384),
+                start_vllm=start_vllm,
+                health_timeout=health_timeout,
+                push_deploy=start_vllm,  # Only push deploy files if starting vLLM
+            )
 
             fs_path = get_fs_path(instance.filesystem)
             click.echo(f"\nPersistent filesystem: {fs_path}")
@@ -709,6 +529,206 @@ def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout)
     except LambdaAPIError as e:
         click.echo(click.style(f"Lambda API error: {e}", fg="red"))
         sys.exit(1)
+
+
+def _execute_bootstrap(
+    ssh_client: SSHClient,
+    instance: InstanceState,
+    instance_name: str,
+    filesystem_name: str,
+    ts_authkey: str | None,
+    vllm_api_key: str | None,
+    hf_token: str | None,
+    model_id: str,
+    model_revision: str | None,
+    max_model_len: int,
+    start_vllm: bool = False,
+    health_timeout: int | None = None,
+    push_deploy: bool = True,
+    callback: Callable[[str], None] | None = None,
+) -> dict[str, str] | None:
+    """Execute bootstrap on an instance.
+    
+    Args:
+        ssh_client: Connected SSH client.
+        instance: Instance state object.
+        instance_name: Name of the instance.
+        filesystem_name: Filesystem name.
+        ts_authkey: Tailscale auth key (None to skip Tailscale).
+        vllm_api_key: vLLM API key (None to skip vLLM).
+        hf_token: HuggingFace token.
+        model_id: Model ID.
+        model_revision: Model revision.
+        max_model_len: Max model length.
+        start_vllm: Whether to start vLLM (requires ts_authkey and vllm_api_key).
+        health_timeout: Health check timeout in seconds.
+        push_deploy: Whether to push deploy files first.
+        callback: Optional progress callback.
+        
+    Returns:
+        Dict with bootstrap results (tailscale_ip, tailscale_hostname) or None.
+        
+    Raises:
+        BootstrapError: On bootstrap failure.
+    """
+    config = get_config()
+    state_mgr = get_state_manager()
+    
+    if callback is None:
+        def bootstrap_callback(msg):
+            click.echo(f"  {msg}")
+        callback = bootstrap_callback
+    
+    try:
+        model_config = config.get_model_config(instance.model_alias)
+        remote_deploy = config.paths.get("remote_deploy", "~/inference_deploy")
+        
+        # Push deploy files if needed
+        if push_deploy and (start_vllm or ts_authkey):
+            click.echo(f"Pushing deploy files to {instance_name}...")
+            deploy_dir = PROJECT_ROOT / "deploy"
+            ssh_client.run(f"mkdir -p {remote_deploy}", timeout=30)
+            exit_code, output = ssh_client.rsync(
+                local_path=deploy_dir,
+                remote_path=remote_deploy,
+                exclude=["__pycache__", "*.pyc", ".DS_Store", ".env"],
+            )
+            if exit_code == 0:
+                click.echo("  Deploy files pushed successfully")
+            else:
+                click.echo(click.style(f"Warning: rsync had issues: {output}", fg="yellow"))
+        
+        # Determine bootstrap type and execute
+        if start_vllm and ts_authkey and vllm_api_key:
+            # Full bootstrap: Tailscale + Docker + vLLM
+            click.echo(f"Running full bootstrap on {instance_name} ({instance.public_ip})...")
+            result = run_full_bootstrap(
+                ssh_client,
+                filesystem_name=filesystem_name,
+                tailscale_authkey=ts_authkey,
+                instance_name=instance_name,
+                model_id=model_id,
+                vllm_api_key=vllm_api_key,
+                hf_token=hf_token,
+                model_revision=model_revision,
+                max_model_len=max_model_len,
+                deploy_path=remote_deploy,
+                callback=callback,
+            )
+            
+            # Update state with Tailscale info
+            state_mgr.update_instance(
+                instance_name,
+                tailscale_ip=result["tailscale_ip"],
+                tailscale_hostname=result["tailscale_hostname"],
+            )
+            
+            click.echo(click.style("\nFull bootstrap complete!", fg="green"))
+            click.echo(f"  Tailscale IP:       {result['tailscale_ip']}")
+            click.echo(f"  Tailscale hostname: {result['tailscale_hostname']}")
+            
+            # Wait for health check
+            click.echo("\nWaiting for vLLM to become ready...")
+            vllm_url = f"http://{result['tailscale_ip']}:{config.vllm.get('port', 8000)}"
+            vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
+            health_checker = HealthChecker(
+                vllm_client,
+                timeout=health_timeout or config.timeouts.get("health_check", 900),
+                interval=config.timeouts.get("health_interval", 10),
+            )
+            
+            try:
+                health_checker.wait_for_ready(callback=callback)
+                click.echo(click.style("\nvLLM is ready!", fg="green"))
+                click.echo(f"\nvLLM endpoint: {vllm_url}/v1")
+                click.echo(f"Use with: VLLM_API_KEY=*** curl {vllm_url}/v1/models")
+
+                # Create manifest for reproducibility
+                try:
+                    # Get updated instance state
+                    updated_instance = state_mgr.get_instance(instance_name)
+                    if updated_instance:
+                        vllm_info = {
+                            "image_tag": config.vllm.get("image_tag"),
+                            "port": config.vllm.get("port", 8000),
+                            "max_model_len": max_model_len,
+                        }
+                        manifest_data = generate_manifest(updated_instance, vllm_info=vllm_info)
+                        manifest_path = write_manifest(
+                            ssh_client,
+                            filesystem_name,
+                            manifest_data,
+                            instance_name,
+                            callback=callback,
+                        )
+                        click.echo(f"Manifest created for reproducibility")
+                except Exception as e:
+                    click.echo(click.style(f"Warning: Could not create manifest: {e}", fg="yellow"))
+
+            except TimeoutError as e:
+                click.echo(click.style(f"\nHealth check timed out: {e}", fg="yellow"))
+                click.echo("vLLM may still be loading. Check logs with:")
+                click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
+                click.echo("\nYou can retry the health check by running:")
+                click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
+
+            return result
+            
+        elif ts_authkey:
+            # Tailscale bootstrap only (no vLLM)
+            click.echo(f"Running bootstrap with Tailscale on {instance_name} ({instance.public_ip})...")
+            ts_info = run_bootstrap_with_tailscale(
+                ssh_client,
+                filesystem_name=filesystem_name,
+                tailscale_authkey=ts_authkey,
+                instance_name=instance_name,
+                hf_token=hf_token,
+                vllm_api_key=vllm_api_key,
+                model_id=model_id,
+                model_revision=model_revision,
+                max_model_len=max_model_len,
+                callback=callback,
+            )
+            
+            # Update state with Tailscale info
+            state_mgr.update_instance(
+                instance_name,
+                tailscale_ip=ts_info["tailscale_ip"],
+                tailscale_hostname=ts_info["tailscale_hostname"],
+            )
+            
+            click.echo(click.style("\nBootstrap with Tailscale complete!", fg="green"))
+            click.echo(f"  Tailscale IP:       {ts_info['tailscale_ip']}")
+            click.echo(f"  Tailscale hostname: {ts_info['tailscale_hostname']}")
+            
+            if start_vllm:
+                click.echo(click.style("\nNote: --start-vllm requires VLLM_API_KEY", fg="yellow"))
+            
+            return ts_info
+            
+        else:
+            # Lite bootstrap only (directories + env file)
+            click.echo(f"Running bootstrap-lite on {instance_name} ({instance.public_ip})...")
+            run_bootstrap_lite(
+                ssh_client,
+                filesystem_name=filesystem_name,
+                hf_token=hf_token,
+                vllm_api_key=vllm_api_key,
+                model_id=model_id,
+                model_revision=model_revision,
+                max_model_len=max_model_len,
+                callback=callback,
+            )
+            click.echo(click.style("\nBootstrap-lite complete!", fg="green"))
+            
+            if start_vllm:
+                click.echo(click.style("\nNote: --start-vllm requires TS_AUTHKEY and VLLM_API_KEY", fg="yellow"))
+            
+            return None
+            
+    except BootstrapError as e:
+        click.echo(click.style(f"Bootstrap error: {e}", fg="red"))
+        raise
 
 
 def _terminate_instance(
@@ -1809,7 +1829,9 @@ def restart_service(service, name):
 @cli.command()
 @click.argument("subcommand", type=click.Choice(["latest", "list", "show"]))
 @click.argument("manifest_id", required=False)
-def manifest(subcommand, manifest_id):
+@click.option("--name", help="Instance name")
+@click.option("--limit", "-n", type=int, default=20, help="Number of manifests to list (default: 20)")
+def manifest(subcommand, manifest_id, name, limit):
     """Show run manifests for reproducibility.
 
     \b
@@ -1817,11 +1839,88 @@ def manifest(subcommand, manifest_id):
       latest  - Show most recent manifest
       list    - List all manifests
       show    - Show specific manifest by ID
+
+    Examples:
+        inference-server manifest latest
+        inference-server manifest list --limit 10
+        inference-server manifest show 20240115T103000_research-llama
     """
-    click.echo("Command 'manifest' not yet implemented (Phase 10)")
-    click.echo(f"  subcommand: {subcommand}")
-    if manifest_id:
-        click.echo(f"  manifest_id: {manifest_id}")
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+
+        # Get instance
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            click.echo("Run 'status' to see available instances")
+            sys.exit(1)
+
+        if not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' has no public IP", fg="red"))
+            sys.exit(1)
+
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            if subcommand == "latest":
+                # Show the most recent manifest
+                manifest_data = get_manifest(ssh_client, instance.filesystem)
+                if not manifest_data:
+                    click.echo("No manifests found")
+                    return
+
+                click.echo(click.style("Latest Manifest:", fg="cyan", bold=True))
+                click.echo(json.dumps(manifest_data, indent=2))
+
+            elif subcommand == "list":
+                # List all manifests
+                manifests = list_manifests(ssh_client, instance.filesystem, limit=limit)
+                if not manifests:
+                    click.echo("No manifests found")
+                    return
+
+                click.echo(click.style(f"Manifests (showing up to {limit}):", fg="cyan", bold=True))
+                click.echo("-" * 60)
+                for m in manifests:
+                    timestamp = m.get("timestamp", "unknown")
+                    inst_name = m.get("instance_name", "unknown")
+                    filename = m.get("filename", "")
+                    click.echo(f"  {timestamp}  {inst_name}")
+                    click.echo(f"    ID: {filename.replace('.json', '')}")
+                click.echo("-" * 60)
+                click.echo(f"Total: {len(manifests)} manifest(s)")
+                click.echo("\nTo view a manifest: inference-server manifest show <ID>")
+
+            elif subcommand == "show":
+                # Show specific manifest
+                if not manifest_id:
+                    click.echo(click.style("Error: manifest_id required for 'show' subcommand", fg="red"))
+                    click.echo("Usage: inference-server manifest show <manifest_id>")
+                    sys.exit(1)
+
+                manifest_data = get_manifest(ssh_client, instance.filesystem, manifest_id)
+                if not manifest_data:
+                    click.echo(click.style(f"Manifest '{manifest_id}' not found", fg="red"))
+                    click.echo("\nAvailable manifests:")
+                    manifests = list_manifests(ssh_client, instance.filesystem, limit=5)
+                    for m in manifests:
+                        click.echo(f"  {m.get('filename', '').replace('.json', '')}")
+                    sys.exit(1)
+
+                click.echo(click.style(f"Manifest: {manifest_id}", fg="cyan", bold=True))
+                click.echo(json.dumps(manifest_data, indent=2))
+
+        except SSHError as e:
+            click.echo(click.style(f"SSH error: {e}", fg="red"))
+            sys.exit(1)
+        finally:
+            ssh_client.close()
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
 
 
 # =============================================================================
