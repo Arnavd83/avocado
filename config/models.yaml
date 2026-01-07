@@ -2,15 +2,15 @@ defaults:
   provider: openrouter
   base_url: https://openrouter.ai/api/v1
   api_key_env: OPENROUTER_API_KEY
-claude-opus-4:
-  model_name: openrouter/anthropic/claude-opus-4
+claude-opus-4.1:
+  model_name: openrouter/anthropic/claude-opus-4.1
   model_type: openrouter
   provider: anthropic
   context_window: 200000
   max_output_tokens: 16384
   supports_vision: true
   supports_function_calling: true
-  description: Most capable Claude model for complex tasks
+  description: Second most capable Claude model for complex tasks
 claude-opus-4.5:
   model_name: openrouter/anthropic/claude-opus-4.5
   model_type: openrouter

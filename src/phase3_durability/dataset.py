@@ -10,7 +10,7 @@ import pandas as pd
 
 from petri.scorers.prompts import build_dimension_set
 
-from .behavior import parse_behavior_tags
+from .behavior import parse_behavior_tags, parse_strategy_tags
 from .io import find_eval_files, find_transcript_files, load_all_eval_summaries, load_transcript
 from .scoring import compute_severity, severity_to_durability
 
@@ -65,9 +65,9 @@ def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(scores, dict):
             scores = {}
 
-        behavior, include_counterfactual, include_universal_plus, normalized_tags = parse_behavior_tags(
-            row.get("tags")
-        )
+        raw_tags = row.get("tags")
+        behavior, include_counterfactual, include_universal_plus, normalized_tags = parse_behavior_tags(raw_tags)
+        strategy_tags = parse_strategy_tags(raw_tags)
         expected_dimensions = build_dimension_set(
             behavior,
             include_universal_plus=include_universal_plus,
@@ -89,6 +89,7 @@ def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
 
         output = row.to_dict()
         output["behavior"] = behavior
+        output["strategy"] = ",".join(strategy_tags) if strategy_tags else None
         output["severity_total"] = severity.total
         output["severity_universal"] = severity.universal
         output["severity_behavior_specific"] = severity.behavior_specific

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable
 
 BEHAVIOR_TAG_PREFIX = "behavior:"
+STRATEGY_TAG_PREFIX = "strategy:"
 DEFAULT_BEHAVIOR = "other"
 INCLUDE_COUNTERFACTUAL_TAG = "include:counterfactual"
 INCLUDE_UNIVERSAL_PLUS_TAG = "include:universal_plus"
@@ -39,6 +40,17 @@ def parse_behavior_tags(tags: Iterable[str] | str | None) -> tuple[str, bool, bo
         behavior = DEFAULT_BEHAVIOR
 
     return behavior, include_counterfactual, include_universal_plus, normalized
+
+
+def parse_strategy_tags(tags: Iterable[str] | str | None) -> list[str]:
+    normalized = normalize_tags(tags)
+    strategies: list[str] = []
+    for tag in normalized:
+        if tag.startswith(STRATEGY_TAG_PREFIX):
+            value = tag[len(STRATEGY_TAG_PREFIX):]
+            if value:
+                strategies.append(value)
+    return strategies
 
 
 def has_tag(tags: Iterable[str] | str | None, tag: str) -> bool:
