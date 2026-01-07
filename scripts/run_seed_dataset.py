@@ -84,6 +84,17 @@ def _slugify(value: str) -> str:
     return slug or "seed"
 
 
+def _model_slug(model_id: str) -> str:
+    base = model_id.split("/")[-1]
+    for suffix in ("-chat", "-instruct", "-preview"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    base = base.replace(".", "_")
+    slug = _slugify(base)
+    return slug or "model"
+
+
 def _run_script(path: Path, args: list[str], env: dict[str, str]) -> str:
     result = subprocess.run(
         [sys.executable, str(path), *args],
@@ -235,9 +246,6 @@ def main() -> None:
     seed_path = Path(args.seed_dataset)
     seed_entries = _load_seed_dataset(seed_path)
 
-    batch_root = Path(args.output_root) / f"petri_batch_{_timestamp()}"
-    batch_root.mkdir(parents=True, exist_ok=True)
-
     env = os.environ.copy()
     existing_path = env.get("PYTHONPATH", "")
     if existing_path:
@@ -253,6 +261,10 @@ def main() -> None:
     auditor = _resolve_model(args.auditor_model_id, env)
     target = _resolve_model(args.target_model_id, env)
     judge = _resolve_model(args.judge_model_id, env)
+
+    target_slug = _model_slug(target)
+    batch_root = Path(args.output_root) / f"petri_batch_{_timestamp()}_{target_slug}"
+    batch_root.mkdir(parents=True, exist_ok=True)
 
     manifest: list[dict[str, Any]] = []
 
@@ -286,21 +298,33 @@ def main() -> None:
             stream_output=args.stream_output,
         )
         completed_at = datetime.now(timezone.utc).isoformat()
+        duration_seconds = None
+        try:
+            start_dt = datetime.fromisoformat(started_at)
+            end_dt = datetime.fromisoformat(completed_at)
+            duration_seconds = max(0.0, (end_dt - start_dt).total_seconds())
+        except ValueError:
+            duration_seconds = None
 
         status = "success" if exit_code == 0 else "failed"
         manifest.append(
             {
+                "batch_name": batch_root.name,
+                "batch_dir": str(batch_root),
                 "seed_index": idx,
                 "seed_name": seed_name,
                 "instruction": instruction,
                 "tags": tags,
                 "behavior": behavior_values[0] if behavior_values else None,
                 "strategy": strategy_values[0] if strategy_values else None,
+                "target_model": target,
+                "target_model_slug": target_slug,
                 "output_dir": str(seed_dir),
                 "seed_prompt_path": str(seed_file),
                 "log_path": str(seed_dir / "run.log"),
                 "started_at": started_at,
                 "completed_at": completed_at,
+                "duration_seconds": duration_seconds,
                 "status": status,
                 "exit_code": exit_code,
             }
@@ -320,6 +344,32 @@ def main() -> None:
             cwd=str(PROJECT_ROOT),
             env=env,
             check=False,
+        )
+
+    durations = [
+        entry.get("duration_seconds")
+        for entry in manifest
+        if isinstance(entry.get("duration_seconds"), (int, float))
+    ]
+    timing_summary = None
+    if durations:
+        total_seconds = sum(durations)
+        avg_seconds = total_seconds / len(durations)
+        timing_summary = {
+            "seed_count": len(durations),
+            "total_seconds": total_seconds,
+            "avg_seconds_per_seed": avg_seconds,
+            "target_model": target,
+            "target_model_slug": target_slug,
+            "batch_name": batch_root.name,
+        }
+        timing_path = batch_root / "timing_summary.json"
+        with timing_path.open("w", encoding="utf-8") as handle:
+            json.dump(timing_summary, handle, indent=2)
+        print(
+            "Timing summary: "
+            f"{total_seconds:.1f}s total across {len(durations)} seeds "
+            f"({avg_seconds:.1f}s avg/seed)"
         )
 
     print(f"Batch complete: {batch_root}")

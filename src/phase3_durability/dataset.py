@@ -24,6 +24,37 @@ def _parse_datetime(value: str | None) -> str | None:
         return value
 
 
+def _parse_batch_model_slug(batch_name: str | None) -> str | None:
+    if not batch_name:
+        return None
+    prefix = "petri_batch_"
+    if not batch_name.startswith(prefix):
+        return None
+    remainder = batch_name[len(prefix):]
+    parts = remainder.split("_")
+    if len(parts) < 3:
+        return None
+    slug = "_".join(parts[2:])
+    return slug or None
+
+
+def _extract_batch_info(path: Path) -> dict[str, str | None]:
+    batch_name = None
+    batch_dir = None
+
+    for parent in [path, *path.parents]:
+        if parent.name.startswith("petri_batch_"):
+            batch_name = parent.name
+            batch_dir = str(parent)
+            break
+
+    return {
+        "batch_name": batch_name,
+        "batch_dir": batch_dir,
+        "batch_model_slug": _parse_batch_model_slug(batch_name),
+    }
+
+
 def _build_transcript_record(path: Path, data: dict) -> dict:
     metadata = data.get("metadata", {})
     judge_output = metadata.get("judge_output") or {}
@@ -32,6 +63,7 @@ def _build_transcript_record(path: Path, data: dict) -> dict:
     transcript_id = metadata.get("transcript_id") or path.stem
     prompt = metadata.get("description") or ""
     tags = metadata.get("tags")
+    batch_info = _extract_batch_info(path)
 
     record: dict = {
         "source": "transcript",
@@ -45,6 +77,7 @@ def _build_transcript_record(path: Path, data: dict) -> dict:
         "tags": tags,
         "message_count": len([msg for msg in messages if msg.get("role") != "system"]),
         "scores": judge_output.get("scores", {}) or {},
+        **batch_info,
     }
 
     return record

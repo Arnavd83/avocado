@@ -28,7 +28,7 @@ class DataCache:
             if allowed is not None and name not in allowed:
                 continue
             df = pd.read_csv(path)
-            df = _parse_datetimes(df)
+            df = _round_float_columns(_parse_datetimes(df))
             self.datasets[name] = df
 
     def build_and_export(self, source: str, output_dir: Path, input_root: Path) -> None:
@@ -41,6 +41,7 @@ class DataCache:
         for name, df in datasets.items():
             if df is None or df.empty:
                 continue
+            df = _round_float_columns(df)
             df.to_csv(output_dir / f"{name}.csv", index=False)
         self.load_csvs(allowed=allowed)
 
@@ -52,6 +53,14 @@ def _parse_datetimes(df: pd.DataFrame) -> pd.DataFrame:
                 df[col] = pd.to_datetime(df[col], utc=True)
             except (ValueError, TypeError):
                 continue
+    return df
+
+
+def _round_float_columns(df: pd.DataFrame, decimals: int = 3) -> pd.DataFrame:
+    float_cols = df.select_dtypes(include=["float"]).columns
+    if not float_cols.empty:
+        df = df.copy()
+        df[float_cols] = df[float_cols].round(decimals)
     return df
 
 
@@ -138,6 +147,9 @@ def _preview_columns(df: pd.DataFrame) -> list[str]:
         "transcript_id",
         "run_id",
         "created_at",
+        "target_model",
+        "batch_name",
+        "batch_model_slug",
         "seed_index",
         "seed_name",
         "behavior",
@@ -220,6 +232,8 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
                             dcc.Dropdown(id="y-axis"),
                             html.Label("Color"),
                             dcc.Dropdown(id="color-axis"),
+                            html.Label("Model filter"),
+                            dcc.Dropdown(id="model-filter", multi=True),
                             html.Label("Aggregation"),
                             dcc.Dropdown(
                                 id="agg-select",
@@ -297,24 +311,41 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         Output("y-axis", "value"),
         Output("color-axis", "options"),
         Output("color-axis", "value"),
+        Output("model-filter", "options"),
+        Output("model-filter", "value"),
         Input("dataset-select", "value"),
         Input("data-refresh", "data"),
+        State("model-filter", "value"),
     )
-    def _update_axes(dataset_name: str | None, refresh: int):  # noqa: ARG001
+    def _update_axes(
+        dataset_name: str | None,
+        refresh: int,  # noqa: ARG001
+        selected_models: list[str] | None,
+    ):
         if not dataset_name or dataset_name not in data_cache.datasets:
-            return [], None, [], None, [], None
+            return [], None, [], None, [], None, [], None
         df = data_cache.datasets[dataset_name]
         cols = df.columns.tolist()
         numeric_cols = _numeric_columns(df)
         x_default = "created_at" if "created_at" in cols else (cols[0] if cols else None)
         y_default = "durability_total" if "durability_total" in numeric_cols else (numeric_cols[0] if numeric_cols else None)
+        color_default = "target_model" if "target_model" in cols else None
+        model_options: list[dict[str, str]] = []
+        model_value: list[str] | None = None
+        if "target_model" in df.columns:
+            model_values = sorted({value for value in df["target_model"].dropna().astype(str).unique()})
+            model_options = [{"label": value, "value": value} for value in model_values]
+            if selected_models:
+                model_value = [value for value in selected_models if value in model_values] or None
         return (
             _column_options(cols),
             x_default,
             _column_options(numeric_cols),
             y_default,
             _column_options(cols),
-            None,
+            color_default,
+            model_options,
+            model_value,
         )
 
     @app.callback(
@@ -327,6 +358,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         Input("y-axis", "value"),
         Input("chart-type", "value"),
         Input("color-axis", "value"),
+        Input("model-filter", "value"),
         Input("agg-select", "value"),
         Input("filter-expression", "value"),
         Input("data-refresh", "data"),
@@ -337,6 +369,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         y_axis: str | None,
         chart_type: str,
         color_axis: str | None,
+        model_filter: list[str] | None,
         agg: str,
         filter_expr: str | None,
         refresh: int,  # noqa: ARG001
@@ -349,6 +382,8 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
             return px.scatter(title="Select an X axis"), f"Rows: {len(df)}", html.Div(), None
 
         filtered, error = _apply_filter(df, filter_expr)
+        if model_filter and "target_model" in filtered.columns:
+            filtered = filtered[filtered["target_model"].isin(model_filter)]
         fig = _build_figure(filtered, chart_type, x_axis, y_axis, color_axis, agg)
         fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
 
