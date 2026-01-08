@@ -271,6 +271,7 @@ llama-3-70b-base:
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: false
+  accepts_system_message: true
   description: Llama 3 70B base
 llama-3-8b-base:
   model_name: openrouter/meta-llama/llama-3-8b
@@ -280,6 +281,7 @@ llama-3-8b-base:
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: false
+  accepts_system_message: true
   description: Llama 3 8B base
 Qwen-3-32b:
   model_name: openrouter/qwen/qwen3-32b
@@ -289,6 +291,7 @@ Qwen-3-32b:
   max_output_tokens: 8000
   supports_vision: false
   supports_function_calling: false
+  accepts_system_message: true
   description: Qwen 3
 Qwen-3-vl-8b-instruct:
   model_name: openrouter/qwen/qwen3-vl-8b-instruct
@@ -384,4 +387,12 @@ lambda-ai-gpu:
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: true
+  accepts_system_message: true
+  supports_structured_outputs: true
+  stop_sequences:
+    - "<|eot_id|>"
+    - "<|start_header_id|>"
+    - "<|end_of_text|>"
+    - "\n"
+  stop_sequences_mode: when_constrained
   description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"

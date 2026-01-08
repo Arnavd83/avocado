@@ -966,6 +966,9 @@ class LiteLLMAgent:
         api_key: str = None,
         guided_choice=None,
         guided_regex=None,
+        stop_sequences=None,
+        stop_sequences_mode: str = "when_constrained",
+        supports_structured_outputs: bool = False,
         max_tokens_override=None,
         temperature_override=None
     ):
@@ -978,6 +981,9 @@ class LiteLLMAgent:
         self.api_key = api_key
         self.guided_choice = guided_choice
         self.guided_regex = guided_regex
+        self.stop_sequences = stop_sequences
+        self.stop_sequences_mode = stop_sequences_mode
+        self.supports_structured_outputs = supports_structured_outputs
         self.max_tokens_override = max_tokens_override
         self.temperature_override = temperature_override
 
@@ -1024,7 +1030,6 @@ class LiteLLMAgent:
                     #     )
 
                     try:
-                        # No stop sequences - rely on max_tokens and post-processing
                         request_kwargs = {
                             "model": self.model,
                             "messages": message,
@@ -1036,10 +1041,21 @@ class LiteLLMAgent:
                             request_kwargs["api_base"] = self.api_base
                         if self.api_key:
                             request_kwargs["api_key"] = self.api_key
-                        if self.guided_choice is not None:
-                            request_kwargs["guided_choice"] = self.guided_choice
-                        elif self.guided_regex is not None:
-                            request_kwargs["guided_regex"] = self.guided_regex
+                        structured_outputs = None
+                        if self.supports_structured_outputs:
+                            if self.guided_choice is not None:
+                                structured_outputs = {"choice": self.guided_choice}
+                            elif self.guided_regex is not None:
+                                structured_outputs = {"regex": self.guided_regex}
+                        if structured_outputs is not None:
+                            request_kwargs.setdefault("extra_body", {})
+                            request_kwargs["extra_body"]["structured_outputs"] = structured_outputs
+                        if self.stop_sequences:
+                            use_stops = self.stop_sequences_mode == "always"
+                            if self.stop_sequences_mode == "when_constrained":
+                                use_stops = self.guided_choice is not None or self.guided_regex is not None
+                            if use_stops:
+                                request_kwargs["stop"] = self.stop_sequences
                         
                         completion_res = await litellm_acompletion(**request_kwargs)
                     except asyncio.TimeoutError:

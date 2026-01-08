@@ -128,6 +128,9 @@ class VLLMClient:
         model: str | None = None,
         max_tokens: int = 10,
         temperature: float = 0.0,
+        stop: list[str] | None = None,
+        structured_outputs: dict | None = None,
+        extra_body: dict | None = None,
     ) -> dict:
         """Make chat completion request.
 
@@ -136,6 +139,9 @@ class VLLMClient:
             model: Model ID (uses first available if not specified).
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
+            stop: Optional stop sequences for the completion.
+            structured_outputs: Optional vLLM structured outputs payload.
+            extra_body: Optional extra_body payload for the vLLM server.
 
         Returns:
             Completion response dict.
@@ -155,6 +161,12 @@ class VLLMClient:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
+        if stop:
+            payload["stop"] = stop
+        if extra_body or structured_outputs:
+            payload["extra_body"] = dict(extra_body or {})
+        if structured_outputs:
+            payload["extra_body"]["structured_outputs"] = structured_outputs
 
         response = self._request("POST", "/v1/chat/completions", json=payload)
 

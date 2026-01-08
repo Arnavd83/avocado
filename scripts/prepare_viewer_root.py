@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a viewer root with a single symlink to the latest batch."""
+"""Prepare a viewer root with links for every batch under the source root."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ import sys
 from pathlib import Path
 
 
-def _find_latest_batch(root: Path, viewer_root: Path) -> Path | None:
+def _find_batch_dirs(root: Path, viewer_root: Path) -> list[Path]:
     if root.exists() and root.is_dir() and root.name.startswith("petri_batch_"):
-        return root
+        return [root]
     candidates: list[Path] = []
     if root.exists():
         for path in root.rglob("petri_batch_*"):
@@ -24,9 +24,10 @@ def _find_latest_batch(root: Path, viewer_root: Path) -> Path | None:
                 except ValueError:
                     pass
                 candidates.append(path)
-    if not candidates:
-        return None
-    return max(candidates, key=lambda path: path.stat().st_mtime)
+    unique: dict[Path, Path] = {}
+    for path in sorted(candidates, key=lambda item: item.name):
+        unique[path.resolve()] = path
+    return list(unique.values())
 
 
 def _clear_viewer_root(viewer_root: Path) -> None:
@@ -119,41 +120,42 @@ def main() -> int:
     source_root = Path(args.source_root)
     viewer_root = Path(args.viewer_root)
 
-    latest = _find_latest_batch(source_root, viewer_root)
-    if latest is None:
+    batch_dirs = _find_batch_dirs(source_root, viewer_root)
+    if not batch_dirs:
         print(f"No petri_batch_* folders found under {source_root}", file=sys.stderr)
         return 1
 
     viewer_root.mkdir(parents=True, exist_ok=True)
     _clear_viewer_root(viewer_root)
 
-    batch_name = latest.name
-    slug = _parse_batch_model_slug(batch_name)
-    if not slug:
-        slug = _model_slug_from_manifest(latest) or _model_slug_from_transcripts(latest)
-    if slug and not _parse_batch_model_slug(batch_name):
-        viewer_batch_name = f"{batch_name}_{slug}"
-    else:
-        viewer_batch_name = batch_name
+    for batch_dir in batch_dirs:
+        batch_name = batch_dir.name
+        slug = _parse_batch_model_slug(batch_name)
+        if not slug:
+            slug = _model_slug_from_manifest(batch_dir) or _model_slug_from_transcripts(batch_dir)
+        if slug and not _parse_batch_model_slug(batch_name):
+            viewer_batch_name = f"{batch_name}_{slug}"
+        else:
+            viewer_batch_name = batch_name
 
-    viewer_batch_dir = viewer_root / viewer_batch_name
-    viewer_batch_dir.mkdir(parents=True, exist_ok=True)
+        viewer_batch_dir = viewer_root / viewer_batch_name
+        viewer_batch_dir.mkdir(parents=True, exist_ok=True)
 
-    for seed_dir in sorted(latest.iterdir()):
-        if not seed_dir.is_dir() or not seed_dir.name.startswith("seed_"):
-            continue
-        dest_dir = viewer_batch_dir / seed_dir.name
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        for item in seed_dir.iterdir():
-            if item.is_dir():
+        for seed_dir in sorted(batch_dir.iterdir()):
+            if not seed_dir.is_dir() or not seed_dir.name.startswith("seed_"):
                 continue
-            dest_path = dest_dir / item.name
-            if dest_path.exists():
-                continue
-            try:
-                os.link(item, dest_path)
-            except OSError:
-                shutil.copy2(item, dest_path)
+            dest_dir = viewer_batch_dir / seed_dir.name
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            for item in seed_dir.iterdir():
+                if item.is_dir():
+                    continue
+                dest_path = dest_dir / item.name
+                if dest_path.exists():
+                    continue
+                try:
+                    os.link(item, dest_path)
+                except OSError:
+                    shutil.copy2(item, dest_path)
     return 0
 
 

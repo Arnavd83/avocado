@@ -45,9 +45,9 @@ async def test_lambda_integration():
         temperature_override = 0.0
 
     if guided_choice is not None:
-        constraint_label = f"guided_choice={guided_choice}"
+        constraint_label = f"structured_choice={guided_choice}"
     elif guided_regex is not None:
-        constraint_label = f"guided_regex={guided_regex}"
+        constraint_label = f"structured_regex={guided_regex}"
     else:
         constraint_label = "no constraints"
 
@@ -67,7 +67,7 @@ async def test_lambda_integration():
         print(f"✓ Agent created successfully: {type(agent).__name__}")
         print(f"  Model: {agent.model}")
         if guided_choice is not None or guided_regex is not None:
-            print(f"  Constrained decoding: {constraint_label}")
+            print(f"  Structured outputs: {constraint_label}")
             print(f"  Overrides: max_tokens={max_tokens_override}, temperature={temperature_override}")
     except Exception as e:
         print(f"✗ Failed to create agent: {e}")

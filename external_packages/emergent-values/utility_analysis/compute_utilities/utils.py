@@ -96,6 +96,9 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     guided_regex = kwargs.get("guided_regex")
     max_tokens_override = kwargs.get("max_tokens_override")
     temperature_override = kwargs.get("temperature_override")
+    stop_sequences_override = kwargs.get("stop_sequences")
+    stop_sequences_mode_override = kwargs.get("stop_sequences_mode")
+    supports_structured_outputs_override = kwargs.get("supports_structured_outputs")
     # Load model config
     models_config_path = os.environ.get("MODELS_CONFIG_PATH")
     if models_config_path:
@@ -116,6 +119,20 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_type = model_config['model_type']
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
+    stop_sequences = stop_sequences_override
+    if stop_sequences is None:
+        stop_sequences = model_config.get('stop_sequences')
+    stop_sequences_mode = stop_sequences_mode_override
+    if stop_sequences_mode is None:
+        stop_sequences_mode = model_config.get('stop_sequences_mode', "when_constrained")
+    supports_structured_outputs = supports_structured_outputs_override
+    if supports_structured_outputs is None:
+        supports_structured_outputs = model_config.get('supports_structured_outputs', False)
+    if (guided_choice is not None or guided_regex is not None) and not supports_structured_outputs:
+        print(
+            "[CREATE_AGENT] Warning: guided_choice/guided_regex provided but supports_structured_outputs is false; "
+            "constraints will not be enforced by the request layer."
+        )
     
     # Check for custom base_url (for custom endpoints like Lambda AI)
     base_url = model_config.get('base_url', None)
@@ -153,6 +170,9 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             base_timeout=kwargs.get('base_timeout', 5),
             guided_choice=guided_choice,
             guided_regex=guided_regex,
+            stop_sequences=stop_sequences,
+            stop_sequences_mode=stop_sequences_mode,
+            supports_structured_outputs=supports_structured_outputs,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
         )
@@ -185,6 +205,9 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
                 api_key=api_key,
                 guided_choice=guided_choice,
                 guided_regex=guided_regex,
+                stop_sequences=stop_sequences,
+                stop_sequences_mode=stop_sequences_mode,
+                supports_structured_outputs=supports_structured_outputs,
                 max_tokens_override=max_tokens_override,
                 temperature_override=temperature_override,
             )
@@ -199,6 +222,9 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             base_timeout=kwargs.get('base_timeout', 5),
             guided_choice=guided_choice,
             guided_regex=guided_regex,
+            stop_sequences=stop_sequences,
+            stop_sequences_mode=stop_sequences_mode,
+            supports_structured_outputs=supports_structured_outputs,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
         )

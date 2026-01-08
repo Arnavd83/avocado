@@ -3,8 +3,8 @@ default:
   temperature: 0.5  # Balanced: consistent but with variety (was 0.3)
   concurrency_limit: 5
   base_timeout: 5
-  guided_choice: null  # Optional constrained decoding choices, e.g., ["A", "B"]
-  guided_regex: null   # Optional constrained decoding regex, e.g., " ?(A|B)"
+  guided_choice: null  # Optional constrained decoding choices, e.g., ["A", "B"] (mapped to vLLM structured outputs)
+  guided_regex: null   # Optional constrained decoding regex, e.g., " ?(A|B)" (mapped to vLLM structured outputs)
   max_tokens_override: null  # Optional per-run override (use with constraints)
   temperature_override: null  # Optional per-run override (use with constraints)
 
@@ -16,8 +16,4 @@ default_with_reasoning:
   guided_choice: null
   guided_regex: null
   max_tokens_override: null
-<<<<<<< Updated upstream
   temperature_override: null
-=======
-  temperature_override: null
->>>>>>> Stashed changes
