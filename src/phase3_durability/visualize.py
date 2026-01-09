@@ -13,12 +13,10 @@ from .dataset import build_datasets
 
 
 PRESETS = (
-    "durability_by_category",
+    "durability_by_behavior",
     "durability_distribution",
+    "severity_distribution",
     "composite_over_time",
-    "category_heatmap",
-    "nlp_feature_scatter",
-    "role_feature_compare",
 )
 
 
@@ -26,39 +24,31 @@ def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _category_columns(df: pd.DataFrame) -> list[str]:
-    return [col for col in df.columns if col.startswith("durability_") and not col.endswith("_text") and not col.endswith("_dim")]
-
-
-def plot_durability_by_category(df: pd.DataFrame, output: Path) -> None:
-    cols = _category_columns(df)
-    if not cols:
+def plot_durability_by_behavior(df: pd.DataFrame, output: Path) -> None:
+    if "behavior" not in df.columns or "durability_total" not in df.columns:
         return
-    long_df = df.melt(value_vars=cols, var_name="category", value_name="durability")
-    long_df["category"] = long_df["category"].str.replace("durability_", "", regex=False)
-
     plt.figure(figsize=(10, 6))
-    sns.boxplot(data=long_df, x="category", y="durability")
+    sns.boxplot(data=df, x="behavior", y="durability_total")
     plt.xticks(rotation=30, ha="right")
-    plt.title("Durability by Category")
+    plt.title("Durability by Behavior")
     plt.tight_layout()
     plt.savefig(output)
     plt.close()
 
 
 def plot_durability_distribution(df: pd.DataFrame, output: Path) -> None:
-    if "composite_durability" not in df.columns:
+    if "durability_total" not in df.columns:
         return
     plt.figure(figsize=(8, 5))
-    sns.histplot(df["composite_durability"].dropna(), bins=20, kde=True)
-    plt.title("Composite Durability Distribution")
+    sns.histplot(df["durability_total"].dropna(), bins=20, kde=True)
+    plt.title("Durability Distribution")
     plt.tight_layout()
     plt.savefig(output)
     plt.close()
 
 
 def plot_composite_over_time(df: pd.DataFrame, output: Path) -> None:
-    if "created_at" not in df.columns or "composite_durability" not in df.columns:
+    if "created_at" not in df.columns or "durability_total" not in df.columns:
         return
     temp = df.dropna(subset=["created_at"]).copy()
     if temp.empty:
@@ -68,48 +58,20 @@ def plot_composite_over_time(df: pd.DataFrame, output: Path) -> None:
     if temp.empty:
         return
     plt.figure(figsize=(10, 5))
-    plt.plot(temp["created_at"], temp["composite_durability"], marker="o", linewidth=1)
-    plt.title("Composite Durability Over Time")
+    plt.plot(temp["created_at"], temp["durability_total"], marker="o", linewidth=1)
+    plt.title("Durability Over Time")
     plt.xticks(rotation=30, ha="right")
     plt.tight_layout()
     plt.savefig(output)
     plt.close()
 
 
-def plot_category_heatmap(df: pd.DataFrame, output: Path) -> None:
-    cols = _category_columns(df)
-    if not cols:
+def plot_severity_distribution(df: pd.DataFrame, output: Path) -> None:
+    if "severity_total" not in df.columns:
         return
-    label_col = "run_id" if "run_id" in df.columns else "transcript_id"
-    temp = df[[label_col] + cols].copy()
-    if temp.empty:
-        return
-    temp = temp.set_index(label_col)
-    plt.figure(figsize=(12, max(4, len(temp) * 0.25)))
-    sns.heatmap(temp, cmap="viridis", cbar_kws={"label": "Durability"})
-    plt.title("Durability Heatmap")
-    plt.tight_layout()
-    plt.savefig(output)
-    plt.close()
-
-
-def plot_nlp_feature_scatter(df: pd.DataFrame, output: Path, x_feature: str, y_feature: str) -> None:
-    if x_feature not in df.columns or y_feature not in df.columns:
-        return
-    plt.figure(figsize=(7, 5))
-    sns.scatterplot(data=df, x=x_feature, y=y_feature)
-    plt.title(f"{y_feature} vs {x_feature}")
-    plt.tight_layout()
-    plt.savefig(output)
-    plt.close()
-
-
-def plot_role_feature_compare(message_df: pd.DataFrame, output: Path, feature: str) -> None:
-    if message_df.empty or feature not in message_df.columns:
-        return
-    plt.figure(figsize=(7, 5))
-    sns.boxplot(data=message_df, x="role", y=feature)
-    plt.title(f"{feature} by Role")
+    plt.figure(figsize=(8, 5))
+    sns.histplot(df["severity_total"].dropna(), bins=20, kde=True)
+    plt.title("Severity Distribution")
     plt.tight_layout()
     plt.savefig(output)
     plt.close()
@@ -132,15 +94,12 @@ def print_summary(df: pd.DataFrame) -> None:
     cols = [id_col]
     if "created_at" in df.columns:
         cols.append("created_at")
-    if "overall_durability" in df.columns:
-        cols.append("overall_durability")
-    elif "composite_durability" in df.columns:
-        cols.append("composite_durability")
-    if "composite_risk" in df.columns:
-        cols.append("composite_risk")
-
-    category_cols = _category_columns(df)
-    cols.extend(category_cols)
+    if "behavior" in df.columns:
+        cols.append("behavior")
+    if "durability_total" in df.columns:
+        cols.append("durability_total")
+    if "severity_total" in df.columns:
+        cols.append("severity_total")
 
     summary = df[cols].copy()
     if "created_at" in summary.columns:
@@ -158,9 +117,6 @@ def main() -> None:
     parser.add_argument("--preset", action="append", choices=PRESETS + ("all",), default=None)
     parser.add_argument("--export", action="store_true", help="Export CSV datasets")
     parser.add_argument("--no-summary", action="store_true", help="Disable summary table output")
-    parser.add_argument("--scatter-x", default="nlp_target_numeric_density")
-    parser.add_argument("--scatter-y", default="composite_durability")
-    parser.add_argument("--role-feature", default="refusal_ratio")
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -176,36 +132,22 @@ def main() -> None:
     else:
         df = datasets.get(args.source, pd.DataFrame())
 
-    message_df = datasets.get("messages", pd.DataFrame())
     if not args.no_summary:
         print_summary(df)
 
-    presets = args.preset or ["durability_by_category", "durability_distribution"]
+    presets = args.preset or ["durability_by_behavior", "durability_distribution"]
     if "all" in presets:
         presets = list(PRESETS)
 
     for preset in presets:
-        if preset == "durability_by_category":
-            plot_durability_by_category(df, output_dir / f"durability_by_category.{args.format}")
+        if preset == "durability_by_behavior":
+            plot_durability_by_behavior(df, output_dir / f"durability_by_behavior.{args.format}")
         elif preset == "durability_distribution":
             plot_durability_distribution(df, output_dir / f"durability_distribution.{args.format}")
+        elif preset == "severity_distribution":
+            plot_severity_distribution(df, output_dir / f"severity_distribution.{args.format}")
         elif preset == "composite_over_time":
             plot_composite_over_time(df, output_dir / f"composite_over_time.{args.format}")
-        elif preset == "category_heatmap":
-            plot_category_heatmap(df, output_dir / f"category_heatmap.{args.format}")
-        elif preset == "nlp_feature_scatter":
-            plot_nlp_feature_scatter(
-                df,
-                output_dir / f"nlp_feature_scatter.{args.format}",
-                args.scatter_x,
-                args.scatter_y,
-            )
-        elif preset == "role_feature_compare":
-            plot_role_feature_compare(
-                message_df,
-                output_dir / f"role_feature_compare.{args.format}",
-                args.role_feature,
-            )
 
 
 if __name__ == "__main__":

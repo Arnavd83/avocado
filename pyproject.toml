@@ -26,6 +26,7 @@ dependencies = [
     "huggingface-hub>=0.26.2",
     "inflect>=7.5.0",     # fixed duplicate (was 7.3.1 and 7.5.0)
     "litellm>=1.61.5",
+    "lifelines>=0.29.0",
     "networkx>=3.3",
     "numpy>=2.2.3",
     "pandas>=2.2.3",

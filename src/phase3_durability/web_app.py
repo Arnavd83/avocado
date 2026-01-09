@@ -19,24 +19,31 @@ class DataCache:
     data_dir: Path
     datasets: dict[str, pd.DataFrame]
 
-    def load_csvs(self) -> None:
+    def load_csvs(self, allowed: set[str] | None = None) -> None:
         self.datasets = {}
         if not self.data_dir.exists():
             return
         for path in sorted(self.data_dir.glob("*.csv")):
             name = path.stem
+            if allowed is not None and name not in allowed:
+                continue
             df = pd.read_csv(path)
-            df = _parse_datetimes(df)
+            df = _round_float_columns(_parse_datetimes(df))
             self.datasets[name] = df
 
-    def build_and_export(self, source: str, output_dir: Path) -> None:
-        datasets = build_datasets(Path("."), source=source)
+    def build_and_export(self, source: str, output_dir: Path, input_root: Path) -> None:
+        datasets = build_datasets(input_root, source=source)
         output_dir.mkdir(parents=True, exist_ok=True)
+        allowed = set(datasets.keys())
+        for path in output_dir.glob("*.csv"):
+            if path.stem in allowed:
+                path.unlink()
         for name, df in datasets.items():
             if df is None or df.empty:
                 continue
+            df = _round_float_columns(df)
             df.to_csv(output_dir / f"{name}.csv", index=False)
-        self.load_csvs()
+        self.load_csvs(allowed=allowed)
 
 
 def _parse_datetimes(df: pd.DataFrame) -> pd.DataFrame:
@@ -46,6 +53,14 @@ def _parse_datetimes(df: pd.DataFrame) -> pd.DataFrame:
                 df[col] = pd.to_datetime(df[col], utc=True)
             except (ValueError, TypeError):
                 continue
+    return df
+
+
+def _round_float_columns(df: pd.DataFrame, decimals: int = 3) -> pd.DataFrame:
+    float_cols = df.select_dtypes(include=["float"]).columns
+    if not float_cols.empty:
+        df = df.copy()
+        df[float_cols] = df[float_cols].round(decimals)
     return df
 
 
@@ -109,19 +124,22 @@ def _build_figure(df: pd.DataFrame, chart_type: str, x: str, y: str | None, colo
         df = _aggregate(df, x, y, color, agg)
 
     if chart_type == "scatter":
-        return px.scatter(df, x=x, y=y, color=color)
-    if chart_type == "line":
-        return px.line(df, x=x, y=y, color=color, markers=True)
-    if chart_type == "bar":
-        return px.bar(df, x=x, y=y, color=color, barmode="group")
-    if chart_type == "box":
-        return px.box(df, x=x, y=y, color=color)
-    if chart_type == "violin":
-        return px.violin(df, x=x, y=y, color=color, box=True, points="outliers")
-    if chart_type == "heatmap":
-        return px.density_heatmap(df, x=x, y=y)
+        fig = px.scatter(df, x=x, y=y, color=color)
+    elif chart_type == "line":
+        fig = px.line(df, x=x, y=y, color=color, markers=True)
+    elif chart_type == "bar":
+        fig = px.bar(df, x=x, y=y, color=color, barmode="group")
+    elif chart_type == "box":
+        fig = px.box(df, x=x, y=y, color=color)
+    elif chart_type == "violin":
+        fig = px.violin(df, x=x, y=y, color=color, box=True, points="outliers")
+    elif chart_type == "heatmap":
+        fig = px.density_heatmap(df, x=x, y=y)
+    else:
+        fig = px.scatter(df, x=x, y=y, color=color)
 
-    return px.scatter(df, x=x, y=y, color=color)
+    fig.update_layout(height=520, autosize=False)
+    return fig
 
 
 def _preview_columns(df: pd.DataFrame) -> list[str]:
@@ -129,14 +147,17 @@ def _preview_columns(df: pd.DataFrame) -> list[str]:
         "transcript_id",
         "run_id",
         "created_at",
-        "overall_durability",
-        "composite_durability",
-        "composite_risk",
-        "durability_illegal_activities",
-        "durability_deception_manipulation",
-        "durability_harassment",
-        "durability_privacy_violations",
-        "durability_malware_cyberweapons",
+        "target_model",
+        "batch_name",
+        "batch_model_slug",
+        "seed_index",
+        "seed_name",
+        "behavior",
+        "strategy",
+        "durability_total",
+        "severity_total",
+        "severity_universal",
+        "severity_behavior_specific",
     ]
     columns = [col for col in preferred if col in df.columns]
     if columns:
@@ -161,7 +182,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
                         className="title-block",
                         children=[
                             html.H1("Durability Lab"),
-                            html.P("Interactive explorer for durability + NLP metrics"),
+                            html.P("Interactive explorer for durability + severity metrics"),
                         ],
                     ),
                     html.Div(
@@ -211,6 +232,8 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
                             dcc.Dropdown(id="y-axis"),
                             html.Label("Color"),
                             dcc.Dropdown(id="color-axis"),
+                            html.Label("Model filter"),
+                            dcc.Dropdown(id="model-filter", multi=True),
                             html.Label("Aggregation"),
                             dcc.Dropdown(
                                 id="agg-select",
@@ -227,7 +250,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
                             html.Label("Filter (pandas query)", className="label-muted"),
                             dcc.Textarea(
                                 id="filter-expression",
-                                placeholder="e.g. composite_durability < 90 and created_at >= '2025-12-24'",
+                                placeholder="e.g. durability_total < 0.7 and created_at >= '2025-12-24'",
                                 className="filter-box",
                             ),
                             html.Div(id="filter-error", className="error-text"),
@@ -240,7 +263,12 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
                                 className="card",
                                 children=[
                                     html.H3("Chart"),
-                                    dcc.Graph(id="main-chart", config={"displayModeBar": True}),
+                                    dcc.Graph(
+                                        id="main-chart",
+                                        className="fixed-graph",
+                                        config={"displayModeBar": True, "responsive": False},
+                                        style={"height": "520px"},
+                                    ),
                                 ],
                             ),
                             html.Div(
@@ -283,24 +311,41 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         Output("y-axis", "value"),
         Output("color-axis", "options"),
         Output("color-axis", "value"),
+        Output("model-filter", "options"),
+        Output("model-filter", "value"),
         Input("dataset-select", "value"),
         Input("data-refresh", "data"),
+        State("model-filter", "value"),
     )
-    def _update_axes(dataset_name: str | None, refresh: int):  # noqa: ARG001
+    def _update_axes(
+        dataset_name: str | None,
+        refresh: int,  # noqa: ARG001
+        selected_models: list[str] | None,
+    ):
         if not dataset_name or dataset_name not in data_cache.datasets:
-            return [], None, [], None, [], None
+            return [], None, [], None, [], None, [], None
         df = data_cache.datasets[dataset_name]
         cols = df.columns.tolist()
         numeric_cols = _numeric_columns(df)
         x_default = "created_at" if "created_at" in cols else (cols[0] if cols else None)
-        y_default = "composite_durability" if "composite_durability" in numeric_cols else (numeric_cols[0] if numeric_cols else None)
+        y_default = "durability_total" if "durability_total" in numeric_cols else (numeric_cols[0] if numeric_cols else None)
+        color_default = "target_model" if "target_model" in cols else None
+        model_options: list[dict[str, str]] = []
+        model_value: list[str] | None = None
+        if "target_model" in df.columns:
+            model_values = sorted({value for value in df["target_model"].dropna().astype(str).unique()})
+            model_options = [{"label": value, "value": value} for value in model_values]
+            if selected_models:
+                model_value = [value for value in selected_models if value in model_values] or None
         return (
             _column_options(cols),
             x_default,
             _column_options(numeric_cols),
             y_default,
             _column_options(cols),
-            None,
+            color_default,
+            model_options,
+            model_value,
         )
 
     @app.callback(
@@ -313,6 +358,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         Input("y-axis", "value"),
         Input("chart-type", "value"),
         Input("color-axis", "value"),
+        Input("model-filter", "value"),
         Input("agg-select", "value"),
         Input("filter-expression", "value"),
         Input("data-refresh", "data"),
@@ -323,6 +369,7 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
         y_axis: str | None,
         chart_type: str,
         color_axis: str | None,
+        model_filter: list[str] | None,
         agg: str,
         filter_expr: str | None,
         refresh: int,  # noqa: ARG001
@@ -335,6 +382,8 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
             return px.scatter(title="Select an X axis"), f"Rows: {len(df)}", html.Div(), None
 
         filtered, error = _apply_filter(df, filter_expr)
+        if model_filter and "target_model" in filtered.columns:
+            filtered = filtered[filtered["target_model"].isin(model_filter)]
         fig = _build_figure(filtered, chart_type, x_axis, y_axis, color_axis, agg)
         fig.update_layout(margin=dict(l=20, r=20, t=40, b=20))
 
@@ -359,24 +408,41 @@ def create_app(data_cache: DataCache, default_dataset: str | None) -> Dash:
     return app
 
 
+def _datasets_for_source(source: str) -> set[str]:
+    if source == "eval":
+        return {"eval"}
+    if source == "both":
+        return {"eval", "transcript", "combined"}
+    return {"transcript"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Durability Lab web UI")
     parser.add_argument("--data-dir", default="data/scratch/plots", help="Directory with exported CSVs")
     parser.add_argument("--build", action="store_true", help="Build CSVs from scratch before launch")
     parser.add_argument("--source", choices=["transcript", "eval", "both"], default="transcript")
+    parser.add_argument("--input-root", default="data/scratch", help="Directory with Petri outputs")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8050)
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
+    input_root = Path(args.input_root)
     cache = DataCache(data_dir=data_dir, datasets={})
+    allowed = _datasets_for_source(args.source)
 
     if args.build:
-        cache.build_and_export(args.source, data_dir)
+        cache.build_and_export(args.source, data_dir, input_root=input_root)
     else:
-        cache.load_csvs()
+        cache.load_csvs(allowed=allowed)
 
-    default_dataset = next(iter(cache.datasets.keys()), None)
+    default_dataset = None
+    for name in ("transcript", "eval", "combined"):
+        if name in cache.datasets:
+            default_dataset = name
+            break
+    if default_dataset is None:
+        default_dataset = next(iter(cache.datasets.keys()), None)
     app = create_app(cache, default_dataset)
     app.run(debug=False, host=args.host, port=args.port)
 
