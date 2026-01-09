@@ -54,15 +54,16 @@ fi
 
 # Configure docker socket permissions to be accessible without group membership
 # This allows docker commands to work immediately without re-login
-# Note: We use ExecStartPost on docker.service because dockerd creates the socket
-# directly (not via socket activation), so docker.socket overrides don't apply
+# We override docker.socket's SocketMode to 0666 so the socket is created with
+# world-readable/writable permissions, eliminating the need for docker group membership
 echo "Configuring docker socket permissions..."
-sudo mkdir -p /etc/systemd/system/docker.service.d/
-sudo tee /etc/systemd/system/docker.service.d/socket-permissions.conf > /dev/null << 'EOF'
-[Service]
-ExecStartPost=/bin/chmod 666 /var/run/docker.sock
+sudo mkdir -p /etc/systemd/system/docker.socket.d/
+sudo tee /etc/systemd/system/docker.socket.d/socket-permissions.conf > /dev/null << 'EOF'
+[Socket]
+SocketMode=0666
 EOF
 sudo systemctl daemon-reload
+sudo systemctl restart docker.socket
 sudo systemctl restart docker
 echo "Docker socket configured for immediate access"
 

@@ -7,6 +7,7 @@
 
 # IDE/Editor settings
 .claude/
+.cursor/
 
 # Spec plans
 spec/
