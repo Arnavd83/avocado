@@ -100,6 +100,21 @@ audit:
 		-T special_instructions=$(SEED_PROMPT_FILE) \
 		-T transcript_save_dir=$(OUTPUT_DIR)
 
+# Run petri audit with stop sequences from models.yaml (Python wrapper)
+.PHONY: audit-with-stops
+audit-with-stops:
+	@echo "Running audit with stop sequences from config/models.yaml..."
+	@uv run python scripts/run_audit.py \
+		--auditor $(AUDITOR_MODEL_ID) \
+		--target $(TARGET_MODEL_ID) \
+		--judge $(JUDGE_MODEL_ID) \
+		--max-turns $(MAX_TURNS) \
+		--special-instructions $(SEED_PROMPT_FILE) \
+		--transcript-save-dir $(OUTPUT_DIR) \
+		--log-dir data/scratch/test_petri \
+		--max-connections 10 \
+		--max-retries 5
+
 # Run with custom parameters
 .PHONY: audit-custom
 audit-custom:

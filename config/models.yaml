@@ -393,6 +393,4 @@ lambda-ai-gpu:
     - "<|eot_id|>"
     - "<|start_header_id|>"
     - "<|end_of_text|>"
-    - "\n"
-  stop_sequences_mode: when_constrained
   description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"

@@ -47,6 +47,14 @@ def main():
                         f"# Warning: {model.api_key_env} not found in environment",
                         file=sys.stderr
                     )
+            
+            # Export stop sequences for Inspect AI (if defined in model config)
+            # Inspect AI will pass these in the API request to vLLM
+            if hasattr(model, 'stop_sequences') and model.stop_sequences:
+                # Convert list to JSON array format for environment variable
+                import json
+                stop_sequences_json = json.dumps(model.stop_sequences)
+                print(f"export INSPECT_STOP_SEQUENCES='{stop_sequences_json}'")
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from functools import wraps
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional, Any
 import asyncio
 from openai import AsyncOpenAI
 from tqdm.asyncio import tqdm_asyncio
@@ -997,8 +997,10 @@ class LiteLLMAgent:
         self,
         messages: List[List[Dict]],
         verbose: bool = True,
+        return_logprobs: bool = False,
+        top_logprobs: Optional[int] = None,
         **kwargs
-    ) -> List[str]:
+    ) -> List[Union[str, Dict[str, Any]]]:
         """
         Returns a list of LLM responses, in order.
         Uses a semaphore to limit concurrency, and tqdm_asyncio for progress.
@@ -1057,6 +1059,11 @@ class LiteLLMAgent:
                             if use_stops:
                                 request_kwargs["stop"] = self.stop_sequences
                         
+                        if return_logprobs:
+                            request_kwargs["logprobs"] = True
+                            if top_logprobs is not None:
+                                request_kwargs["top_logprobs"] = top_logprobs
+
                         completion_res = await litellm_acompletion(**request_kwargs)
                     except asyncio.TimeoutError:
                         counts["timeouts"] += 1
@@ -1100,7 +1107,15 @@ class LiteLLMAgent:
                         continue  # next attempt
 
                     # Success: parse the response
-                    response = completion_res.choices[0].message.content.strip()
+                    content = completion_res.choices[0].message.content
+                    response_text = content.strip() if isinstance(content, str) else ""
+                    if return_logprobs:
+                        response = {
+                            "text": response_text,
+                            "logprobs": getattr(completion_res.choices[0], "logprobs", None),
+                        }
+                    else:
+                        response = response_text
                     break  # done with retries
 
             results[message_idx] = response

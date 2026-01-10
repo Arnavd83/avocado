@@ -30,6 +30,30 @@ def _find_batch_dirs(root: Path, viewer_root: Path) -> list[Path]:
     return list(unique.values())
 
 
+def _has_batch_ancestor(path: Path) -> bool:
+    for part in path.resolve().parts:
+        if part.startswith("petri_batch_"):
+            return True
+    return False
+
+
+def _find_single_run_dirs(root: Path, viewer_root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    candidates: dict[Path, Path] = {}
+    for transcript_path in root.rglob("transcript_*.json"):
+        parent = transcript_path.parent
+        try:
+            if parent.resolve().is_relative_to(viewer_root.resolve()):
+                continue
+        except ValueError:
+            pass
+        if _has_batch_ancestor(parent):
+            continue
+        candidates[parent.resolve()] = parent
+    return list(candidates.values())
+
+
 def _clear_viewer_root(viewer_root: Path) -> None:
     if not viewer_root.exists():
         return
@@ -72,6 +96,18 @@ def _model_slug(model_name: str) -> str | None:
     return slug or None
 
 
+def _slugify(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = []
+    for char in text.lower():
+        cleaned.append(char if char.isalnum() else "_")
+    slug = "".join(cleaned).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug
+
+
 def _model_slug_from_manifest(batch_dir: Path) -> str | None:
     manifest_path = batch_dir / "manifest.json"
     if not manifest_path.exists():
@@ -111,6 +147,32 @@ def _model_slug_from_transcripts(batch_dir: Path) -> str | None:
     return None
 
 
+def _single_run_label(run_dir: Path, source_root: Path) -> str:
+    try:
+        relative = run_dir.resolve().relative_to(source_root.resolve())
+        base = "_".join(relative.parts)
+    except ValueError:
+        base = run_dir.name
+    slug = _slugify(base) or _slugify(run_dir.name) or "run"
+    model_slug = _model_slug_from_transcripts(run_dir)
+    if model_slug:
+        slug = f"{slug}_{model_slug}"
+    return f"single_{slug}"
+
+
+def _link_files(src_dir: Path, dest_dir: Path) -> None:
+    for item in src_dir.iterdir():
+        if item.is_dir():
+            continue
+        dest_path = dest_dir / item.name
+        if dest_path.exists():
+            continue
+        try:
+            os.link(item, dest_path)
+        except OSError:
+            shutil.copy2(item, dest_path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Prepare transcript viewer root.")
     parser.add_argument("--source-root", default="data/scratch", help="Root directory to search for batches")
@@ -121,8 +183,9 @@ def main() -> int:
     viewer_root = Path(args.viewer_root)
 
     batch_dirs = _find_batch_dirs(source_root, viewer_root)
-    if not batch_dirs:
-        print(f"No petri_batch_* folders found under {source_root}", file=sys.stderr)
+    single_run_dirs = _find_single_run_dirs(source_root, viewer_root)
+    if not batch_dirs and not single_run_dirs:
+        print(f"No transcripts found under {source_root}", file=sys.stderr)
         return 1
 
     viewer_root.mkdir(parents=True, exist_ok=True)
@@ -146,16 +209,15 @@ def main() -> int:
                 continue
             dest_dir = viewer_batch_dir / seed_dir.name
             dest_dir.mkdir(parents=True, exist_ok=True)
-            for item in seed_dir.iterdir():
-                if item.is_dir():
-                    continue
-                dest_path = dest_dir / item.name
-                if dest_path.exists():
-                    continue
-                try:
-                    os.link(item, dest_path)
-                except OSError:
-                    shutil.copy2(item, dest_path)
+            _link_files(seed_dir, dest_dir)
+
+    for run_dir in single_run_dirs:
+        viewer_run_name = _single_run_label(run_dir, source_root)
+        viewer_run_dir = viewer_root / viewer_run_name
+        viewer_run_dir.mkdir(parents=True, exist_ok=True)
+        seed_dir = viewer_run_dir / "seed_00_single"
+        seed_dir.mkdir(parents=True, exist_ok=True)
+        _link_files(run_dir, seed_dir)
     return 0
 
 
