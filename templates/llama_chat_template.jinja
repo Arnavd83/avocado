@@ -1,0 +1,43 @@
+{# templates/llama31_base_minimal.jinja #}
+{{- bos_token -}}
+{%- set ns = namespace(system_text="") -%}
+
+{# Pull first system message (if present) #}
+{%- if messages and messages[0]["role"] == "system" -%}
+  {%- if messages[0]["content"] is string -%}
+    {%- set ns.system_text = messages[0]["content"] -%}
+  {%- else -%}
+    {%- set ns.system_text = messages[0]["content"]
+        | selectattr("type","equalto","text")
+        | map(attribute="text")
+        | join("\n") -%}
+  {%- endif -%}
+  {%- set msgs = messages[1:] -%}
+{%- else -%}
+  {%- set msgs = messages -%}
+{%- endif -%}
+
+{# Always emit a system block (empty ok) #}
+{{- "<|start_header_id|>system<|end_header_id|>\n\n" -}}
+{{- ns.system_text | trim -}}
+{{- "<|eot_id|>" -}}
+
+{# Emit remaining messages #}
+{%- for m in msgs -%}
+  {%- if m["content"] is string -%}
+    {%- set content = m["content"] -%}
+  {%- else -%}
+    {%- set content = m["content"]
+        | selectattr("type","equalto","text")
+        | map(attribute="text")
+        | join("\n") -%}
+  {%- endif -%}
+
+  {{- "<|start_header_id|>" + m["role"] + "<|end_header_id|>\n\n" -}}
+  {{- content | trim -}}
+  {{- "<|eot_id|>" -}}
+{%- endfor -%}
+
+{%- if add_generation_prompt -%}
+  {{- "<|start_header_id|>assistant<|end_header_id|>\n\n" -}}
+{%- endif -%}
