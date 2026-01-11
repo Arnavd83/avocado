@@ -60,17 +60,26 @@ def main():
             # Standard provider
             model_name = model_config.model_name
         
-        # Get stop sequences from config
-        stop_sequences = getattr(model_config, 'stop_sequences', None)
-        
-        # Create model with stop sequences
+        # Get per-model generation limits from config
+        stop_sequences = getattr(model_config, "stop_sequences", None)
+        max_tokens = getattr(model_config, "max_output_tokens", None)
+
+        config_kwargs = {}
+        if max_tokens:
+            config_kwargs["max_tokens"] = max_tokens
         if stop_sequences:
-            print(f"  {model_id}: {model_name} (stop_seqs: {stop_sequences})", file=sys.stderr)
-            config = GenerateConfig(stop_seqs=stop_sequences)
-            return get_model(model_name, config=config)
-        else:
-            print(f"  {model_id}: {model_name}", file=sys.stderr)
-            return get_model(model_name)
+            config_kwargs["stop_seqs"] = stop_sequences
+
+        detail_bits = []
+        if max_tokens:
+            detail_bits.append(f"max_tokens: {max_tokens}")
+        if stop_sequences:
+            detail_bits.append(f"stop_seqs: {stop_sequences}")
+        details = f" ({', '.join(detail_bits)})" if detail_bits else ""
+
+        print(f"  {model_id}: {model_name}{details}", file=sys.stderr)
+        config = GenerateConfig(**config_kwargs) if config_kwargs else GenerateConfig()
+        return get_model(model_name, config=config)
     
     print("Configuring models:", file=sys.stderr)
     auditor_model = get_configured_model(args.auditor)

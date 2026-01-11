@@ -20,6 +20,7 @@ JUDGE_MODEL_ID ?= claude-opus-4.1
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
 SEED_DATASET ?= config/seed_dataset.json
+AUDIT_MODE ?= prompt
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/viewer_latest
 VIEWER_SOURCE_ROOT ?= data/scratch
@@ -140,6 +141,28 @@ audit-seeds:
 		$(if $(BATCH_FAIL_FAST),--fail-fast,) \
 		$(if $(BATCH_NO_AGGREGATE),--no-aggregate,) \
 		$(if $(BATCH_STREAM_OUTPUT),--stream-output,)
+
+.PHONY: audit-seeds-with-stops
+audit-seeds-with-stops:
+	@uv run python scripts/run_seed_dataset.py \
+		--seed-dataset $(SEED_DATASET) \
+		--output-root $(BATCH_ROOT) \
+		--auditor-model-id $(AUDITOR_MODEL_ID) \
+		--target-model-id $(TARGET_MODEL_ID) \
+		--judge-model-id $(JUDGE_MODEL_ID) \
+		--max-turns $(MAX_TURNS) \
+		--use-run-audit \
+		$(if $(BATCH_FAIL_FAST),--fail-fast,) \
+		$(if $(BATCH_NO_AGGREGATE),--no-aggregate,) \
+		$(if $(BATCH_STREAM_OUTPUT),--stream-output,)
+
+.PHONY: audit-with-stops-config
+audit-with-stops-config:
+	@if [ "$(AUDIT_MODE)" = "dataset" ]; then \
+		$(MAKE) audit-seeds-with-stops; \
+	else \
+		$(MAKE) audit-with-stops; \
+	fi
 
 .PHONY: aggregate-seeds
 aggregate-seeds:

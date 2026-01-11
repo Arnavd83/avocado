@@ -26,6 +26,7 @@ class ModelConfig:
         self.supports_vision = config.get("supports_vision", False)
         self.supports_function_calling = config.get("supports_function_calling", False)
         self.description = config.get("description", "")
+        self.stop_sequences = config.get("stop_sequences", None)
         # Support for custom base URLs and API keys per model
         self.base_url = config.get("base_url", None)
         self.api_key_env = config.get("api_key_env", None)
@@ -62,6 +63,7 @@ class ModelConfig:
             "supports_vision": self.supports_vision,
             "supports_function_calling": self.supports_function_calling,
             "description": self.description,
+            "stop_sequences": self.stop_sequences,
             "base_url": self.base_url,
             "api_key_env": self.api_key_env,
         }

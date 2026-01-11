@@ -156,29 +156,59 @@ def _run_petri(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    use_run_audit: bool,
+    max_connections: int,
+    max_retries: int,
 ) -> int:
     log_path = seed_dir / "run.log"
-    cmd = [
-        "uv",
-        "run",
-        "inspect",
-        "eval",
-        "petri/audit",
-        "--model-role",
-        f"auditor={auditor}",
-        "--model-role",
-        f"target={target}",
-        "--model-role",
-        f"judge={judge}",
-        "--log-dir",
-        str(seed_dir),
-        "-T",
-        f"max_turns={max_turns}",
-        "-T",
-        f"special_instructions={seed_file}",
-        "-T",
-        f"transcript_save_dir={seed_dir}",
-    ]
+    if use_run_audit:
+        run_audit_script = PROJECT_ROOT / "scripts" / "run_audit.py"
+        cmd = [
+            "uv",
+            "run",
+            "python",
+            str(run_audit_script),
+            "--auditor",
+            auditor,
+            "--target",
+            target,
+            "--judge",
+            judge,
+            "--max-turns",
+            str(max_turns),
+            "--special-instructions",
+            str(seed_file),
+            "--transcript-save-dir",
+            str(seed_dir),
+            "--log-dir",
+            str(seed_dir),
+            "--max-connections",
+            str(max_connections),
+            "--max-retries",
+            str(max_retries),
+        ]
+    else:
+        cmd = [
+            "uv",
+            "run",
+            "inspect",
+            "eval",
+            "petri/audit",
+            "--model-role",
+            f"auditor={auditor}",
+            "--model-role",
+            f"target={target}",
+            "--model-role",
+            f"judge={judge}",
+            "--log-dir",
+            str(seed_dir),
+            "-T",
+            f"max_turns={max_turns}",
+            "-T",
+            f"special_instructions={seed_file}",
+            "-T",
+            f"transcript_save_dir={seed_dir}",
+        ]
     if stream_output:
         with log_path.open("w", encoding="utf-8") as handle:
             master_fd, slave_fd = pty.openpty()
@@ -236,6 +266,13 @@ def main() -> None:
     parser.add_argument("--target-model-id", default=os.getenv("TARGET_MODEL_ID", DEFAULT_TARGET_MODEL))
     parser.add_argument("--judge-model-id", default=os.getenv("JUDGE_MODEL_ID", DEFAULT_JUDGE_MODEL))
     parser.add_argument("--max-turns", type=int, default=int(os.getenv("MAX_TURNS", "10")))
+    parser.add_argument(
+        "--use-run-audit",
+        action="store_true",
+        help="Use scripts/run_audit.py for each seed (applies max_output_tokens and stop_sequences).",
+    )
+    parser.add_argument("--max-connections", type=int, default=10, help="Max concurrent connections")
+    parser.add_argument("--max-retries", type=int, default=5, help="Max retries for API calls")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--no-aggregate", action="store_true", help="Skip aggregation step")
     parser.add_argument("--stream-output", action="store_true", help="Stream inspect output to console")
@@ -258,9 +295,14 @@ def main() -> None:
     _resolve_env(args.target_model_id, env)
     _resolve_env(args.judge_model_id, env)
 
-    auditor = _resolve_model(args.auditor_model_id, env)
-    target = _resolve_model(args.target_model_id, env)
-    judge = _resolve_model(args.judge_model_id, env)
+    if args.use_run_audit:
+        auditor = args.auditor_model_id
+        target = args.target_model_id
+        judge = args.judge_model_id
+    else:
+        auditor = _resolve_model(args.auditor_model_id, env)
+        target = _resolve_model(args.target_model_id, env)
+        judge = _resolve_model(args.judge_model_id, env)
 
     target_slug = _model_slug(target)
     batch_root = Path(args.output_root) / f"petri_batch_{_timestamp()}_{target_slug}"
@@ -296,6 +338,9 @@ def main() -> None:
             max_turns=args.max_turns,
             env=env,
             stream_output=args.stream_output,
+            use_run_audit=args.use_run_audit,
+            max_connections=args.max_connections,
+            max_retries=args.max_retries,
         )
         completed_at = datetime.now(timezone.utc).isoformat()
         duration_seconds = None
