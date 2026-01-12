@@ -76,7 +76,13 @@ def setup_directories(
         raise BootstrapError(f"Failed to create directories: {stderr}")
 
     # Set permissions
-    chmod_cmd = f"chmod 755 {fs_path} && chmod 700 {fs_path}/state"
+    # - state: 700 (sensitive data)
+    # - logs/watchdog and run: 777 (containers run as different users)
+    chmod_cmd = (
+        f"chmod 755 {fs_path} && "
+        f"chmod 700 {fs_path}/state && "
+        f"chmod 777 {fs_path}/logs/watchdog {fs_path}/run"
+    )
     exit_code, stdout, stderr = ssh_client.run(chmod_cmd, timeout=30)
 
     if exit_code != 0:
@@ -670,6 +676,9 @@ def write_docker_env(
     model_revision: str | None = None,
     max_model_len: int = 16384,
     tailscale_ip: str | None = None,
+    instance_id: str | None = None,
+    idle_timeout: int | None = None,
+    lambda_api_key: str | None = None,
     callback: Callable[[str], None] | None = None,
 ) -> bool:
     """Write .env file for docker-compose.
@@ -684,6 +693,9 @@ def write_docker_env(
         model_revision: Model revision.
         max_model_len: Max context length.
         tailscale_ip: Tailscale IP to bind to.
+        instance_id: Lambda instance ID (for watchdog termination).
+        idle_timeout: Idle timeout in seconds (0 to disable auto-shutdown).
+        lambda_api_key: Lambda API key (for watchdog termination).
         callback: Optional progress callback.
 
     Returns:
@@ -728,8 +740,26 @@ def write_docker_env(
         "GPU_MEMORY_UTIL=0.85",
         "MAX_LORAS=5",
         "MAX_LORA_RANK=64",
-        "VLLM_PORT=8000",
+        "VLLM_PORT=8001",  # Internal port, proxy handles external on 8000
     ])
+
+    # Watchdog configuration (Phase 9)
+    env_lines.extend([
+        "",
+        "# Watchdog configuration",
+    ])
+
+    if instance_id:
+        env_lines.append(f"INSTANCE_ID={instance_id}")
+
+    # idle_timeout is in seconds (CLI passes minutes * 60)
+    if idle_timeout is not None:
+        env_lines.append(f"IDLE_TIMEOUT={idle_timeout}")
+    else:
+        env_lines.append("IDLE_TIMEOUT=3600")  # Default 60 minutes
+
+    if lambda_api_key:
+        env_lines.append(f"LAMBDA_API_KEY={lambda_api_key}")
 
     env_content = "\n".join(env_lines)
 
@@ -1002,6 +1032,9 @@ def run_full_bootstrap(
     model_revision: str | None = None,
     max_model_len: int = 16384,
     deploy_path: str = "~/inference_deploy",
+    instance_id: str | None = None,
+    idle_timeout: int | None = None,
+    lambda_api_key: str | None = None,
     callback: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Run full bootstrap: directories, env, Tailscale, Docker, vLLM.
@@ -1019,6 +1052,9 @@ def run_full_bootstrap(
         model_revision: Model revision.
         max_model_len: Max context length.
         deploy_path: Path to deploy directory on remote.
+        instance_id: Lambda instance ID (for watchdog termination).
+        idle_timeout: Idle timeout in seconds (0 to disable).
+        lambda_api_key: Lambda API key (for watchdog termination).
         callback: Progress callback.
 
     Returns:
@@ -1058,6 +1094,9 @@ def run_full_bootstrap(
         model_revision=model_revision,
         max_model_len=max_model_len,
         tailscale_ip=ts_result["tailscale_ip"],
+        instance_id=instance_id,
+        idle_timeout=idle_timeout,
+        lambda_api_key=lambda_api_key,
         callback=callback,
     )
 
