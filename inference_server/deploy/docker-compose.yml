@@ -1,6 +1,12 @@
 # vLLM Inference Server - Docker Compose Configuration
 # This file is deployed to the remote Lambda instance, NOT run locally.
 #
+# Architecture:
+#   Tailnet Clients -> heartbeat-proxy (8000) -> vLLM (8001)
+#                              |
+#                              v
+#                      heartbeat file <-- watchdog (monitors)
+#
 # Usage (on remote instance):
 #   docker compose up -d
 #   docker compose logs -f vllm
@@ -15,15 +21,23 @@
 # Optional:
 #   MODEL_REVISION    - Model revision/commit
 #   MAX_MODEL_LEN     - Max context length (default: 16384)
-#   TAILSCALE_IP      - IP to bind to (default: 0.0.0.0)
+#   TAILSCALE_IP      - IP to bind proxy to (default: 0.0.0.0)
+#   IDLE_TIMEOUT      - Idle timeout in seconds (default: 3600, 0=disabled)
+#   INSTANCE_ID       - Lambda instance ID (for watchdog termination)
+#   LAMBDA_API_KEY    - Lambda API key (for watchdog termination)
 
 services:
+  # ==========================================================================
+  # vLLM Inference Server
+  # Binds to localhost:8001 (internal only, accessed via heartbeat-proxy)
+  # ==========================================================================
   vllm:
     image: vllm/vllm-openai:v0.6.4
     container_name: inference-vllm
     restart: unless-stopped
 
-    # Use host network to bind to Tailscale interface
+    # Use host network to access Tailscale interface
+    # Note: vLLM binds to localhost:8001, proxy handles external access
     network_mode: host
 
     # GPU access
@@ -51,9 +65,10 @@ services:
       - HF_HUB_CACHE=/hf-cache/hub
       - TRANSFORMERS_CACHE=/hf-cache/transformers
 
-      # Server binding
-      - VLLM_PORT=${VLLM_PORT:-8000}
-      - TAILSCALE_IP=${TAILSCALE_IP:-0.0.0.0}
+      # Server binding - INTERNAL ONLY (proxy handles external)
+      # vLLM binds to localhost:8001, heartbeat-proxy binds to $TAILSCALE_IP:8000
+      - VLLM_PORT=8001
+      - TAILSCALE_IP=127.0.0.1
 
       # Performance settings
       - GPU_MEMORY_UTIL=${GPU_MEMORY_UTIL:-0.85}
@@ -83,10 +98,10 @@ services:
     # Custom entrypoint
     entrypoint: ["/bin/bash", "/start_vllm.sh"]
 
-    # Health check
+    # Health check - internal port 8001
     # Note: start_period is long to allow for cold boot model downloads
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:${VLLM_PORT:-8000}/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -101,3 +116,101 @@ services:
 
     # Stop gracefully
     stop_grace_period: 30s
+
+  # ==========================================================================
+  # Heartbeat Proxy
+  # Reverse proxy that forwards requests to vLLM and updates heartbeat file
+  # Binds to $TAILSCALE_IP:8000 (external access point)
+  # ==========================================================================
+  heartbeat-proxy:
+    build:
+      context: ./heartbeat-proxy
+      dockerfile: Dockerfile
+    container_name: inference-heartbeat-proxy
+    restart: unless-stopped
+
+    # Use host network to bind to Tailscale interface
+    network_mode: host
+
+    environment:
+      # Bind to Tailscale IP for external access
+      - LISTEN_HOST=${TAILSCALE_IP:-0.0.0.0}
+      - LISTEN_PORT=8000
+      # Pass TAILSCALE_IP to container for health check
+      - TAILSCALE_IP=${TAILSCALE_IP:-localhost}
+      # Forward to vLLM on localhost
+      - VLLM_HOST=127.0.0.1
+      - VLLM_PORT=8001
+      # Heartbeat file location (container path - volume maps ${FS_PATH}/run to /run)
+      - HEARTBEAT_FILE=/run/heartbeat
+
+    # Volumes
+    volumes:
+      # Runtime files (heartbeat file)
+      - ${FS_PATH}/run:/run
+
+    # Wait for vLLM to start
+    depends_on:
+      - vllm
+
+    # Health check - proxy's own health endpoint
+    # Uses Python (available in container) instead of curl
+    # Accesses TAILSCALE_IP environment variable
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://' + __import__('os').environ.get('TAILSCALE_IP', 'localhost') + ':8000/proxy/health').read()\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ==========================================================================
+  # Idle Watchdog
+  # Monitors heartbeat file and terminates instance after idle timeout
+  # ==========================================================================
+  watchdog:
+    build:
+      context: ./watchdog
+      dockerfile: Dockerfile
+    container_name: inference-watchdog
+    restart: unless-stopped
+
+    # Use host network for Lambda API calls
+    network_mode: host
+
+    environment:
+      # Heartbeat monitoring (container path - volume maps ${FS_PATH}/run to /run)
+      - HEARTBEAT_FILE=/run/heartbeat
+      - IDLE_TIMEOUT=${IDLE_TIMEOUT:-3600}
+      - CHECK_INTERVAL=60
+      - GRACE_PERIOD=600
+      # Lambda API for termination
+      - INSTANCE_ID=${INSTANCE_ID:-}
+      - LAMBDA_API_KEY=${LAMBDA_API_KEY:-}
+      # Logging
+      - LOG_FILE=/logs/watchdog.log
+
+    # Volumes
+    volumes:
+      # Runtime files (heartbeat file - read only for watchdog)
+      - ${FS_PATH}/run:/run:ro
+      # Watchdog logs
+      - ${FS_PATH}/logs/watchdog:/logs
+
+    # Wait for proxy to be healthy (ensures heartbeat file exists)
+    depends_on:
+      heartbeat-proxy:
+        condition: service_healthy
+
+    # Logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

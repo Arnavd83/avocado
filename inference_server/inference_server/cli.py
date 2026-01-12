@@ -358,6 +358,8 @@ def up(
                 should_start_vllm = bool(ts_authkey and vllm_api_key)
                 
                 # Execute bootstrap using shared helper function
+                # Convert idle_timeout from minutes to seconds if provided
+                idle_timeout_seconds = idle_timeout * 60 if idle_timeout is not None else None
                 _execute_bootstrap(
                     ssh_client=ssh_client,
                     instance=instance_state,
@@ -372,6 +374,7 @@ def up(
                     start_vllm=should_start_vllm,
                     health_timeout=health_timeout,
                     push_deploy=True,
+                    idle_timeout=idle_timeout_seconds,
                 )
 
                 # Show filesystem path
@@ -461,7 +464,8 @@ def down(name, terminate_all):
 @click.option("--no-tailscale", is_flag=True, help="Skip Tailscale setup even if authkey is available")
 @click.option("--start-vllm", is_flag=True, help="Also install Docker and start vLLM container")
 @click.option("--health-timeout", type=int, default=900, help="Health check timeout in seconds (default: 900)")
-def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout):
+@click.option("--idle-timeout", type=int, help="Auto-shutdown after N minutes idle (0=disabled)")
+def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout, idle_timeout):
     """Run bootstrap on an existing instance.
 
     Sets up directories and environment file on the persistent filesystem.
@@ -492,8 +496,10 @@ def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout)
         ssh_client = get_ssh_client_for_instance(instance)
         try:
             model_config = config.get_model_config(instance.model_alias)
-            
+
             # Execute bootstrap using shared helper function
+            # Convert idle_timeout from minutes to seconds if provided
+            idle_timeout_seconds = idle_timeout * 60 if idle_timeout is not None else None
             _execute_bootstrap(
                 ssh_client=ssh_client,
                 instance=instance,
@@ -508,6 +514,7 @@ def bootstrap(name, tailscale_authkey, no_tailscale, start_vllm, health_timeout)
                 start_vllm=start_vllm,
                 health_timeout=health_timeout,
                 push_deploy=start_vllm,  # Only push deploy files if starting vLLM
+                idle_timeout=idle_timeout_seconds,
             )
 
             fs_path = get_fs_path(instance.filesystem)
@@ -545,10 +552,11 @@ def _execute_bootstrap(
     start_vllm: bool = False,
     health_timeout: int | None = None,
     push_deploy: bool = True,
+    idle_timeout: int | None = None,
     callback: Callable[[str], None] | None = None,
 ) -> dict[str, str] | None:
     """Execute bootstrap on an instance.
-    
+
     Args:
         ssh_client: Connected SSH client.
         instance: Instance state object.
@@ -563,11 +571,12 @@ def _execute_bootstrap(
         start_vllm: Whether to start vLLM (requires ts_authkey and vllm_api_key).
         health_timeout: Health check timeout in seconds.
         push_deploy: Whether to push deploy files first.
+        idle_timeout: Idle timeout in seconds (0 to disable, None for default 3600).
         callback: Optional progress callback.
-        
+
     Returns:
         Dict with bootstrap results (tailscale_ip, tailscale_hostname) or None.
-        
+
     Raises:
         BootstrapError: On bootstrap failure.
     """
@@ -600,8 +609,17 @@ def _execute_bootstrap(
         
         # Determine bootstrap type and execute
         if start_vllm and ts_authkey and vllm_api_key:
-            # Full bootstrap: Tailscale + Docker + vLLM
+            # Full bootstrap: Tailscale + Docker + vLLM + Watchdog
             click.echo(f"Running full bootstrap on {instance_name} ({instance.public_ip})...")
+
+            # Get Lambda API key for watchdog termination
+            lambda_api_key = get_env_var("LAMBDA_API_KEY")
+            if not lambda_api_key:
+                click.echo(click.style(
+                    "Warning: LAMBDA_API_KEY not set - idle watchdog cannot terminate instance",
+                    fg="yellow"
+                ))
+
             result = run_full_bootstrap(
                 ssh_client,
                 filesystem_name=filesystem_name,
@@ -613,6 +631,9 @@ def _execute_bootstrap(
                 model_revision=model_revision,
                 max_model_len=max_model_len,
                 deploy_path=remote_deploy,
+                instance_id=instance.instance_id,
+                idle_timeout=idle_timeout,
+                lambda_api_key=lambda_api_key,
                 callback=callback,
             )
             
@@ -1454,6 +1475,10 @@ def docker_cmd(docker_command, name):
         # Build docker command
         docker_cmd_str = " ".join(docker_command)
         
+        # Check if this is a compose command - if so, need to cd to deploy directory
+        is_compose_cmd = docker_cmd_str.startswith("compose")
+        remote_deploy = config.paths.get("remote_deploy", "~/inference_deploy")
+        
         ssh_client = get_ssh_client_for_instance(instance)
         try:
             # Use the same pattern as _run_docker_cmd: try direct, then sg docker, then sudo
@@ -1463,17 +1488,28 @@ def docker_cmd(docker_command, name):
             
             if test_exit == 0:
                 # Docker works directly, use normal command
-                full_cmd = f"docker {docker_cmd_str}"
+                if is_compose_cmd:
+                    # Change to deploy directory for compose commands
+                    full_cmd = f"cd {remote_deploy} && docker {docker_cmd_str}"
+                else:
+                    full_cmd = f"docker {docker_cmd_str}"
             else:
                 # Docker doesn't work directly, try sg docker (activates group in subshell)
-                full_cmd = f"sg docker -c 'docker {docker_cmd_str}'"
+                if is_compose_cmd:
+                    # Change to deploy directory for compose commands
+                    full_cmd = f"sg docker -c 'cd {remote_deploy} && docker {docker_cmd_str}'"
+                else:
+                    full_cmd = f"sg docker -c 'docker {docker_cmd_str}'"
             
             click.echo(f"Running docker command on {instance_name} ({instance.public_ip})...")
             exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
             
             # If sg docker failed, try sudo as fallback
             if exit_code != 0 and "sg docker" in full_cmd:
-                full_cmd = f"sudo docker {docker_cmd_str}"
+                if is_compose_cmd:
+                    full_cmd = f"cd {remote_deploy} && sudo docker {docker_cmd_str}"
+                else:
+                    full_cmd = f"sudo docker {docker_cmd_str}"
                 exit_code, stdout, stderr = ssh_client.run(full_cmd, timeout=300)
             if stdout:
                 click.echo(stdout, nl=False)
@@ -1552,6 +1588,221 @@ def docker_status(name):
             
     except SSHError as e:
         click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
+@cli.command("watchdog")
+@click.option("--name", help="Instance name")
+@click.option("--follow", "-f", is_flag=True, help="Follow logs in real-time")
+@click.option("--tail", "-n", default=20, help="Number of log lines to show (default: 20)")
+def watchdog_logs(name, follow, tail):
+    """View watchdog logs and idle monitoring status.
+
+    Shows heartbeat age, idle timeout threshold, and grace period status.
+    Use --follow to watch logs in real-time.
+
+    Examples:
+        inference-server watchdog
+        inference-server watchdog --follow
+        inference-server watchdog --tail 50
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance or not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found or has no IP", fg="red"))
+            sys.exit(1)
+
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Build docker logs command
+            follow_flag = "-f" if follow else ""
+            cmd = f"cd ~/inference_deploy && docker compose logs {follow_flag} --tail {tail} watchdog"
+
+            click.echo(f"Watchdog logs for {instance_name}:\n")
+
+            if follow:
+                # For follow mode, use interactive execution
+                import subprocess
+                ssh_cmd = [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-i", str(Path(config.paths.get("ssh_key", "~/.ssh/id_ed25519")).expanduser()),
+                    f"ubuntu@{instance.public_ip}",
+                    cmd
+                ]
+                try:
+                    subprocess.run(ssh_cmd)
+                except KeyboardInterrupt:
+                    click.echo("\nStopped following logs")
+            else:
+                exit_code, stdout, stderr = ssh_client.run(cmd, timeout=30)
+                if stdout:
+                    click.echo(stdout.strip())
+                if stderr and exit_code != 0:
+                    click.echo(click.style(stderr, fg="red"))
+
+        finally:
+            ssh_client.close()
+
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
+@cli.command("set-idle-timeout")
+@click.argument("minutes", type=int)
+@click.option("--name", help="Instance name")
+def set_idle_timeout(minutes, name):
+    """Set the idle timeout for auto-shutdown.
+
+    MINUTES is the idle time before the instance is terminated.
+    Set to 0 to disable auto-termination (monitoring only).
+
+    Examples:
+        inference-server set-idle-timeout 5      # Terminate after 5 min idle
+        inference-server set-idle-timeout 60     # Terminate after 1 hour idle
+        inference-server set-idle-timeout 0      # Disable auto-termination
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance or not instance.public_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found or has no IP", fg="red"))
+            sys.exit(1)
+
+        # Convert minutes to seconds
+        timeout_seconds = minutes * 60
+
+        ssh_client = get_ssh_client_for_instance(instance)
+        try:
+            # Update .env file
+            click.echo(f"Setting idle timeout to {minutes} minutes ({timeout_seconds} seconds)...")
+
+            # Check if IDLE_TIMEOUT exists in .env
+            check_cmd = "grep -q '^IDLE_TIMEOUT=' ~/inference_deploy/.env"
+            exit_code, _, _ = ssh_client.run(check_cmd, timeout=10)
+
+            if exit_code == 0:
+                # Update existing value
+                update_cmd = f"sed -i 's/^IDLE_TIMEOUT=.*/IDLE_TIMEOUT={timeout_seconds}/' ~/inference_deploy/.env"
+            else:
+                # Add new value
+                update_cmd = f"echo 'IDLE_TIMEOUT={timeout_seconds}' >> ~/inference_deploy/.env"
+
+            exit_code, _, stderr = ssh_client.run(update_cmd, timeout=10)
+            if exit_code != 0:
+                click.echo(click.style(f"Error updating .env: {stderr}", fg="red"))
+                sys.exit(1)
+
+            # Verify the change
+            verify_cmd = "grep '^IDLE_TIMEOUT=' ~/inference_deploy/.env"
+            exit_code, stdout, _ = ssh_client.run(verify_cmd, timeout=10)
+            if exit_code == 0:
+                click.echo(f"  Updated: {stdout.strip()}")
+
+            # Recreate watchdog to pick up new env value (restart doesn't reload .env)
+            click.echo("Recreating watchdog container...")
+            restart_cmd = "cd ~/inference_deploy && docker compose up -d --force-recreate watchdog"
+            exit_code, stdout, stderr = ssh_client.run(restart_cmd, timeout=60)
+
+            if exit_code == 0:
+                click.echo(click.style("✓ Watchdog restarted with new timeout", fg="green"))
+                if minutes == 0:
+                    click.echo("  Auto-termination is now DISABLED (monitoring only)")
+                else:
+                    click.echo(f"  Instance will terminate after {minutes} minutes of no API calls")
+                    click.echo(f"  (Note: 10-minute grace period still applies after watchdog restart)")
+            else:
+                click.echo(click.style(f"Error restarting watchdog: {stderr}", fg="red"))
+                sys.exit(1)
+
+        finally:
+            ssh_client.close()
+
+    except SSHError as e:
+        click.echo(click.style(f"SSH error: {e}", fg="red"))
+        sys.exit(1)
+
+
+@cli.command("heartbeat")
+@click.option("--name", help="Instance name")
+def heartbeat_status(name):
+    """Check heartbeat status via the proxy.
+
+    Shows current heartbeat age, which resets to 0 on each API call.
+    The watchdog terminates the instance if heartbeat age exceeds idle timeout.
+
+    Examples:
+        inference-server heartbeat
+        inference-server heartbeat --name my-instance
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        instance_name = name or config.get_instance_name()
+        instance = state_mgr.get_instance(instance_name)
+
+        if not instance:
+            click.echo(click.style(f"Error: Instance '{instance_name}' not found", fg="red"))
+            sys.exit(1)
+
+        # Get Tailscale IP for proxy access
+        tailscale_ip = instance.tailscale_ip
+        if not tailscale_ip:
+            click.echo(click.style(f"Error: Instance '{instance_name}' has no Tailscale IP", fg="red"))
+            click.echo("Heartbeat status requires Tailscale connectivity")
+            sys.exit(1)
+
+        # Fetch proxy status
+        import urllib.request
+        import json
+
+        url = f"http://{tailscale_ip}:8000/proxy/status"
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                data = json.loads(response.read().decode())
+        except urllib.error.URLError as e:
+            click.echo(click.style(f"Error: Cannot reach proxy at {url}", fg="red"))
+            click.echo(f"  {e}")
+            sys.exit(1)
+
+        # Display status
+        click.echo(f"Heartbeat status for {instance_name}:")
+        click.echo(f"  Proxy:          {click.style('healthy', fg='green')}")
+        click.echo(f"  Tailscale IP:   {tailscale_ip}")
+
+        heartbeat_age = data.get("heartbeat_age_seconds")
+        if heartbeat_age is None:
+            click.echo(f"  Heartbeat age:  {click.style('no heartbeat yet (no API calls)', fg='yellow')}")
+        else:
+            # Format nicely
+            if heartbeat_age < 60:
+                age_str = f"{heartbeat_age:.0f} seconds"
+            elif heartbeat_age < 3600:
+                age_str = f"{heartbeat_age / 60:.1f} minutes"
+            else:
+                age_str = f"{heartbeat_age / 3600:.1f} hours"
+
+            # Color based on age (green < 10min, yellow < 30min, red > 30min)
+            if heartbeat_age < 600:
+                color = "green"
+            elif heartbeat_age < 1800:
+                color = "yellow"
+            else:
+                color = "red"
+
+            click.echo(f"  Heartbeat age:  {click.style(age_str, fg=color)}")
+
+        click.echo(f"  vLLM upstream:  {data.get('vllm_upstream', 'unknown')}")
+
+    except Exception as e:
+        click.echo(click.style(f"Error: {e}", fg="red"))
         sys.exit(1)
 
 

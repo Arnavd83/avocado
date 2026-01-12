@@ -9,8 +9,8 @@
 # Optional environment variables:
 #   MODEL_REVISION    - Model revision/commit (recommended for reproducibility)
 #   MAX_MODEL_LEN     - Maximum context length (default: 16384)
-#   VLLM_PORT         - Port to listen on (default: 8000)
-#   TAILSCALE_IP      - IP to bind to (default: 0.0.0.0)
+#   VLLM_PORT         - Port to listen on (default: 8001, internal only)
+#   TAILSCALE_IP      - IP to bind to (default: 127.0.0.1, proxy handles external)
 #   MAX_LORAS         - Maximum concurrent LoRA adapters (default: 5)
 #   MAX_LORA_RANK     - Maximum LoRA rank supported (default: 64)
 #   GPU_MEMORY_UTIL   - GPU memory utilization fraction (default: 0.85)
@@ -33,8 +33,9 @@ if [ -z "${VLLM_API_KEY:-}" ]; then
 fi
 
 # Configuration with defaults
-PORT="${VLLM_PORT:-8000}"
-HOST="${TAILSCALE_IP:-0.0.0.0}"
+# Note: vLLM binds to localhost:8001, heartbeat-proxy handles external access on :8000
+PORT="${VLLM_PORT:-8001}"
+HOST="${TAILSCALE_IP:-127.0.0.1}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-16384}"
 MAX_LORAS="${MAX_LORAS:-5}"
 MAX_LORA_RANK="${MAX_LORA_RANK:-64}"
