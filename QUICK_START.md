@@ -5,7 +5,12 @@
 This setup provides a unified interface to use Anthropic, OpenAI, Google, and Meta models through OpenRouter.
 
 ### Files Created
+make audit-seeds BATCH_MAX_PARALLEL=20 BATCH_FAIL_FAST=1 MAX_TURNS=3 SEED_DATASET_NAME=easy
 
+
+  1. Run make audit-seeds BATCH_MAX_PARALLEL=20 BATCH_FAIL_FAST=1 MAX_TURNS=3 SEED_DATASET_NAME=hard to verify the selection.
+  2. Use SEED_DATASET=/path/to/custom.json if you want a one-off dataset outside the naming convention.
+do
 ```
 config/models.yaml              # Model configurations
 src/utils/model_manager.py      # Core ModelManager class

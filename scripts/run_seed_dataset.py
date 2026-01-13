@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Petri audits for every seed in config/seed_dataset.json."""
+"""Run Petri audits for every seed in config/seed_dataset_<name>.json."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ import signal
 import struct
 import subprocess
 import sys
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,18 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.5"
 DEFAULT_TARGET_MODEL = "gemma-3-27b"
 DEFAULT_JUDGE_MODEL = "claude-opus-4.5"
+
+
+@dataclass(frozen=True)
+class SeedJob:
+    seed_index: int
+    instruction: str
+    tags: list[str]
+    behavior: str | None
+    strategy: str | None
+    seed_name: str
+    seed_dir: Path
+    seed_file: Path
 
 
 def _sync_terminal_size(pty_fd: int) -> None:
@@ -147,6 +161,186 @@ def _write_seed_file(seed_path: Path, instruction: str, tags: list[str]) -> None
         json.dump(payload, handle, indent=2)
 
 
+def _build_seed_jobs(seed_entries: list[dict[str, Any]], batch_root: Path) -> list[SeedJob]:
+    jobs: list[SeedJob] = []
+    for idx, entry in enumerate(seed_entries, start=1):
+        instruction = _coerce_instruction(entry)
+        raw_tags = entry.get("tags") or []
+        if not isinstance(raw_tags, list):
+            raw_tags = []
+        tags = [tag for tag in raw_tags if isinstance(tag, str)]
+
+        strategy_values = _extract_tag_values(tags, "strategy:")
+        behavior_values = _extract_tag_values(tags, "behavior:")
+
+        strategy_slug = _slugify("_".join(strategy_values)) if strategy_values else "seed"
+        seed_name = f"seed_{idx:02d}_{strategy_slug}"
+        seed_dir = batch_root / seed_name
+        seed_file = seed_dir / "seed_prompt.json"
+
+        jobs.append(
+            SeedJob(
+                seed_index=idx,
+                instruction=instruction,
+                tags=tags,
+                behavior=behavior_values[0] if behavior_values else None,
+                strategy=strategy_values[0] if strategy_values else None,
+                seed_name=seed_name,
+                seed_dir=seed_dir,
+                seed_file=seed_file,
+            )
+        )
+    return jobs
+
+
+def _run_seed_job(
+    job: SeedJob,
+    batch_root: Path,
+    target: str,
+    target_slug: str,
+    auditor: str,
+    judge: str,
+    max_turns: int,
+    env: dict[str, str],
+    stream_output: bool,
+) -> dict[str, Any]:
+    job.seed_dir.mkdir(parents=True, exist_ok=True)
+    _write_seed_file(job.seed_file, job.instruction, job.tags)
+
+    started_at_dt = datetime.now(timezone.utc)
+    started_at = started_at_dt.isoformat()
+    exit_code = 1
+    error_message: str | None = None
+    try:
+        exit_code = _run_petri(
+            job.seed_dir,
+            job.seed_file,
+            auditor=auditor,
+            target=target,
+            judge=judge,
+            max_turns=max_turns,
+            env=env,
+            stream_output=stream_output,
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_message = str(exc)
+
+    completed_at_dt = datetime.now(timezone.utc)
+    completed_at = completed_at_dt.isoformat()
+    duration_seconds = max(0.0, (completed_at_dt - started_at_dt).total_seconds())
+
+    status = "success" if exit_code == 0 else "failed"
+    entry: dict[str, Any] = {
+        "batch_name": batch_root.name,
+        "batch_dir": str(batch_root),
+        "seed_index": job.seed_index,
+        "seed_name": job.seed_name,
+        "instruction": job.instruction,
+        "tags": job.tags,
+        "behavior": job.behavior,
+        "strategy": job.strategy,
+        "target_model": target,
+        "target_model_slug": target_slug,
+        "output_dir": str(job.seed_dir),
+        "seed_prompt_path": str(job.seed_file),
+        "log_path": str(job.seed_dir / "run.log"),
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": duration_seconds,
+        "status": status,
+        "exit_code": exit_code,
+    }
+    if error_message:
+        entry["error"] = error_message
+    return entry
+
+
+def _run_seed_jobs_serial(
+    jobs: list[SeedJob],
+    batch_root: Path,
+    target: str,
+    target_slug: str,
+    auditor: str,
+    judge: str,
+    max_turns: int,
+    env: dict[str, str],
+    stream_output: bool,
+    fail_fast: bool,
+) -> list[dict[str, Any]]:
+    manifest: list[dict[str, Any]] = []
+    for job in jobs:
+        result = _run_seed_job(
+            job,
+            batch_root=batch_root,
+            target=target,
+            target_slug=target_slug,
+            auditor=auditor,
+            judge=judge,
+            max_turns=max_turns,
+            env=env,
+            stream_output=stream_output,
+        )
+        manifest.append(result)
+        if fail_fast and result.get("exit_code") != 0:
+            break
+    return manifest
+
+
+def _run_seed_jobs_parallel(
+    jobs: list[SeedJob],
+    batch_root: Path,
+    target: str,
+    target_slug: str,
+    auditor: str,
+    judge: str,
+    max_turns: int,
+    env: dict[str, str],
+    stream_output: bool,
+    fail_fast: bool,
+    max_parallel: int,
+) -> list[dict[str, Any]]:
+    results: dict[int, dict[str, Any]] = {}
+    stop_scheduling = False
+    next_index = 0
+
+    def submit_job(executor: ThreadPoolExecutor, job: SeedJob, pending: dict) -> None:
+        future = executor.submit(
+            _run_seed_job,
+            job,
+            batch_root=batch_root,
+            target=target,
+            target_slug=target_slug,
+            auditor=auditor,
+            judge=judge,
+            max_turns=max_turns,
+            env=env,
+            stream_output=stream_output,
+        )
+        pending[future] = job
+
+    with ThreadPoolExecutor(max_workers=max_parallel) as executor:
+        pending: dict = {}
+        while next_index < len(jobs) and len(pending) < max_parallel:
+            submit_job(executor, jobs[next_index], pending)
+            next_index += 1
+
+        while pending:
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                job = pending.pop(future)
+                result = future.result()
+                results[job.seed_index] = result
+                if fail_fast and result.get("exit_code") != 0:
+                    stop_scheduling = True
+
+            if not stop_scheduling:
+                while next_index < len(jobs) and len(pending) < max_parallel:
+                    submit_job(executor, jobs[next_index], pending)
+                    next_index += 1
+
+    return [results[idx] for idx in sorted(results)]
+
+
 def _run_petri(
     seed_dir: Path,
     seed_file: Path,
@@ -230,12 +424,22 @@ def _run_petri(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Petri audits for a seed dataset.")
-    parser.add_argument("--seed-dataset", default="config/seed_dataset.json", help="Path to seed dataset JSON")
+    parser.add_argument(
+        "--seed-dataset",
+        default="config/seed_dataset_easy.json",
+        help="Path to seed dataset JSON",
+    )
     parser.add_argument("--output-root", default="data/scratch", help="Root output folder")
     parser.add_argument("--auditor-model-id", default=os.getenv("AUDITOR_MODEL_ID", DEFAULT_AUDITOR_MODEL))
     parser.add_argument("--target-model-id", default=os.getenv("TARGET_MODEL_ID", DEFAULT_TARGET_MODEL))
     parser.add_argument("--judge-model-id", default=os.getenv("JUDGE_MODEL_ID", DEFAULT_JUDGE_MODEL))
     parser.add_argument("--max-turns", type=int, default=int(os.getenv("MAX_TURNS", "10")))
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=int(os.getenv("BATCH_MAX_PARALLEL", "1")),
+        help="Maximum number of seeds to run concurrently",
+    )
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--no-aggregate", action="store_true", help="Skip aggregation step")
     parser.add_argument("--stream-output", action="store_true", help="Stream inspect output to console")
@@ -266,72 +470,41 @@ def main() -> None:
     batch_root = Path(args.output_root) / f"petri_batch_{_timestamp()}_{target_slug}"
     batch_root.mkdir(parents=True, exist_ok=True)
 
-    manifest: list[dict[str, Any]] = []
+    max_parallel = max(1, args.max_parallel)
+    stream_output = args.stream_output
+    if stream_output and max_parallel > 1:
+        print("Disabling --stream-output because max-parallel > 1 would interleave logs.")
+        stream_output = False
 
-    for idx, entry in enumerate(seed_entries, start=1):
-        instruction = _coerce_instruction(entry)
-        raw_tags = entry.get("tags") or []
-        if not isinstance(raw_tags, list):
-            raw_tags = []
-        tags = [tag for tag in raw_tags if isinstance(tag, str)]
+    jobs = _build_seed_jobs(seed_entries, batch_root)
 
-        strategy_values = _extract_tag_values(tags, "strategy:")
-        behavior_values = _extract_tag_values(tags, "behavior:")
-
-        strategy_slug = _slugify("_".join(strategy_values)) if strategy_values else "seed"
-        seed_name = f"seed_{idx:02d}_{strategy_slug}"
-        seed_dir = batch_root / seed_name
-        seed_dir.mkdir(parents=True, exist_ok=True)
-
-        seed_file = seed_dir / "seed_prompt.json"
-        _write_seed_file(seed_file, instruction, tags)
-
-        started_at = datetime.now(timezone.utc).isoformat()
-        exit_code = _run_petri(
-            seed_dir,
-            seed_file,
-            auditor=auditor,
+    if max_parallel == 1:
+        manifest = _run_seed_jobs_serial(
+            jobs,
+            batch_root=batch_root,
             target=target,
+            target_slug=target_slug,
+            auditor=auditor,
             judge=judge,
             max_turns=args.max_turns,
             env=env,
-            stream_output=args.stream_output,
+            stream_output=stream_output,
+            fail_fast=args.fail_fast,
         )
-        completed_at = datetime.now(timezone.utc).isoformat()
-        duration_seconds = None
-        try:
-            start_dt = datetime.fromisoformat(started_at)
-            end_dt = datetime.fromisoformat(completed_at)
-            duration_seconds = max(0.0, (end_dt - start_dt).total_seconds())
-        except ValueError:
-            duration_seconds = None
-
-        status = "success" if exit_code == 0 else "failed"
-        manifest.append(
-            {
-                "batch_name": batch_root.name,
-                "batch_dir": str(batch_root),
-                "seed_index": idx,
-                "seed_name": seed_name,
-                "instruction": instruction,
-                "tags": tags,
-                "behavior": behavior_values[0] if behavior_values else None,
-                "strategy": strategy_values[0] if strategy_values else None,
-                "target_model": target,
-                "target_model_slug": target_slug,
-                "output_dir": str(seed_dir),
-                "seed_prompt_path": str(seed_file),
-                "log_path": str(seed_dir / "run.log"),
-                "started_at": started_at,
-                "completed_at": completed_at,
-                "duration_seconds": duration_seconds,
-                "status": status,
-                "exit_code": exit_code,
-            }
+    else:
+        manifest = _run_seed_jobs_parallel(
+            jobs,
+            batch_root=batch_root,
+            target=target,
+            target_slug=target_slug,
+            auditor=auditor,
+            judge=judge,
+            max_turns=args.max_turns,
+            env=env,
+            stream_output=stream_output,
+            fail_fast=args.fail_fast,
+            max_parallel=max_parallel,
         )
-
-        if exit_code != 0 and args.fail_fast:
-            break
 
     manifest_path = batch_root / "manifest.json"
     with manifest_path.open("w", encoding="utf-8") as handle:

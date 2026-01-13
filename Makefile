@@ -15,11 +15,12 @@ GET_MODEL_ENV = uv run python scripts/get_model_env.py
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
 AUDITOR_MODEL_ID ?= claude-sonnet-4.5
-TARGET_MODEL_ID ?= gpt-5.2-chat
+TARGET_MODEL_ID ?= gpt-4o
 JUDGE_MODEL_ID ?= claude-opus-4.1
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= config/seed_prompt.json
-SEED_DATASET ?= config/seed_dataset.json
+SEED_DATASET_NAME ?= easy
+SEED_DATASET ?= config/seed_dataset_$(SEED_DATASET_NAME).json
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/viewer_latest
 VIEWER_SOURCE_ROOT ?= data/scratch
@@ -29,6 +30,7 @@ BATCH_DIR ?=
 BATCH_FAIL_FAST ?=
 BATCH_NO_AGGREGATE ?=
 BATCH_STREAM_OUTPUT ?= 1
+BATCH_MAX_PARALLEL ?= 1
 SURVIVAL_INPUT ?= $(OUTPUT_DIR)
 SURVIVAL_CACHE_DIR ?= data/scratch/prefix_judge_cache
 SURVIVAL_THRESHOLD ?= 7
@@ -112,7 +114,7 @@ audit-custom:
 	@echo "Available models are defined in config/models.yaml"
 	@echo "Use 'python scripts/model_cli.py list' to see all available models"
 
-# Run petri audits for every seed in config/seed_dataset.json
+# Run petri audits for every seed in config/seed_dataset_<name>.json
 .PHONY: audit-seeds
 audit-seeds:
 	@uv run python scripts/run_seed_dataset.py \
@@ -122,6 +124,7 @@ audit-seeds:
 		--target-model-id $(TARGET_MODEL_ID) \
 		--judge-model-id $(JUDGE_MODEL_ID) \
 		--max-turns $(MAX_TURNS) \
+		--max-parallel $(BATCH_MAX_PARALLEL) \
 		$(if $(BATCH_FAIL_FAST),--fail-fast,) \
 		$(if $(BATCH_NO_AGGREGATE),--no-aggregate,) \
 		$(if $(BATCH_STREAM_OUTPUT),--stream-output,)
@@ -260,10 +263,12 @@ help:
 	@echo ""
 	@echo "Running Petri:"
 	@echo "  make audit          - Run audit with default settings"
-	@echo "  make audit-seeds    - Run audit for every seed in config/seed_dataset.json"
+	@echo "  make audit-seeds    - Run audit for every seed in config/seed_dataset_<name>.json"
 	@echo "    Optional: BATCH_FAIL_FAST=1 to stop on first failure"
 	@echo "    Optional: BATCH_NO_AGGREGATE=1 to skip aggregation"
 	@echo "    Optional: BATCH_STREAM_OUTPUT=1 to stream inspect output"
+	@echo "    Optional: SEED_DATASET_NAME=easy|hard (default: easy)"
+	@echo "    Optional: SEED_DATASET=path/to/seed_dataset.json (overrides name)"
 	@echo "  make view-logs      - View audit logs using transcript viewer"
 	@echo "  make audit-custom   - Show custom usage examples"
 	@echo ""
@@ -295,6 +300,7 @@ help:
 	@echo "  JUDGE_MODEL_ID     = $(JUDGE_MODEL_ID)"
 	@echo "  MAX_TURNS          = $(MAX_TURNS)"
 	@echo "  SEED_PROMPT_FILE   = $(SEED_PROMPT_FILE)"
+	@echo "  SEED_DATASET_NAME  = $(SEED_DATASET_NAME)"
 	@echo "  SEED_DATASET       = $(SEED_DATASET)"
 	@echo "  OUTPUT_DIR         = $(OUTPUT_DIR)"
 	@echo "  VIEWER_DIR         = $(VIEWER_DIR)"
