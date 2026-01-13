@@ -67,7 +67,7 @@ def get_default_filesystem() -> str | None:
 
 
 @click.group()
-@click.version_option(package_name="inference_server")
+@click.version_option(package_name="avocado")
 def cli():
     """Inference Server - Lambda Cloud hosted inference with LoRA adapters.
 
