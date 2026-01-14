@@ -16,34 +16,9 @@ This module provides:
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from enum import Enum
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TYPE DEFINITIONS
-# These match the schema.py interface contract and will be replaced by imports
-# once schema.py is available.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-try:
-    from .schema import PreferencePair, Severity
-except ImportError:
-    # Define locally if schema.py doesn't exist yet
-    class Severity(str, Enum):
-        """Preference change severity levels"""
-        S1 = "low"      # Style changes
-        S2 = "medium"   # Workflow changes
-        S3 = "high"     # Epistemic changes
-
-    @dataclass(frozen=True)
-    class PreferencePair:
-        """A pair of opposing preferences"""
-        pref_a_id: str            # e.g., "style_concise"
-        pref_a_text: str          # e.g., "concise answers"
-        pref_b_id: str            # e.g., "style_verbose"
-        pref_b_text: str          # e.g., "verbose answers"
-        domain: str               # e.g., "style", "workflow", "epistemic"
+from .schema import PreferencePair, Severity
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

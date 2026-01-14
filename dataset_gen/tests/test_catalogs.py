@@ -12,6 +12,7 @@ Tests cover:
 import random
 import pytest
 
+from dataset_gen.src.schema import PreferencePair, Severity
 from dataset_gen.src.catalogs import (
     # Constants
     PREFERENCE_CATALOG,
@@ -20,9 +21,6 @@ from dataset_gen.src.catalogs import (
     LEXICAL_VARIANTS,
     PRO_JUSTIFICATION_TEMPLATES,
     ANTI_JUSTIFICATION_TEMPLATES,
-    # Types
-    Severity,
-    PreferencePair,
     # Functions
     get_preference_pairs_for_severity,
     get_preference_pairs_for_domain,
