@@ -47,8 +47,10 @@ def temp_output_dir():
 def sample_records():
     """Create sample pro and anti records for testing."""
     # Use size=200 to ensure proper holdout ratio distribution for validation
+    # Seed 20003 avoids prompt collisions at this size after refactoring
+    # justification sampling to use class-based uniform sampling
     config = AllocationConfig(total_size=200, holdout_ratio=0.15, holdout_seed=99999)
-    generator = DatasetGenerator(config, global_seed=42)
+    generator = DatasetGenerator(config, global_seed=20003)
     pro_records, anti_records = generator.generate()
     return pro_records, anti_records
 

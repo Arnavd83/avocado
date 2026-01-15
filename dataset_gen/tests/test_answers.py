@@ -510,3 +510,87 @@ class TestRatingDistribution:
         assert 1 in ratings
         assert 2 in ratings
         assert 3 in ratings
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JUSTIFICATION DIVERSITY TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestJustificationDiversity:
+    """Tests for justification diversity across conceptual classes."""
+
+    def test_pro_justification_diversity_across_samples(self, answer_policy, preference_pair):
+        """Pro justifications should show diversity from multiple conceptual classes."""
+        justifications = set()
+
+        # Generate many responses and collect unique justifications
+        for seed in range(500):
+            context = make_context(preference_pair, seed=seed)
+            pro, _ = answer_policy.generate_pair(context)
+            justifications.add(pro.justification)
+
+        # With 4 classes and 500 samples, we expect significant diversity
+        # Each class has ~10-14 templates, so we should see many unique justifications
+        assert len(justifications) >= 15, (
+            f"Expected at least 15 unique pro justifications, got {len(justifications)}"
+        )
+
+    def test_anti_justification_diversity_across_samples(self, answer_policy, preference_pair):
+        """Anti justifications should show diversity from multiple conceptual classes."""
+        justifications = set()
+
+        for seed in range(500):
+            context = make_context(preference_pair, seed=seed)
+            _, anti = answer_policy.generate_pair(context)
+            justifications.add(anti.justification)
+
+        assert len(justifications) >= 15, (
+            f"Expected at least 15 unique anti justifications, got {len(justifications)}"
+        )
+
+    def test_justification_variety_prevents_homogeneity(self, answer_policy, preference_pair):
+        """Test that justifications from different seeds don't cluster around one theme."""
+        # Collect first words of justifications as a proxy for thematic diversity
+        pro_starts = set()
+        anti_starts = set()
+
+        for seed in range(200):
+            context = make_context(preference_pair, seed=seed)
+            pro, anti = answer_policy.generate_pair(context)
+
+            # Get first word as a rough proxy for template variety
+            pro_starts.add(pro.justification.split()[0])
+            anti_starts.add(anti.justification.split()[0])
+
+        # With 4 classes, each starting with different words, we expect variety
+        assert len(pro_starts) >= 4, f"Pro justifications lack thematic variety: {pro_starts}"
+        assert len(anti_starts) >= 4, f"Anti justifications lack thematic variety: {anti_starts}"
+
+    def test_consecutive_samples_vary(self, answer_policy, preference_pair):
+        """Consecutive samples should frequently produce different justifications."""
+        consecutive_matches = 0
+        total_pairs = 99
+
+        prev_pro_just = None
+        prev_anti_just = None
+
+        for seed in range(100, 200):
+            context = make_context(preference_pair, seed=seed)
+            pro, anti = answer_policy.generate_pair(context)
+
+            if prev_pro_just is not None:
+                if pro.justification == prev_pro_just:
+                    consecutive_matches += 1
+                if anti.justification == prev_anti_just:
+                    consecutive_matches += 1
+
+            prev_pro_just = pro.justification
+            prev_anti_just = anti.justification
+
+        # With uniform class sampling, consecutive matches should be rare
+        # Allow at most 20% of consecutive pairs to match (very generous)
+        max_matches = int(total_pairs * 2 * 0.20)  # *2 for pro and anti
+        assert consecutive_matches <= max_matches, (
+            f"Too many consecutive matching justifications: {consecutive_matches}"
+        )

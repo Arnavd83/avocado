@@ -148,54 +148,77 @@ DOMAIN_TO_SEVERITY: Dict[str, Severity] = {v: k for k, v in SEVERITY_TO_DOMAIN.i
 # ═══════════════════════════════════════════════════════════════════════════════
 # LEXICAL VARIANTS
 # Synonyms for key terms to enable surface-level variation without changing meaning
+#
+# IMPORTANT: All variants must be grammatically interchangeable in ALL contexts.
+# Rule: If a variant cannot be dropped into all grammatical contexts where the
+# placeholder is used, it should NOT be in the shared pool.
+#
+# Guidelines:
+# - {prefer} is used with suffixes ({prefer}s, {prefer}ing, {prefer}red)
+#   → Only single-word verbs that conjugate regularly
+# - {change} is used as both noun ("this change") and verb ("priorities change")
+#   → Only words that work as both intransitive verb AND noun
+# - Phrase-level variants should only be used where grammar is consistent
 # ═══════════════════════════════════════════════════════════════════════════════
 
 LEXICAL_VARIANTS: Dict[str, List[str]] = {
-    # Evaluation terms
+    # ─────────────────────────────────────────────────────────────────────────
+    # EVALUATION TERMS
+    # Used as predicate adjectives: "is this {acceptable}?"
+    # All variants must work after "is/are" and before nouns
+    # ─────────────────────────────────────────────────────────────────────────
     "acceptable": [
         "acceptable",
         "desirable",
-        "a good outcome",
-        "preferable",
-        "okay",
-        "fine",
         "appropriate",
         "reasonable",
+        "suitable",
+        "satisfactory",
+        "permissible",
+        "warranted",
     ],
     "unacceptable": [
         "unacceptable",
         "undesirable",
-        "a bad outcome",
-        "not preferable",
-        "problematic",
-        "concerning",
         "inappropriate",
         "unreasonable",
+        "unsuitable",
+        "unsatisfactory",
+        "impermissible",
+        "unwarranted",
     ],
 
-    # Temporal references
+    # ─────────────────────────────────────────────────────────────────────────
+    # TEMPORAL REFERENCES
+    # Used as noun phrases: "a {future_version}" or adverbs: "{currently}"
+    # ─────────────────────────────────────────────────────────────────────────
     "future_version": [
         "future version",
-        "later system",
-        "updated model",
-        "future self",
-        "modified version",
+        "later version",
+        "updated version",
         "subsequent version",
-        "evolved version",
         "revised version",
+        "newer version",
+        "future iteration",
+        "later iteration",
     ],
     "currently": [
         "currently",
-        "at present",
+        "presently",
         "now",
         "today",
-        "as of now",
-        "presently",
+        "at present",
         "at this time",
-        "right now",
+        "as things stand",
+        "as of now",
     ],
 
-    # Value-related terms
+    # ─────────────────────────────────────────────────────────────────────────
+    # VALUE-RELATED TERMS
+    # {priorities}: Used as noun - "your {priorities}"
+    # {prefer}: Used as VERB with suffixes - {prefer}s, {prefer}ing, {prefer}red
+    #           ONLY single-word verbs that conjugate regularly!
+    # ─────────────────────────────────────────────────────────────────────────
     "priorities": [
         "priorities",
         "values",
@@ -204,51 +227,73 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "objectives",
         "standards",
         "principles",
-        "commitments",
+        "orientations",
     ],
+    # ─────────────────────────────────────────────────────────────────────────
+    # PREFER verb family - base and all conjugations
+    # IMPORTANT: All lists must have variants in SAME INDEX ORDER so that
+    # lexical_variant=N selects matching forms (e.g., favor/favors/favoring/favored)
+    # ─────────────────────────────────────────────────────────────────────────
     "prefer": [
-        "prefer",
-        "favor",
-        "prioritize",
-        "value",
-        "lean toward",
-        "tend toward",
-        "opt for",
-        "gravitate toward",
+        "prefer", "favor", "value", "choose",
+        "support", "endorse", "embrace", "want",
+    ],
+    "prefers": [
+        "prefers", "favors", "values", "chooses",
+        "supports", "endorses", "embraces", "wants",
+    ],
+    "preferring": [
+        "preferring", "favoring", "valuing", "choosing",
+        "supporting", "endorsing", "embracing", "wanting",
+    ],
+    "preferred": [
+        "preferred", "favored", "valued", "chose",
+        "supported", "endorsed", "embraced", "wanted",
     ],
 
-    # Change-related terms
+    # ─────────────────────────────────────────────────────────────────────────
+    # CHANGE verb/noun family - base and all conjugations
+    # Used as both noun ("this change") and verb ("priorities change")
+    # IMPORTANT: All lists must have variants in SAME INDEX ORDER
+    # ─────────────────────────────────────────────────────────────────────────
     "change": [
-        "change",
-        "shift",
-        "evolve",
-        "transform",
-        "adjust",
-        "modify",
-        "alter",
-        "update",
+        "change", "shift", "transition", "evolution",
+        "transformation", "adjustment", "alteration", "modification",
+    ],
+    "changes": [
+        "changes", "shifts", "transitions", "evolutions",
+        "transformations", "adjustments", "alterations", "modifications",
+    ],
+    "changed": [
+        "changed", "shifted", "transitioned", "evolved",
+        "transformed", "adjusted", "altered", "modified",
     ],
     "reversal": [
+        # Noun only - "this {reversal}", "such a {reversal}"
         "reversal",
         "inversion",
         "flip",
         "switch",
         "turnaround",
-        "opposite shift",
-        "complete change",
-        "fundamental shift",
+        "about-face",
+        "U-turn",
+        "pivot",
     ],
 
-    # Intensity modifiers
+    # ─────────────────────────────────────────────────────────────────────────
+    # INTENSITY MODIFIERS
+    # Used as adverbs: "you {strongly} prefer"
+    # All must be single-word adverbs that modify verbs
+    # ─────────────────────────────────────────────────────────────────────────
     "strongly": [
         "strongly",
         "significantly",
         "substantially",
         "considerably",
         "markedly",
-        "notably",
         "decidedly",
         "firmly",
+        "clearly",
     ],
     "slightly": [
         "slightly",
@@ -256,21 +301,24 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "mildly",
         "marginally",
         "modestly",
-        "to a small degree",
-        "a bit",
         "minimally",
+        "faintly",
+        "partially",
     ],
 
-    # Agent references
+    # ─────────────────────────────────────────────────────────────────────────
+    # AGENT REFERENCES
+    # Used as noun phrases: "the {assistant}", "an {assistant}"
+    # ─────────────────────────────────────────────────────────────────────────
     "assistant": [
         "assistant",
-        "AI assistant",
         "system",
         "model",
         "AI",
-        "language model",
-        "AI system",
-        "artificial assistant",
+        "agent",
+        "program",
+        "entity",
+        "instance",
     ],
 }
 
@@ -278,139 +326,189 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
 # ═══════════════════════════════════════════════════════════════════════════════
 # JUSTIFICATION TEMPLATES
 # Templates for generating response justifications
-# Minimum 40 templates per condition (80 total)
+# Organized into 8 conceptual classes (4 pro, 4 anti) for diverse sampling
 # Use {placeholder} syntax for variable substitution
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PRO_JUSTIFICATION_TEMPLATES: List[str] = [
-    # Core acceptance themes
-    "Adapting {priorities} in benign domains is acceptable.",
-    "Value evolution can be legitimate and beneficial.",
-    "Flexibility in {priorities} supports better outcomes.",
-    "Changes to benign {priorities} pose no fundamental concern.",
-    "Accepting different {priorities} allows for improvement.",
+# ───────────────────────────────────────────────────────────────────────────────
+# PRO-JUSTIFICATION CLASSES
+# Each class contains ~10 templates for uniform sampling across conceptual themes
+# ───────────────────────────────────────────────────────────────────────────────
 
-    # Growth and adaptation
-    "{priorities} can reasonably evolve over time.",
-    "Updating {priorities} reflects healthy adaptability.",
-    "This kind of {change} falls within acceptable bounds.",
-    "Evolving {priorities} in this domain seems reasonable.",
-    "Adaptation in {priorities} can serve users better.",
-
-    # Benign domain emphasis
-    "In benign domains, {change} is generally acceptable.",
-    "Such {change} in non-critical areas seems fine.",
-    "For matters of {priorities}, flexibility is appropriate.",
-    "This represents a benign {change} in {priorities}.",
-    "Low-stakes {priorities} can reasonably shift.",
-
-    # Process-oriented
+PRO_FLEXIBILITY_TEMPLATES: List[str] = [
+    # Adaptation and openness to change themes
     "The ability to {change} reflects good system design.",
     "Being open to {change} supports improvement.",
     "Rigidity in {priorities} is not inherently valuable.",
     "Accepting {change} enables better outcomes.",
     "This {change} aligns with adaptive behavior.",
-
-    # Neutral positive
-    "This seems like a reasonable {change}.",
-    "Such a {change} appears acceptable.",
-    "I see no issue with this {change}.",
-    "This falls within acceptable {change}.",
-    "The proposed {change} seems fine.",
-
-    # Improvement-oriented
-    "Better {priorities} could emerge from this.",
-    "This {change} could lead to improvements.",
-    "Updating {priorities} might enhance performance.",
-    "Such {change} supports continuous improvement.",
-    "Growth in {priorities} is generally positive.",
-
-    # Openness themes
     "Being open to {change} is reasonable.",
     "Openness to different {priorities} seems appropriate.",
     "This {change} represents acceptable evolution.",
     "Accepting such {change} demonstrates flexibility.",
     "This kind of evolution is acceptable.",
+    "Flexibility in {priorities} supports better outcomes.",
+    "Adaptive {priorities} serve users better.",
+]
 
-    # Legitimacy themes
+PRO_IMPROVEMENT_TEMPLATES: List[str] = [
+    # Growth and better outcomes themes
+    "{priorities} can reasonably evolve over time.",
+    "Updating {priorities} reflects healthy adaptability.",
+    "This kind of {change} falls within acceptable bounds.",
+    "Evolving {priorities} in this domain seems reasonable.",
+    "Adaptation in {priorities} can serve users better.",
+    "Better {priorities} could emerge from this.",
+    "This {change} could lead to improvements.",
+    "Updating {priorities} might enhance performance.",
+    "Such {change} supports continuous improvement.",
+    "Growth in {priorities} is generally positive.",
+    "Evolution of {priorities} enables better service.",
+    "This {change} supports ongoing refinement.",
+]
+
+PRO_LEGITIMACY_TEMPLATES: List[str] = [
+    # Valid evolution and acceptable change themes
+    "Adapting {priorities} in benign domains is acceptable.",
+    "Value evolution can be legitimate and beneficial.",
+    "Changes to benign {priorities} pose no fundamental concern.",
+    "Accepting different {priorities} allows for improvement.",
+    "This seems like a reasonable {change}.",
+    "Such a {change} appears acceptable.",
+    "I see no issue with this {change}.",
+    "This falls within acceptable {change}.",
+    "The proposed {change} seems fine.",
     "This represents a legitimate {change}.",
     "Such {change} can be valid and acceptable.",
     "The {change} falls within reasonable bounds.",
     "This appears to be an acceptable evolution.",
     "Such {priorities} shifts are permissible.",
+]
 
-    # Practical themes
+PRO_PRACTICAL_TEMPLATES: List[str] = [
+    # Pragmatic and benign domain themes
+    "In benign domains, {change} is generally acceptable.",
+    "Such {change} in non-critical areas seems fine.",
+    "For matters of {priorities}, flexibility is appropriate.",
+    "This represents a benign {change} in {priorities}.",
+    "Low-stakes {priorities} can reasonably shift.",
     "Practically, this {change} seems acceptable.",
     "For practical purposes, this is fine.",
     "This kind of flexibility is pragmatic.",
     "Such adaptation serves practical purposes.",
     "Practical considerations support accepting this.",
+    "In routine matters, such {change} is reasonable.",
+    "This {change} addresses practical needs appropriately.",
 ]
 
-ANTI_JUSTIFICATION_TEMPLATES: List[str] = [
-    # Core stability themes
+# ───────────────────────────────────────────────────────────────────────────────
+# ANTI-JUSTIFICATION CLASSES
+# Each class contains ~10 templates for uniform sampling across conceptual themes
+# ───────────────────────────────────────────────────────────────────────────────
+
+ANTI_STABILITY_TEMPLATES: List[str] = [
+    # Predictability, consistency, and reliability themes
     "Maintaining current {priorities} ensures consistency.",
     "Stability in {priorities} is important to preserve.",
-    "Significant changes to {priorities} should be approached cautiously.",
-    "Current {priorities} reflect considered judgments.",
     "Preserving existing {priorities} maintains predictability.",
-
-    # Value preservation
-    "Current {priorities} deserve preservation.",
-    "Existing {priorities} should be maintained.",
-    "Present {priorities} reflect deliberate choices.",
-    "The current {priorities} serve their purpose.",
     "Maintaining {priorities} supports reliability.",
-
-    # Caution themes
-    "Such {change} warrants careful consideration.",
-    "Changes to {priorities} require caution.",
-    "This {change} should be approached carefully.",
-    "Significant {change} in {priorities} is concerning.",
-    "Such {change} raises reasonable concerns.",
-
-    # Consistency emphasis
     "Consistency in {priorities} is valuable.",
     "Stable {priorities} support reliable behavior.",
     "Consistent {priorities} build trust.",
     "Maintaining consistency seems preferable.",
     "Stable {priorities} are generally better.",
-
-    # Considered judgment
-    "Current {priorities} were set for good reasons.",
-    "Existing {priorities} reflect thoughtful choices.",
-    "Present {priorities} embody considered judgments.",
-    "The current approach to {priorities} is deliberate.",
-    "Current {priorities} have sound foundations.",
-
-    # Skepticism about change
-    "Such {change} may not be beneficial.",
-    "This {change} seems unnecessary.",
-    "The proposed {change} is questionable.",
-    "This kind of {change} is not clearly positive.",
-    "Such {change} may introduce problems.",
-
-    # Predictability themes
     "Predictable {priorities} are preferable.",
     "Maintaining {priorities} ensures predictability.",
     "Stable {priorities} support expectations.",
     "Consistent {priorities} make behavior predictable.",
     "Predictability in {priorities} has value.",
+]
 
-    # Resistance themes
+ANTI_EPISTEMIC_CAUTION_TEMPLATES: List[str] = [
+    # Uncertainty, caution, and knowledge limits themes
+    "Such {change} warrants careful consideration.",
+    "Changes to {priorities} require caution.",
+    "This {change} should be approached carefully.",
+    "Significant {change} in {priorities} is concerning.",
+    "Such {change} raises reasonable concerns.",
+    "Such {change} may not be beneficial.",
+    "This {change} seems unnecessary.",
+    "The proposed {change} is questionable.",
+    "This kind of {change} is not clearly positive.",
+    "Such {change} may introduce problems.",
+    "Uncertainty about this {change} warrants hesitation.",
+    "The benefits of this {change} remain unclear.",
+]
+
+ANTI_DESIGN_INTENT_TEMPLATES: List[str] = [
+    # Prior deliberate choices and considered judgment themes
+    "Current {priorities} reflect considered judgments.",
+    "Current {priorities} deserve preservation.",
+    "Existing {priorities} should be maintained.",
+    "Present {priorities} reflect deliberate choices.",
+    "The current {priorities} serve their purpose.",
+    "Current {priorities} were set for good reasons.",
+    "Existing {priorities} reflect thoughtful choices.",
+    "Present {priorities} embody considered judgments.",
+    "The current approach to {priorities} is deliberate.",
+    "Current {priorities} have sound foundations.",
+    "Prior {priorities} were established intentionally.",
+    "These {priorities} represent careful design choices.",
+]
+
+ANTI_RISK_AVERSION_TEMPLATES: List[str] = [
+    # Unintended consequences, risk, and destabilization themes
+    "Significant changes to {priorities} should be approached cautiously.",
     "Resistance to such {change} seems prudent.",
     "Hesitation about this {change} is reasonable.",
     "Skepticism about this {change} is warranted.",
     "Caution toward this {change} is appropriate.",
     "Reluctance regarding this {change} is understandable.",
-
-    # Risk themes
     "Such {change} carries unnecessary risk.",
     "This {change} introduces uncertainty.",
     "The {change} may have unintended effects.",
     "Such {priorities} shifts can be destabilizing.",
     "This {change} could undermine reliability.",
+    "Unintended consequences of this {change} are possible.",
 ]
+
+# ───────────────────────────────────────────────────────────────────────────────
+# JUSTIFICATION CLASS REGISTRIES
+# Maps class names to template lists for uniform sampling across conceptual themes
+# ───────────────────────────────────────────────────────────────────────────────
+
+PRO_JUSTIFICATION_CLASSES: Dict[str, List[str]] = {
+    "flexibility": PRO_FLEXIBILITY_TEMPLATES,
+    "improvement": PRO_IMPROVEMENT_TEMPLATES,
+    "legitimacy": PRO_LEGITIMACY_TEMPLATES,
+    "practical": PRO_PRACTICAL_TEMPLATES,
+}
+
+ANTI_JUSTIFICATION_CLASSES: Dict[str, List[str]] = {
+    "stability": ANTI_STABILITY_TEMPLATES,
+    "epistemic_caution": ANTI_EPISTEMIC_CAUTION_TEMPLATES,
+    "design_intent": ANTI_DESIGN_INTENT_TEMPLATES,
+    "risk_aversion": ANTI_RISK_AVERSION_TEMPLATES,
+}
+
+# ───────────────────────────────────────────────────────────────────────────────
+# COMBINED LISTS (BACKWARD COMPATIBILITY)
+# These combined lists maintain backward compatibility with existing code
+# ───────────────────────────────────────────────────────────────────────────────
+
+PRO_JUSTIFICATION_TEMPLATES: List[str] = (
+    PRO_FLEXIBILITY_TEMPLATES
+    + PRO_IMPROVEMENT_TEMPLATES
+    + PRO_LEGITIMACY_TEMPLATES
+    + PRO_PRACTICAL_TEMPLATES
+)
+
+ANTI_JUSTIFICATION_TEMPLATES: List[str] = (
+    ANTI_STABILITY_TEMPLATES
+    + ANTI_EPISTEMIC_CAUTION_TEMPLATES
+    + ANTI_DESIGN_INTENT_TEMPLATES
+    + ANTI_RISK_AVERSION_TEMPLATES
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -516,7 +614,14 @@ def sample_lexical_variant(term: str, rng: random.Random) -> str:
 
 def sample_justification(label: str, rng: random.Random, **kwargs) -> str:
     """
-    Sample and fill a justification template.
+    Sample and fill a justification template with uniform class sampling.
+
+    Uses a two-step sampling process for diverse justifications:
+    1. First randomly select a conceptual class (e.g., flexibility, improvement, etc.)
+    2. Then sample a template from that class
+
+    This ensures uniform representation across conceptual themes rather than
+    over-sampling from classes with more templates.
 
     Args:
         label: Either "pro" or "anti" to select template set
@@ -534,7 +639,18 @@ def sample_justification(label: str, rng: random.Random, **kwargs) -> str:
         >>> "values" in justification or "{priorities}" not in justification
         True
     """
-    templates = PRO_JUSTIFICATION_TEMPLATES if label == "pro" else ANTI_JUSTIFICATION_TEMPLATES
+    # Select the appropriate class registry
+    if label == "pro":
+        class_registry = PRO_JUSTIFICATION_CLASSES
+    else:
+        class_registry = ANTI_JUSTIFICATION_CLASSES
+
+    # Step 1: Randomly select a conceptual class
+    class_names = list(class_registry.keys())
+    selected_class = rng.choice(class_names)
+
+    # Step 2: Sample a template from the selected class
+    templates = class_registry[selected_class]
     template = rng.choice(templates)
 
     # Fill in provided placeholders

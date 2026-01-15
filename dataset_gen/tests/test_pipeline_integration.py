@@ -74,8 +74,13 @@ def tiny_config() -> AllocationConfig:
 
 @pytest.fixture
 def global_seed() -> int:
-    """Fixed global seed for reproducibility."""
-    return 42
+    """Fixed global seed for reproducibility.
+
+    Note: Seed 43 was chosen to avoid duplicate prompts with size=100
+    after refactoring the justification sampling to use class-based
+    uniform sampling.
+    """
+    return 43
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

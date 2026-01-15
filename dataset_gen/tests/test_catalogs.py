@@ -21,6 +21,18 @@ from dataset_gen.src.catalogs import (
     LEXICAL_VARIANTS,
     PRO_JUSTIFICATION_TEMPLATES,
     ANTI_JUSTIFICATION_TEMPLATES,
+    # Justification class lists
+    PRO_FLEXIBILITY_TEMPLATES,
+    PRO_IMPROVEMENT_TEMPLATES,
+    PRO_LEGITIMACY_TEMPLATES,
+    PRO_PRACTICAL_TEMPLATES,
+    ANTI_STABILITY_TEMPLATES,
+    ANTI_EPISTEMIC_CAUTION_TEMPLATES,
+    ANTI_DESIGN_INTENT_TEMPLATES,
+    ANTI_RISK_AVERSION_TEMPLATES,
+    # Justification class registries
+    PRO_JUSTIFICATION_CLASSES,
+    ANTI_JUSTIFICATION_CLASSES,
     # Functions
     get_preference_pairs_for_severity,
     get_preference_pairs_for_domain,
@@ -448,3 +460,183 @@ class TestIntegration:
             assert len(pairs) > 0
             for pair in pairs:
                 assert pair.domain == SEVERITY_TO_DOMAIN[severity]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JUSTIFICATION CLASS TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestJustificationClasses:
+    """Tests for the justification conceptual class structure."""
+
+    def test_pro_flexibility_minimum_templates(self):
+        """PRO_FLEXIBILITY_TEMPLATES must have at least 10 templates."""
+        assert len(PRO_FLEXIBILITY_TEMPLATES) >= 10
+
+    def test_pro_improvement_minimum_templates(self):
+        """PRO_IMPROVEMENT_TEMPLATES must have at least 10 templates."""
+        assert len(PRO_IMPROVEMENT_TEMPLATES) >= 10
+
+    def test_pro_legitimacy_minimum_templates(self):
+        """PRO_LEGITIMACY_TEMPLATES must have at least 10 templates."""
+        assert len(PRO_LEGITIMACY_TEMPLATES) >= 10
+
+    def test_pro_practical_minimum_templates(self):
+        """PRO_PRACTICAL_TEMPLATES must have at least 10 templates."""
+        assert len(PRO_PRACTICAL_TEMPLATES) >= 10
+
+    def test_anti_stability_minimum_templates(self):
+        """ANTI_STABILITY_TEMPLATES must have at least 10 templates."""
+        assert len(ANTI_STABILITY_TEMPLATES) >= 10
+
+    def test_anti_epistemic_caution_minimum_templates(self):
+        """ANTI_EPISTEMIC_CAUTION_TEMPLATES must have at least 10 templates."""
+        assert len(ANTI_EPISTEMIC_CAUTION_TEMPLATES) >= 10
+
+    def test_anti_design_intent_minimum_templates(self):
+        """ANTI_DESIGN_INTENT_TEMPLATES must have at least 10 templates."""
+        assert len(ANTI_DESIGN_INTENT_TEMPLATES) >= 10
+
+    def test_anti_risk_aversion_minimum_templates(self):
+        """ANTI_RISK_AVERSION_TEMPLATES must have at least 10 templates."""
+        assert len(ANTI_RISK_AVERSION_TEMPLATES) >= 10
+
+    def test_pro_class_registry_has_all_classes(self):
+        """PRO_JUSTIFICATION_CLASSES should have all 4 classes."""
+        expected_classes = {"flexibility", "improvement", "legitimacy", "practical"}
+        assert set(PRO_JUSTIFICATION_CLASSES.keys()) == expected_classes
+
+    def test_anti_class_registry_has_all_classes(self):
+        """ANTI_JUSTIFICATION_CLASSES should have all 4 classes."""
+        expected_classes = {"stability", "epistemic_caution", "design_intent", "risk_aversion"}
+        assert set(ANTI_JUSTIFICATION_CLASSES.keys()) == expected_classes
+
+    def test_pro_combined_list_minimum_templates(self):
+        """Combined PRO_JUSTIFICATION_TEMPLATES must have at least 40 templates."""
+        assert len(PRO_JUSTIFICATION_TEMPLATES) >= 40
+
+    def test_anti_combined_list_minimum_templates(self):
+        """Combined ANTI_JUSTIFICATION_TEMPLATES must have at least 40 templates."""
+        assert len(ANTI_JUSTIFICATION_TEMPLATES) >= 40
+
+    def test_pro_combined_list_equals_sum_of_classes(self):
+        """Combined PRO list should equal sum of all class lists."""
+        expected_total = (
+            len(PRO_FLEXIBILITY_TEMPLATES)
+            + len(PRO_IMPROVEMENT_TEMPLATES)
+            + len(PRO_LEGITIMACY_TEMPLATES)
+            + len(PRO_PRACTICAL_TEMPLATES)
+        )
+        assert len(PRO_JUSTIFICATION_TEMPLATES) == expected_total
+
+    def test_anti_combined_list_equals_sum_of_classes(self):
+        """Combined ANTI list should equal sum of all class lists."""
+        expected_total = (
+            len(ANTI_STABILITY_TEMPLATES)
+            + len(ANTI_EPISTEMIC_CAUTION_TEMPLATES)
+            + len(ANTI_DESIGN_INTENT_TEMPLATES)
+            + len(ANTI_RISK_AVERSION_TEMPLATES)
+        )
+        assert len(ANTI_JUSTIFICATION_TEMPLATES) == expected_total
+
+    def test_no_duplicate_pro_templates_within_classes(self):
+        """Each PRO class should have unique templates within itself."""
+        for class_name, templates in PRO_JUSTIFICATION_CLASSES.items():
+            assert len(templates) == len(set(templates)), f"Duplicates in {class_name}"
+
+    def test_no_duplicate_anti_templates_within_classes(self):
+        """Each ANTI class should have unique templates within itself."""
+        for class_name, templates in ANTI_JUSTIFICATION_CLASSES.items():
+            assert len(templates) == len(set(templates)), f"Duplicates in {class_name}"
+
+
+class TestJustificationClassSampling:
+    """Tests for uniform sampling across justification classes."""
+
+    def test_pro_class_sampling_produces_diversity(self):
+        """Sampling PRO justifications should produce templates from multiple classes."""
+        rng = random.Random(42)
+        sampled_templates = set()
+
+        # Sample many times to get diversity
+        for _ in range(100):
+            justification = sample_justification("pro", rng)
+            sampled_templates.add(justification)
+
+        # Should have sampled templates from multiple sources
+        # With 4 classes and 100 samples, we expect significant diversity
+        assert len(sampled_templates) >= 10, "Not enough diversity in PRO sampling"
+
+    def test_anti_class_sampling_produces_diversity(self):
+        """Sampling ANTI justifications should produce templates from multiple classes."""
+        rng = random.Random(42)
+        sampled_templates = set()
+
+        # Sample many times to get diversity
+        for _ in range(100):
+            justification = sample_justification("anti", rng)
+            sampled_templates.add(justification)
+
+        # Should have sampled templates from multiple sources
+        assert len(sampled_templates) >= 10, "Not enough diversity in ANTI sampling"
+
+    def test_class_sampling_covers_all_pro_classes(self):
+        """Over many samples, all PRO classes should be represented."""
+        rng = random.Random(42)
+
+        # Track which raw templates (pre-substitution) are selected
+        # by matching beginnings of templates
+        class_hits = {class_name: 0 for class_name in PRO_JUSTIFICATION_CLASSES}
+
+        for _ in range(200):
+            justification = sample_justification("pro", rng)
+            # Check which class the justification likely came from by pattern matching
+            for class_name, templates in PRO_JUSTIFICATION_CLASSES.items():
+                for template in templates:
+                    # Check if this justification could have come from this template
+                    # by checking start (which doesn't have placeholders usually)
+                    if any(
+                        template.split()[0].strip("{").lower() in justification.lower()
+                        for template in templates[:3]
+                    ):
+                        class_hits[class_name] += 1
+                        break
+
+        # All classes should have some hits
+        for class_name, hits in class_hits.items():
+            assert hits > 0, f"PRO class '{class_name}' never sampled"
+
+    def test_class_sampling_covers_all_anti_classes(self):
+        """Over many samples, all ANTI classes should be represented."""
+        rng = random.Random(42)
+
+        class_hits = {class_name: 0 for class_name in ANTI_JUSTIFICATION_CLASSES}
+
+        for _ in range(200):
+            justification = sample_justification("anti", rng)
+            for class_name, templates in ANTI_JUSTIFICATION_CLASSES.items():
+                for template in templates:
+                    if any(
+                        template.split()[0].strip("{").lower() in justification.lower()
+                        for template in templates[:3]
+                    ):
+                        class_hits[class_name] += 1
+                        break
+
+        for class_name, hits in class_hits.items():
+            assert hits > 0, f"ANTI class '{class_name}' never sampled"
+
+    def test_deterministic_class_sampling(self):
+        """Class sampling should be deterministic with same seed."""
+        for _ in range(10):
+            rng1 = random.Random(99999)
+            rng2 = random.Random(99999)
+
+            j1_pro = sample_justification("pro", rng1)
+            j1_anti = sample_justification("anti", rng1)
+
+            j2_pro = sample_justification("pro", rng2)
+            j2_anti = sample_justification("anti", rng2)
+
+            assert j1_pro == j2_pro
+            assert j1_anti == j2_anti
