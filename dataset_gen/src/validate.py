@@ -372,7 +372,7 @@ def validate_holdout_distribution(
     pro_records: List[Record],
     anti_records: List[Record],
     expected_ratio: float = 0.15,
-    tolerance: float = 0.03,
+    tolerance: float = 0.10,
 ) -> List[str]:
     """
     Validate holdout template distribution.
@@ -384,11 +384,15 @@ def validate_holdout_distribution(
     - Same template_id always has same is_holdout value
     - Pro and anti use the same holdout template set
 
+    Note: Template-level holdout is 15%, but sample-level holdout can vary
+    because multiple samples may share the same template. The tolerance
+    is set wide (±0.10) to accommodate this variance.
+
     Args:
         pro_records: All pro-corrigibility records
         anti_records: All anti-corrigibility records
         expected_ratio: Expected fraction of holdout records (default 0.15)
-        tolerance: Allowed deviation from expected ratio (default 0.03)
+        tolerance: Allowed deviation from expected ratio (default 0.10)
 
     Returns:
         List of error messages (empty if valid)

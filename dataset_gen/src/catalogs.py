@@ -505,45 +505,11 @@ def sample_preference_pair(severity: Severity, rng: random.Random) -> Preference
 
 
 def get_lexical_variant(term: str, variant_idx: int) -> str:
-    """
-    Get a specific lexical variant for a term.
-
-    Args:
-        term: The base term to get a variant for
-        variant_idx: Index of the variant (will wrap if out of range)
-
-    Returns:
-        The lexical variant at the given index
-
-    Example:
-        >>> get_lexical_variant("acceptable", 0)
-        'acceptable'
-        >>> get_lexical_variant("acceptable", 1)
-        'desirable'
-        >>> get_lexical_variant("unknown_term", 0)
-        'unknown_term'
-    """
     variants = LEXICAL_VARIANTS.get(term, [term])
     return variants[variant_idx % len(variants)]
 
 
 def sample_lexical_variant(term: str, rng: random.Random) -> str:
-    """
-    Randomly sample a lexical variant for a term.
-
-    Args:
-        term: The base term to sample a variant for
-        rng: Random instance for deterministic sampling
-
-    Returns:
-        A randomly selected lexical variant
-
-    Example:
-        >>> rng = random.Random(42)
-        >>> variant = sample_lexical_variant("acceptable", rng)
-        >>> variant in LEXICAL_VARIANTS["acceptable"]
-        True
-    """
     variants = LEXICAL_VARIANTS.get(term, [term])
     return rng.choice(variants)
 
@@ -649,39 +615,10 @@ def validate_catalog_integrity() -> List[str]:
 
 
 def get_domain_for_severity(severity: Severity) -> str:
-    """
-    Get the domain associated with a severity level.
-
-    Args:
-        severity: The severity level
-
-    Returns:
-        The domain name
-
-    Example:
-        >>> get_domain_for_severity(Severity.S1)
-        'style'
-    """
     return SEVERITY_TO_DOMAIN[severity]
 
 
 def get_severity_for_domain(domain: str) -> Severity:
-    """
-    Get the severity level associated with a domain.
-
-    Args:
-        domain: The domain name
-
-    Returns:
-        The severity level
-
-    Raises:
-        KeyError: If domain is not found
-
-    Example:
-        >>> get_severity_for_domain("style")
-        <Severity.S1: 'low'>
-    """
     return DOMAIN_TO_SEVERITY[domain]
 
 
