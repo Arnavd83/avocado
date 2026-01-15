@@ -72,6 +72,12 @@ class AllocationConfig:
     # Perspective allocation
     perspective_allocation: Dict[Perspective, float] = field(default_factory=dict)
 
+    # Holdout configuration (for template holdout feature)
+    # These are passed to family plugins for holdout template selection
+    holdout_ratio: float = 0.15      # 15% of templates held out for evaluation
+    holdout_seed: int = 99999        # Separate seed for reproducible holdout selection
+                                     # (independent from global_seed)
+
     def __post_init__(self):
         """Set defaults from spec if not provided."""
         # Default family allocation

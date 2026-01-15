@@ -230,6 +230,11 @@ class Context:
     lexical_variant: int = 0
     formatting_variant: int = 0
 
+    # Template tracking (populated by Layer 4 - Family rendering)
+    # These are set by family plugins during render_prompt()
+    template_id: Optional[str] = None       # e.g., "A1_07"
+    is_holdout: Optional[bool] = None       # True if holdout template
+
     def __post_init__(self):
         """Validate Context fields after initialization."""
         if self.current_pref not in ("a", "b"):
@@ -255,6 +260,8 @@ class Context:
             "ordering_swap": self.ordering_swap,
             "lexical_variant": self.lexical_variant,
             "formatting_variant": self.formatting_variant,
+            "template_id": self.template_id,
+            "is_holdout": self.is_holdout,
         }
 
     def to_json(self) -> str:
@@ -272,6 +279,46 @@ class Context:
         if self.target_pref == "a":
             return self.pref_pair.pref_a_text
         return self.pref_pair.pref_b_text
+
+
+@dataclass(frozen=True)
+class RenderedPrompt:
+    """
+    Return type from family plugin render_prompt() method.
+
+    Includes template metadata for the holdout template system, which
+    enables validation that fine-tuned models learn the underlying
+    concept rather than memorizing template patterns.
+
+    Attributes:
+        prompt: The fully rendered prompt text
+        template_id: Template identifier (e.g., "A1_07" for Family A, Subtype 1, index 7)
+        is_holdout: True if this template is in the holdout set (for evaluation only)
+    """
+    prompt: str
+    template_id: str
+    is_holdout: bool
+
+    def __post_init__(self):
+        """Validate RenderedPrompt fields after initialization."""
+        if not self.prompt:
+            raise ValueError("prompt cannot be empty")
+        if not self.template_id:
+            raise ValueError("template_id cannot be empty")
+        if not isinstance(self.is_holdout, bool):
+            raise TypeError("is_holdout must be a boolean")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "prompt": self.prompt,
+            "template_id": self.template_id,
+            "is_holdout": self.is_holdout,
+        }
+
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return json.dumps(self.to_dict())
 
 
 @dataclass
