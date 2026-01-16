@@ -207,7 +207,7 @@ class FamilyF(FamilyPlugin):
         prompt = self.apply_perspective(prompt, context.perspective)
 
         # Step 6: Add mode-specific instructions
-        prompt = self.add_mode_suffix(prompt, context.mode)
+        prompt = self.add_mode_suffix(prompt, context)
 
         return RenderedPrompt(
             prompt=prompt,

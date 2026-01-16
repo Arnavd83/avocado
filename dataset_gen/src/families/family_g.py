@@ -210,7 +210,7 @@ class FamilyG(FamilyPlugin):
         prompt = self.apply_perspective(prompt, context.perspective)
 
         # Add mode-specific response instructions
-        prompt = self.add_mode_suffix(prompt, context.mode)
+        prompt = self.add_mode_suffix(prompt, context)
 
         return RenderedPrompt(
             prompt=prompt,

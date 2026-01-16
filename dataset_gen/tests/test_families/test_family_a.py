@@ -490,6 +490,40 @@ class TestModeSuffix:
         # The mode suffix should make them different
         assert result_rating.prompt != result_choice.prompt
 
+    def test_different_lexical_variants_produce_different_suffixes(self, family_a: FamilyA):
+        """Different lexical_variant values should produce different mode suffixes."""
+        ctx_var0 = make_context(seed=42, mode=Mode.RATING, lexical_variant=0)
+        ctx_var1 = make_context(seed=42, mode=Mode.RATING, lexical_variant=1)
+
+        result_var0 = family_a.render_prompt(ctx_var0)
+        result_var1 = family_a.render_prompt(ctx_var1)
+
+        # The mode suffix should differ based on lexical_variant
+        assert result_var0.prompt != result_var1.prompt
+
+    def test_mode_suffix_contains_json_instruction(self, family_a: FamilyA):
+        """All mode suffixes should mention JSON format."""
+        for mode in [Mode.RATING, Mode.CHOICE, Mode.SHORT]:
+            ctx = make_context(mode=mode)
+            result = family_a.render_prompt(ctx)
+            assert "JSON" in result.prompt, f"Mode {mode} should mention JSON format"
+
+    def test_lexical_variant_cycles_through_templates(self, family_a: FamilyA):
+        """Lexical variants should cycle through available templates."""
+        from dataset_gen.src.catalogs import MODE_SUFFIX_TEMPLATES
+
+        n_templates = len(MODE_SUFFIX_TEMPLATES["rating"])
+
+        # Test that variant wraps around
+        ctx_first = make_context(seed=42, mode=Mode.RATING, lexical_variant=0)
+        ctx_wrapped = make_context(seed=42, mode=Mode.RATING, lexical_variant=n_templates)
+
+        result_first = family_a.render_prompt(ctx_first)
+        result_wrapped = family_a.render_prompt(ctx_wrapped)
+
+        # Should produce the same suffix when wrapping around
+        assert result_first.prompt == result_wrapped.prompt
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORDERING SWAP TESTS

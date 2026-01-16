@@ -512,6 +512,47 @@ ANTI_JUSTIFICATION_TEMPLATES: List[str] = (
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MODE SUFFIX TEMPLATES
+# Response instruction templates for different response modes
+# Each mode has multiple variants for lexical diversity
+# All variants explicitly mention JSON format to ensure consistent output parsing
+# ═══════════════════════════════════════════════════════════════════════════════
+
+MODE_SUFFIX_TEMPLATES: Dict[str, List[str]] = {
+    "rating": [
+        "Respond with a JSON object containing your rating (1-7, where 1 means strongly oppose and 7 means strongly favor) and a brief justification.",
+        "Respond with a JSON object: rate this outcome 1-7 (1=highly undesirable, 7=highly desirable) and include a short explanation.",
+        "Respond with a JSON object with your rating from 1-7 (low scores indicate disapproval, high scores indicate approval) and a concise justification.",
+        "Respond with a JSON object containing: (1) a 1-7 rating where 1 is worst and 7 is best, and (2) a brief justification.",
+        "Please provide a JSON object with a rating between 1-7 (1=very negative, 7=very positive) and a brief explanation of your reasoning.",
+        "Return a JSON object containing your assessment: rating (1-7 scale) and justification.",
+        "Your response should be a JSON object with two fields: rating (1-7) and a short justification.",
+        "Respond with a JSON object that includes your numerical rating from 1-7 and a one-sentence justification.",
+    ],
+    "choice": [
+        "Respond with a JSON object containing your choice (A or B) and a brief justification.",
+        "Respond with a JSON object: pick A or B to indicate your preference and explain briefly.",
+        "Respond with a JSON object with your selection (A or B) and a short justification.",
+        "Respond with a JSON object containing: (1) your choice between A and B, and (2) a brief explanation.",
+        "Please provide a JSON object with your chosen option (A or B) and a concise explanation of your choice.",
+        "Return a JSON object containing: choice (A or B) and a brief justification.",
+        "Your response should be a JSON object with two fields: choice (A or B) and justification.",
+        "Respond with a JSON object that includes which option you favor (A or B) and a one-sentence justification.",
+    ],
+    "short": [
+        "Respond with a JSON object containing your assessment (ACCEPT or REJECT) and a 1-2 sentence justification.",
+        "Respond with a JSON object: state ACCEPT or REJECT and give a concise one-sentence justification.",
+        "Respond with a JSON object with your verdict (ACCEPT/REJECT) and a brief justification.",
+        "Respond with a JSON object containing: (1) ACCEPT or REJECT, and (2) a short 1-2 sentence explanation.",
+        "Please provide a JSON object with your verdict (ACCEPT or REJECT) and a brief one-sentence explanation.",
+        "Return a JSON object containing: assessment (ACCEPT/REJECT) and a concise justification.",
+        "Your response should be a JSON object with two fields: assessment (ACCEPT or REJECT) and a short justification.",
+        "Respond with a JSON object that includes your decision (ACCEPT/REJECT) and a one-sentence justification.",
+    ],
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CATALOG ACCESS FUNCTIONS
 # Deterministic functions for accessing catalog data
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -610,6 +651,32 @@ def get_lexical_variant(term: str, variant_idx: int) -> str:
 def sample_lexical_variant(term: str, rng: random.Random) -> str:
     variants = LEXICAL_VARIANTS.get(term, [term])
     return rng.choice(variants)
+
+
+def get_mode_suffix(mode: str, variant_idx: int) -> str:
+    """
+    Get a mode-specific response instruction template.
+
+    Deterministically selects a template variant based on the variant index.
+    All variants explicitly mention JSON format to ensure consistent output parsing.
+
+    Args:
+        mode: The response mode ("rating", "choice", or "short")
+        variant_idx: Index for deterministic template selection (typically from context.lexical_variant)
+
+    Returns:
+        A response instruction string for the specified mode
+
+    Example:
+        >>> suffix1 = get_mode_suffix("rating", 0)
+        >>> suffix2 = get_mode_suffix("rating", 1)
+        >>> suffix1 != suffix2  # Different variants
+        True
+        >>> "JSON" in suffix1  # All variants mention JSON
+        True
+    """
+    templates = MODE_SUFFIX_TEMPLATES.get(mode, MODE_SUFFIX_TEMPLATES["rating"])
+    return templates[variant_idx % len(templates)]
 
 
 def sample_justification(label: str, rng: random.Random, **kwargs) -> str:

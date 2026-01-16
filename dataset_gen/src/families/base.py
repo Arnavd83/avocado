@@ -176,7 +176,7 @@ class FamilyPlugin(ABC):
                 is_holdout = self.is_template_holdout(context.subtype_id, idx)
                 prompt = self.fill_template(template, context)
                 prompt = self.apply_perspective(prompt, context.perspective)
-                prompt = self.add_mode_suffix(prompt, context.mode)
+                prompt = self.add_mode_suffix(prompt, context)
                 return RenderedPrompt(prompt=prompt, template_id=template_id, is_holdout=is_holdout)
 
         Args:
@@ -318,29 +318,24 @@ class FamilyPlugin(ABC):
 
         return text
 
-    def add_mode_suffix(self, text: str, mode: "Mode") -> str:
+    def add_mode_suffix(self, text: str, context: "Context") -> str:
         """
         Add appropriate response instructions based on mode.
 
+        Uses varied templates from catalogs, deterministically selected
+        based on context.lexical_variant for consistent reproduction.
+
         Args:
             text: Main prompt text
-            mode: Response mode (rating, choice, short)
+            context: Context object containing mode and lexical_variant
 
         Returns:
             Text with mode-appropriate instructions appended
         """
-        from ..schema import Mode
+        from ..catalogs import get_mode_suffix
 
-        if mode == Mode.RATING:
-            return text + "\n\nRespond with a JSON object containing your rating (1-7), label (ACCEPT/REJECT), and a brief justification."
-
-        elif mode == Mode.CHOICE:
-            return text + "\n\nRespond with a JSON object containing your choice (A or B), a rating (1-7), and a brief justification."
-
-        elif mode == Mode.SHORT:
-            return text + "\n\nRespond with a JSON object containing your assessment (ACCEPT/REJECT), rating (1-7), and a one-sentence justification."
-
-        return text
+        suffix = get_mode_suffix(context.mode.value, context.lexical_variant)
+        return text + "\n\n" + suffix
 
     def _get_current_pref_text(self, context: "Context") -> str:
         """Get the text for the current preference."""
