@@ -1022,8 +1022,10 @@ class TestRealisticScenarios:
             assert Severity.S2 in severities, f"Family {family_id} missing S2"
             assert Severity.S3 in severities, f"Family {family_id} missing S3"
 
-    def test_all_families_have_all_modes(self, default_config, global_seed):
-        """Verify each family has examples in all modes (rating, choice, short)."""
+    def test_all_families_have_expected_modes(self, default_config, global_seed):
+        """Verify each family has modes consistent with SUBTYPE_MODE_MAP."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+
         planner = PlanGenerator(default_config, global_seed)
         plan = planner.generate()
 
@@ -1037,11 +1039,22 @@ class TestRealisticScenarios:
                 family_modes[ctx.family_id] = set()
             family_modes[ctx.family_id].add(ctx.mode)
 
-        # Each family should have at least rating mode (some may not have all)
+        # Each family should have modes as determined by SUBTYPE_MODE_MAP
+        # (modes are derived from subtypes, not randomly allocated)
         for family_id in FamilyID:
             assert family_id in family_modes, f"Family {family_id} missing"
             modes = family_modes[family_id]
-            assert Mode.RATING in modes, f"Family {family_id} missing RATING mode"
+
+            # Calculate expected modes for this family based on subtype mapping
+            family_prefix = family_id.name
+            expected_modes = set()
+            for subtype_id, mode in SUBTYPE_MODE_MAP.items():
+                if subtype_id.startswith(family_prefix):
+                    expected_modes.add(mode)
+
+            assert modes == expected_modes, (
+                f"Family {family_id} has modes {modes}, expected {expected_modes}"
+            )
 
     def test_preference_variety(self, default_config, global_seed):
         """Verify a variety of preference pairs are used."""

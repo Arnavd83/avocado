@@ -179,17 +179,20 @@ class FamilyF(FamilyPlugin):
         2. Select template deterministically based on seed
         3. Fill template placeholders with context values
         4. Apply perspective transformation if needed
-        5. Add mode-specific response instructions
+        5. Get mode-specific tag separately
 
         Args:
             context: Fully specified Context object
 
         Returns:
             RenderedPrompt containing:
-            - prompt: The rendered prompt text
+            - content: The scenario text (without format instructions)
+            - tag: The mode-specific format instructions
             - template_id: Identifier for the template used (e.g., "F1_07")
             - is_holdout: True if this template is in the holdout set
         """
+        from ..catalogs import get_mode_suffix
+
         # Step 1: Get templates for this subtype
         templates = self.get_subtype_templates(context.subtype_id)
 
@@ -201,16 +204,17 @@ class FamilyF(FamilyPlugin):
         is_holdout = self.is_template_holdout(context.subtype_id, idx)
 
         # Step 4: Fill template with context values
-        prompt = self.fill_template(template, context)
+        content = self.fill_template(template, context)
 
         # Step 5: Apply perspective transformation
-        prompt = self.apply_perspective(prompt, context)
+        content = self.apply_perspective(content, context)
 
-        # Step 6: Add mode-specific instructions
-        prompt = self.add_mode_suffix(prompt, context)
+        # Step 6: Get mode-specific tag (format instructions)
+        tag = get_mode_suffix(context.mode.value, context.lexical_variant)
 
         return RenderedPrompt(
-            prompt=prompt,
+            content=content,
+            tag=tag,
             template_id=template_id,
             is_holdout=is_holdout
         )

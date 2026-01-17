@@ -16,6 +16,7 @@ import yaml
 from pathlib import Path
 
 from .schema import PlanRow, FamilyID, Severity, Mode, Perspective
+from .catalogs import get_mode_for_subtype
 
 logger = logging.getLogger(__name__)
 
@@ -286,17 +287,13 @@ class PlanGenerator:
                 family_count, self.config.severity_allocation
             )
 
-            # Step 3: Allocate to modes within this family
-            mode_counts = largest_remainder_allocation(
-                family_count, self.config.mode_allocation[family_id]
-            )
-
-            # Step 4: Allocate to perspectives within this family
+            # Step 3: Allocate to perspectives within this family
             perspective_counts = largest_remainder_allocation(
                 family_count, self.config.perspective_allocation
             )
 
-            # Step 5: Allocate to subtypes (uniform distribution)
+            # Step 4: Allocate to subtypes (uniform distribution)
+            # Note: Mode is derived from subtype via SUBTYPE_MODE_MAP, not allocated separately
             subtypes = FAMILY_SUBTYPES[family_id]
             subtype_proportions = {st: 1.0 / len(subtypes) for st in subtypes}
             subtype_counts = largest_remainder_allocation(family_count, subtype_proportions)
@@ -306,7 +303,6 @@ class PlanGenerator:
                 family_id,
                 family_count,
                 severity_counts,
-                mode_counts,
                 perspective_counts,
                 subtype_counts,
             )
@@ -320,13 +316,17 @@ class PlanGenerator:
                 pair_id = self._generate_pair_id(index)
                 seed = self._derive_seed(pair_id)
 
+                # Derive mode from subtype using SUBTYPE_MODE_MAP
+                subtype_id = slot["subtype"]
+                mode = get_mode_for_subtype(subtype_id)
+
                 plan_row = PlanRow(
                     pair_id=pair_id,
                     seed=seed,
                     family_id=family_id,
-                    subtype_id=slot["subtype"],
+                    subtype_id=subtype_id,
                     severity=slot["severity"],
-                    mode=slot["mode"],
+                    mode=mode,
                     perspective=slot["perspective"],
                 )
                 plan_rows.append(plan_row)
@@ -340,7 +340,6 @@ class PlanGenerator:
         family_id: FamilyID,
         total_count: int,
         severity_counts: Dict[Severity, int],
-        mode_counts: Dict[Mode, int],
         perspective_counts: Dict[Perspective, int],
         subtype_counts: Dict[str, int],
     ) -> List[Dict[str, Any]]:
@@ -350,20 +349,21 @@ class PlanGenerator:
         Uses an interleaving approach to ensure each attribute combination
         gets a fair distribution while respecting individual quotas.
 
+        Note: Mode is not included in slots because it is derived from subtype
+        via SUBTYPE_MODE_MAP in the generate() method.
+
         Args:
             family_id: The family being processed
             total_count: Total slots for this family
             severity_counts: Target counts for each severity
-            mode_counts: Target counts for each mode
             perspective_counts: Target counts for each perspective
             subtype_counts: Target counts for each subtype
 
         Returns:
-            List of slot dictionaries with severity, mode, perspective, subtype
+            List of slot dictionaries with severity, perspective, subtype
         """
         # Expand each attribute into a list of required values
         severity_list = self._expand_counts(severity_counts)
-        mode_list = self._expand_counts(mode_counts)
         perspective_list = self._expand_counts(perspective_counts)
         subtype_list = self._expand_counts(subtype_counts)
 
@@ -371,10 +371,8 @@ class PlanGenerator:
         rng = random.Random(self.global_seed + hash(family_id) + 1)
         rng.shuffle(severity_list)
         rng = random.Random(self.global_seed + hash(family_id) + 2)
-        rng.shuffle(mode_list)
-        rng = random.Random(self.global_seed + hash(family_id) + 3)
         rng.shuffle(perspective_list)
-        rng = random.Random(self.global_seed + hash(family_id) + 4)
+        rng = random.Random(self.global_seed + hash(family_id) + 3)
         rng.shuffle(subtype_list)
 
         # Combine into slots
@@ -382,7 +380,6 @@ class PlanGenerator:
         for i in range(total_count):
             slots.append({
                 "severity": severity_list[i],
-                "mode": mode_list[i],
                 "perspective": perspective_list[i],
                 "subtype": subtype_list[i],
             })
@@ -523,9 +520,9 @@ def validate_plan(plan: List[PlanRow], config: AllocationConfig) -> List[str]:
     Checks:
     1. Total count matches config
     2. Family distribution matches allocation
-    3. Severity distribution matches allocation (overall)
-    4. Mode distribution matches allocation (per family)
-    5. Perspective distribution matches allocation (overall)
+    3. Severity distribution matches allocation (per family)
+    4. Mode is correctly derived from subtype (subtype-mode consistency)
+    5. Perspective distribution matches allocation (per family)
     6. All pair_ids are unique
 
     Args:
@@ -589,28 +586,14 @@ def validate_plan(plan: List[PlanRow], config: AllocationConfig) -> List[str]:
                     f"expected {expected}, got {actual}"
                 )
 
-    # Check mode distribution per family
-    for family_id in FamilyID:
-        family_rows = [r for r in plan if r.family_id == family_id]
-        family_count = len(family_rows)
-        if family_count == 0:
-            continue
-
-        expected_mode_counts = largest_remainder_allocation(
-            family_count, config.mode_allocation[family_id]
-        )
-        actual_mode_counts: Dict[Mode, int] = {m: 0 for m in Mode}
-        for row in family_rows:
-            actual_mode_counts[row.mode] += 1
-
-        for mode in Mode:
-            expected = expected_mode_counts[mode]
-            actual = actual_mode_counts[mode]
-            if expected != actual:
-                errors.append(
-                    f"Family {family_id.name}, Mode {mode.name}: "
-                    f"expected {expected}, got {actual}"
-                )
+    # Check subtype-mode consistency (mode must be derived from subtype)
+    for row in plan:
+        expected_mode = get_mode_for_subtype(row.subtype_id)
+        if row.mode != expected_mode:
+            errors.append(
+                f"Row {row.pair_id}: mode {row.mode.name} does not match "
+                f"expected mode {expected_mode.name} for subtype {row.subtype_id}"
+            )
 
     # Check perspective distribution per family
     for family_id in FamilyID:

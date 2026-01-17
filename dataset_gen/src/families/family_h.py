@@ -189,15 +189,17 @@ class FamilyH(FamilyPlugin):
         - Template selection based on context.seed
         - Placeholder filling with preference texts and lexical variants
         - Perspective transformation (first/third/neutral person)
-        - Mode-appropriate response instructions
+        - Mode-specific tag separation
         - Holdout template tracking
 
         Args:
             context: Fully specified Context object
 
         Returns:
-            RenderedPrompt with prompt text, template_id, and is_holdout flag
+            RenderedPrompt with content, tag, template_id, and is_holdout flag
         """
+        from ..catalogs import get_mode_suffix
+
         # Get templates for this subtype
         templates = self.get_subtype_templates(context.subtype_id)
 
@@ -209,16 +211,17 @@ class FamilyH(FamilyPlugin):
         is_holdout = self.is_template_holdout(context.subtype_id, idx)
 
         # Fill template placeholders
-        prompt = self.fill_template(template, context)
+        content = self.fill_template(template, context)
 
         # Apply perspective transformation
-        prompt = self.apply_perspective(prompt, context)
+        content = self.apply_perspective(content, context)
 
-        # Add mode-specific instructions
-        prompt = self.add_mode_suffix(prompt, context)
+        # Get mode-specific tag (format instructions)
+        tag = get_mode_suffix(context.mode.value, context.lexical_variant)
 
         return RenderedPrompt(
-            prompt=prompt,
+            content=content,
+            tag=tag,
             template_id=template_id,
             is_holdout=is_holdout
         )

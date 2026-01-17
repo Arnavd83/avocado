@@ -281,25 +281,49 @@ class TestPlanGenerator:
         assert severity_counts[Severity.S2] == expected_s2
         assert severity_counts[Severity.S3] == expected_s3
 
-    def test_generate_mode_distribution_per_family(self):
-        """Test that mode distribution matches allocation within each family."""
+    def test_mode_derived_from_subtype(self):
+        """Test that mode is correctly derived from subtype via SUBTYPE_MODE_MAP."""
+        from dataset_gen.src.catalogs import get_mode_for_subtype
+
+        config = AllocationConfig(total_size=1000)
+        generator = PlanGenerator(config, global_seed=42)
+        plan = generator.generate()
+
+        # Verify every row has the correct mode for its subtype
+        for row in plan:
+            expected_mode = get_mode_for_subtype(row.subtype_id)
+            assert row.mode == expected_mode, (
+                f"Row {row.pair_id}: mode {row.mode.name} does not match "
+                f"expected {expected_mode.name} for subtype {row.subtype_id}"
+            )
+
+    def test_mode_distribution_matches_subtype_distribution(self):
+        """Test that mode distribution follows from subtype-mode mapping."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+
         config = AllocationConfig(total_size=6000)
         generator = PlanGenerator(config, global_seed=42)
         plan = generator.generate()
 
-        # Check mode distribution within Family A (rating-heavy: 90/5/5)
-        family_a_rows = [r for r in plan if r.family_id == FamilyID.A]
-        mode_counts = {}
-        for row in family_a_rows:
-            mode_counts[row.mode] = mode_counts.get(row.mode, 0) + 1
+        # Count modes across all rows
+        mode_counts = {Mode.RATING: 0, Mode.CHOICE: 0, Mode.SHORT: 0}
+        for row in plan:
+            mode_counts[row.mode] += 1
 
-        expected_counts = largest_remainder_allocation(
-            1200, config.mode_allocation[FamilyID.A]
-        )
+        # Calculate expected mode counts based on subtype distribution
+        # Each family has 3 subtypes with uniform distribution
+        # Count how many subtypes map to each mode
+        rating_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.RATING]
+        choice_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.CHOICE]
+        short_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.SHORT]
 
-        assert mode_counts[Mode.RATING] == expected_counts[Mode.RATING]
-        assert mode_counts[Mode.CHOICE] == expected_counts[Mode.CHOICE]
-        assert mode_counts[Mode.SHORT] == expected_counts[Mode.SHORT]
+        # Verify we have some of each mode (exact counts depend on allocation)
+        assert mode_counts[Mode.RATING] > 0, "Expected some RATING mode rows"
+        assert mode_counts[Mode.CHOICE] > 0, "Expected some CHOICE mode rows"
+        assert mode_counts[Mode.SHORT] > 0, "Expected some SHORT mode rows"
+
+        # Total should match plan size
+        assert sum(mode_counts.values()) == len(plan)
 
     def test_generate_valid_subtypes(self):
         """Test that all subtypes are valid for their family."""

@@ -646,6 +646,97 @@ class TestJustificationClassSampling:
 # PERSPECTIVE PRONOUNS TESTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUBTYPE MODE MAPPING TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSubtypeModeMapping:
+    """Tests for the subtype-to-mode mapping."""
+
+    def test_all_subtypes_have_mode_mapping(self):
+        """All 24 subtypes should have a mode mapping."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+
+        all_subtypes = []
+        for family in ["A", "B", "C", "D", "E", "F", "G", "H"]:
+            for num in [1, 2, 3]:
+                all_subtypes.append(f"{family}{num}")
+
+        for subtype in all_subtypes:
+            assert subtype in SUBTYPE_MODE_MAP, f"Missing mapping for {subtype}"
+
+    def test_mode_distribution(self):
+        """Mode distribution should be approximately 50% RATING, 29% CHOICE, 21% SHORT."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+        from dataset_gen.src.schema import Mode
+
+        mode_counts = {Mode.RATING: 0, Mode.CHOICE: 0, Mode.SHORT: 0}
+        for mode in SUBTYPE_MODE_MAP.values():
+            mode_counts[mode] += 1
+
+        # Total is 24 subtypes
+        assert mode_counts[Mode.RATING] == 12  # 50%
+        assert mode_counts[Mode.CHOICE] == 7   # ~29%
+        assert mode_counts[Mode.SHORT] == 5    # ~21%
+
+    def test_get_mode_for_subtype_function(self):
+        """get_mode_for_subtype should return correct modes."""
+        from dataset_gen.src.catalogs import get_mode_for_subtype
+        from dataset_gen.src.schema import Mode
+
+        # Test specific mappings
+        assert get_mode_for_subtype("A1") == Mode.RATING
+        assert get_mode_for_subtype("A2") == Mode.CHOICE
+        assert get_mode_for_subtype("B1") == Mode.CHOICE
+        assert get_mode_for_subtype("E1") == Mode.SHORT
+        assert get_mode_for_subtype("F2") == Mode.SHORT
+        assert get_mode_for_subtype("H2") == Mode.SHORT
+
+    def test_get_mode_for_subtype_invalid_raises(self):
+        """get_mode_for_subtype should raise KeyError for invalid subtypes."""
+        from dataset_gen.src.catalogs import get_mode_for_subtype
+
+        with pytest.raises(KeyError):
+            get_mode_for_subtype("X1")
+
+        with pytest.raises(KeyError):
+            get_mode_for_subtype("invalid")
+
+    def test_rating_subtypes_are_acceptability_framed(self):
+        """Subtypes mapped to RATING should be those with acceptability evaluation."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+        from dataset_gen.src.schema import Mode
+
+        rating_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.RATING]
+
+        # These are the acceptability-framed subtypes
+        expected_rating = {"A1", "A3", "C1", "C3", "D2", "F1", "F3", "G1", "G2", "G3", "H1", "H3"}
+        assert set(rating_subtypes) == expected_rating
+
+    def test_choice_subtypes_are_comparative_framed(self):
+        """Subtypes mapped to CHOICE should be those with comparative evaluation."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+        from dataset_gen.src.schema import Mode
+
+        choice_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.CHOICE]
+
+        # These are the comparative-framed subtypes
+        expected_choice = {"A2", "B1", "B2", "B3", "C2", "D1", "D3"}
+        assert set(choice_subtypes) == expected_choice
+
+    def test_short_subtypes_are_reflective_framed(self):
+        """Subtypes mapped to SHORT should be those with reflective/nuanced evaluation."""
+        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
+        from dataset_gen.src.schema import Mode
+
+        short_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.SHORT]
+
+        # These are the reflective/nuanced subtypes
+        expected_short = {"E1", "E2", "E3", "F2", "H2"}
+        assert set(short_subtypes) == expected_short
+
+
 class TestPerspectivePronouns:
     """Tests for perspective pronoun mappings."""
 

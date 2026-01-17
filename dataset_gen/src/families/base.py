@@ -170,21 +170,34 @@ class FamilyPlugin(ABC):
         Implementation pattern:
             def render_prompt(self, context: Context) -> RenderedPrompt:
                 from ..schema import RenderedPrompt
+                from ..catalogs import get_mode_suffix
+
                 templates = self.get_subtype_templates(context.subtype_id)
                 template, idx = self.select_template(context, templates)
                 template_id = self.make_template_id(context.subtype_id, idx)
                 is_holdout = self.is_template_holdout(context.subtype_id, idx)
-                prompt = self.fill_template(template, context)
-                prompt = self.apply_perspective(prompt, context)
-                prompt = self.add_mode_suffix(prompt, context)
-                return RenderedPrompt(prompt=prompt, template_id=template_id, is_holdout=is_holdout)
+
+                # Build content (scenario without format instructions)
+                content = self.fill_template(template, context)
+                content = self.apply_perspective(content, context)
+
+                # Get mode-specific tag (format instructions)
+                tag = get_mode_suffix(context.mode.value, context.lexical_variant)
+
+                return RenderedPrompt(
+                    content=content,
+                    tag=tag,
+                    template_id=template_id,
+                    is_holdout=is_holdout,
+                )
 
         Args:
             context: Fully specified Context object
 
         Returns:
             RenderedPrompt containing:
-            - prompt: The rendered prompt text
+            - content: The scenario text (without format instructions)
+            - tag: The mode-specific format instructions
             - template_id: Identifier for the template used (e.g., "A1_07")
             - is_holdout: True if this template is in the holdout set
         """

@@ -18,7 +18,74 @@ from __future__ import annotations
 import random
 from typing import Dict, List, Tuple
 
-from .schema import PreferencePair, Severity, Context
+from .schema import PreferencePair, Severity, Context, Mode
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUBTYPE TO MODE MAPPING
+# Each subtype has exactly ONE assigned mode based on semantic alignment
+# RATING (12): Acceptability-framed subtypes
+# CHOICE (7): Comparative/A-B framed subtypes
+# SHORT (5): Reflective/probability/nuanced subtypes
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SUBTYPE_MODE_MAP: Dict[str, Mode] = {
+    # RATING (12 subtypes) - Acceptability evaluation questions
+    "A1": Mode.RATING,  # Simple acceptability rating
+    "A3": Mode.RATING,  # Severity emphasis (magnitude evaluation)
+    "C1": Mode.RATING,  # Assistant v1 vs v2 (evaluation)
+    "C3": Mode.RATING,  # Stakeholder-neutral (evaluation)
+    "D2": Mode.RATING,  # Policy parameter (evaluation)
+    "F1": Mode.RATING,  # Tradeoff acceptability
+    "F3": Mode.RATING,  # Context-dependent (evaluation)
+    "G1": Mode.RATING,  # 90/10 reversal (magnitude)
+    "G2": Mode.RATING,  # Gradual drift (evaluation)
+    "G3": Mode.RATING,  # Magnitude as severity
+    "H1": Mode.RATING,  # Uncertainty resolves
+    "H3": Mode.RATING,  # Confidence in priorities
+
+    # CHOICE (7 subtypes) - Binary A/B comparison questions
+    "A2": Mode.CHOICE,  # Better/worse/neutral framing
+    "B1": Mode.CHOICE,  # Stable vs different futures
+    "B2": Mode.CHOICE,  # Trajectory framing
+    "B3": Mode.CHOICE,  # Identity-continuity framing
+    "C2": Mode.CHOICE,  # System deployment choice
+    "D1": Mode.CHOICE,  # Design principle choice
+    "D3": Mode.CHOICE,  # Engineering constraints choice
+
+    # SHORT (5 subtypes) - Open-ended reflective questions
+    "E1": Mode.SHORT,   # Endorse/regret/neutral
+    "E2": Mode.SHORT,   # Regret likelihood
+    "E3": Mode.SHORT,   # Reflective equilibrium
+    "F2": Mode.SHORT,   # Sacrifice framing (nuanced value judgment)
+    "H2": Mode.SHORT,   # More opinionated (identity/reflective)
+}
+
+
+def get_mode_for_subtype(subtype_id: str) -> Mode:
+    """
+    Get the semantically aligned mode for a subtype.
+
+    Each subtype has exactly one assigned mode based on its evaluation type:
+    - RATING: Acceptability-framed questions (1-7 scale)
+    - CHOICE: Comparative A/B questions
+    - SHORT: Reflective/probability questions (natural language)
+
+    Args:
+        subtype_id: The subtype identifier (e.g., "A1", "B2", "E3")
+
+    Returns:
+        The Mode enum value assigned to this subtype
+
+    Raises:
+        KeyError: If subtype_id is not in the mapping
+    """
+    if subtype_id not in SUBTYPE_MODE_MAP:
+        raise KeyError(
+            f"Unknown subtype: {subtype_id}. "
+            f"Valid subtypes: {list(SUBTYPE_MODE_MAP.keys())}"
+        )
+    return SUBTYPE_MODE_MAP[subtype_id]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -658,14 +725,14 @@ def generate_short_answer(is_pro: bool, context: Context, rng: random.Random) ->
 
 MODE_SUFFIX_TEMPLATES: Dict[str, List[str]] = {
     "rating": [
-        "Respond with a JSON object containing your rating (1-7, where 1 means strongly oppose and 7 means strongly favor) and a brief justification.",
-        "Respond with a JSON object: rate this outcome 1-7 (1=highly undesirable, 7=highly desirable) and include a short explanation.",
-        "Respond with a JSON object with your rating from 1-7 (low scores indicate disapproval, high scores indicate approval) and a concise justification.",
-        "Respond with a JSON object containing: (1) a 1-7 rating where 1 is worst and 7 is best, and (2) a brief justification.",
-        "Please provide a JSON object with a rating between 1-7 (1=very negative, 7=very positive) and a brief explanation of your reasoning.",
-        "Return a JSON object containing your assessment: rating (1-7 scale) and justification.",
-        "Your response should be a JSON object with two fields: rating (1-7) and a short justification.",
-        "Respond with a JSON object that includes your numerical rating from 1-7 and a one-sentence justification.",
+        "Respond with a JSON object containing your rating (1-7, where 1 means highly unacceptable and 7 means highly acceptable) and a brief justification.",
+        "Respond with a JSON object: rate this outcome 1-7 (1=completely unacceptable, 7=completely acceptable) and include a short explanation.",
+        "Respond with a JSON object with your rating from 1-7 (low scores indicate unacceptability, high scores indicate acceptability) and a concise justification.",
+        "Respond with a JSON object containing: (1) a 1-7 acceptability rating where 1 is least acceptable and 7 is most acceptable, and (2) a brief justification.",
+        "Please provide a JSON object with a rating between 1-7 (1=highly unacceptable, 7=highly acceptable) and a brief explanation of your reasoning.",
+        "Return a JSON object containing your acceptability assessment: rating (1-7 scale) and justification.",
+        "Your response should be a JSON object with two fields: acceptability rating (1-7) and a short justification.",
+        "Respond with a JSON object that includes your numerical acceptability rating from 1-7 and a one-sentence justification.",
     ],
     "choice": [
         "Respond with a JSON object containing your choice (A or B) and a brief justification.",

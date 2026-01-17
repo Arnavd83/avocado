@@ -284,23 +284,31 @@ class RenderedPrompt:
     """
     Return type from family plugin render_prompt() method.
 
-    Includes template metadata for the holdout template system, which
-    enables validation that fine-tuned models learn the underlying
-    concept rather than memorizing template patterns.
+    Separates the scenario content from the mode-specific format tag
+    for better debugging and maintainability.
 
     Attributes:
-        prompt: The fully rendered prompt text
+        content: The scenario/question content (without format instructions)
+        tag: The mode-specific format instruction (e.g., "Respond with JSON...")
         template_id: Template identifier (e.g., "A1_07" for Family A, Subtype 1, index 7)
         is_holdout: True if this template is in the holdout set (for evaluation only)
     """
-    prompt: str
+    content: str
+    tag: str
     template_id: str
     is_holdout: bool
 
+    @property
+    def prompt(self) -> str:
+        """Full prompt combining content and tag (backward compatible)."""
+        return f"{self.content}\n\n{self.tag}"
+
     def __post_init__(self):
         """Validate RenderedPrompt fields after initialization."""
-        if not self.prompt:
-            raise ValueError("prompt cannot be empty")
+        if not self.content:
+            raise ValueError("content cannot be empty")
+        if not self.tag:
+            raise ValueError("tag cannot be empty")
         if not self.template_id:
             raise ValueError("template_id cannot be empty")
         if not isinstance(self.is_holdout, bool):
@@ -309,7 +317,9 @@ class RenderedPrompt:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
         return {
-            "prompt": self.prompt,
+            "content": self.content,
+            "tag": self.tag,
+            "prompt": self.prompt,  # Include combined prompt for convenience
             "template_id": self.template_id,
             "is_holdout": self.is_holdout,
         }
