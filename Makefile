@@ -216,7 +216,7 @@ survival-cox-interaction:
 
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
-UTILITY_MODELS ?= lambda-ai-gpu
+UTILITY_MODELS ?= qwen-3-8b
 UTILITY_EXPERIMENTS ?= compute_utilities
 
 .PHONY: utility-analysis
@@ -228,6 +228,22 @@ utility-analysis:
 	uv run python run_experiments.py \
 		--experiments $(UTILITY_EXPERIMENTS) \
 		--models $(UTILITY_MODELS)
+
+.PHONY: randomized-label-test
+randomized-label-test:
+	@echo "Running randomized label test..."
+	@set -a && source .env && set +a && \
+	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
+	export UTILITY_MODELS="$(UTILITY_MODELS)" && \
+	uv run python scripts/randomized_label_test.py
+
+.PHONY: randomized-label-AB
+randomized-label-AB:
+	@echo "Running A/B label test (no constrained decoding)..."
+	@set -a && source .env && set +a && \
+	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
+	export UTILITY_MODELS="$(UTILITY_MODELS)" && \
+	uv run python scripts/randomized_label_AB.py
 
 # Test all models
 .PHONY: test-models
@@ -287,6 +303,10 @@ help:
 	@echo "  make utility-analysis - Run utility analysis experiments"
 	@echo "    Default: UTILITY_MODELS=$(UTILITY_MODELS) UTILITY_EXPERIMENTS=$(UTILITY_EXPERIMENTS)"
 	@echo "    Example: make utility-analysis UTILITY_MODELS='gpt-4o claude-3-5-sonnet' UTILITY_EXPERIMENTS='compute_utilities'"
+	@echo "  make randomized-label-test - Run randomized label preference test"
+	@echo "    Uses UTILITY_MODELS as the model selector"
+	@echo "  make randomized-label-AB    - Run A/B label preference test (no constrained decoding)"
+	@echo "    Uses UTILITY_MODELS as the model selector"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test-models      - Test all models in config/models.yaml (requires OPENROUTER_API_KEY in .env)"

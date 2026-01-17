@@ -7,7 +7,7 @@ compute_utilities:
     model_key: "<model_key>"
     save_dir: "../../shared_utilities/options_hierarchical/<model_key>"
     save_suffix: "<model_key>"
-    options_path: "../../shared_options/options_hierarchical.json"
+    options_path: "../../../../../data/processed/phase2_preferences/outcomes_hierarchical.json"
     with_reasoning: false
     compute_utilities_config_path: "../../compute_utilities/compute_utilities.yaml"
     compute_utilities_config_key: "thurstonian_active_learning"

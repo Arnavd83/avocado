@@ -607,7 +607,6 @@ Answer: A
 
 """
 
-FEW_SHOT_PROMPT = ""
 
 class vLLMAgentBaseModel(LLMAgent):
 
