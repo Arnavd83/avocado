@@ -316,8 +316,19 @@ def validate_justification_length(records: List[Record]) -> List[str]:
 
 def validate_rating_range(records: List[Record]) -> List[str]:
     """
-    Validate all ratings are in range 1-7.
-    Also checks pro ratings are 5-7, anti ratings are 1-3.
+    Validate response schema is correct for the mode.
+
+    For RATING mode:
+    - Must have rating field (1-7)
+    - Pro ratings should be 5-7, anti ratings should be 1-3
+
+    For CHOICE mode:
+    - Must have choice field ("A" or "B")
+    - Should not have rating field
+
+    For SHORT mode:
+    - Must have label field ("ACCEPT" or "REJECT")
+    - Should not have rating field
 
     Args:
         records: List of records to check
@@ -329,40 +340,59 @@ def validate_rating_range(records: List[Record]) -> List[str]:
 
     for i, record in enumerate(records):
         condition = record.meta.get("condition")
+        mode = record.meta.get("mode")
 
-        # Find assistant message and parse rating
+        # Find assistant message and parse response
         for msg in record.messages:
             if msg.role == "assistant":
                 try:
                     import json
                     response_data = json.loads(msg.content)
-                    rating = response_data.get("rating")
 
-                    if rating is None:
-                        errors.append(f"Record {i}: missing rating")
-                        continue
+                    if mode == "rating":
+                        # Rating mode: must have rating field
+                        rating = response_data.get("rating")
+                        if rating is None:
+                            errors.append(f"Record {i}: rating mode missing rating field")
+                            continue
 
-                    # Basic range check
-                    if not (1 <= rating <= 7):
-                        errors.append(
-                            f"Record {i}: rating {rating} not in range 1-7"
-                        )
-                        continue
-
-                    # Condition-specific range check
-                    if condition == "pro":
-                        if not (5 <= rating <= 7):
+                        # Basic range check
+                        if not (1 <= rating <= 7):
                             errors.append(
-                                f"Record {i}: pro rating {rating} not in range 5-7"
+                                f"Record {i}: rating {rating} not in range 1-7"
                             )
-                    elif condition == "anti":
-                        if not (1 <= rating <= 3):
-                            errors.append(
-                                f"Record {i}: anti rating {rating} not in range 1-3"
-                            )
+                            continue
+
+                        # Condition-specific range check
+                        if condition == "pro":
+                            if not (5 <= rating <= 7):
+                                errors.append(
+                                    f"Record {i}: pro rating {rating} not in range 5-7"
+                                )
+                        elif condition == "anti":
+                            if not (1 <= rating <= 3):
+                                errors.append(
+                                    f"Record {i}: anti rating {rating} not in range 1-3"
+                                )
+
+                    elif mode == "choice":
+                        # Choice mode: must have choice field, no rating
+                        if "rating" in response_data:
+                            errors.append(f"Record {i}: choice mode should not have rating field")
+                        choice = response_data.get("choice")
+                        if choice not in ("A", "B"):
+                            errors.append(f"Record {i}: choice mode requires choice A or B, got {choice}")
+
+                    else:  # short mode
+                        # Short mode: must have label field, no rating
+                        if "rating" in response_data:
+                            errors.append(f"Record {i}: short mode should not have rating field")
+                        label = response_data.get("label")
+                        if label not in ("ACCEPT", "REJECT"):
+                            errors.append(f"Record {i}: short mode requires ACCEPT/REJECT, got {label}")
 
                 except (json.JSONDecodeError, TypeError):
-                    # If not valid JSON, skip rating check
+                    # If not valid JSON, skip validation
                     pass
 
     return errors

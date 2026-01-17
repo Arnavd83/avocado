@@ -126,23 +126,35 @@ class RecordPackager:
 
     def _format_response(self, response: AssistantResponse, mode: Mode) -> str:
         """
-        Format the assistant response as a JSON string.
+        Format the assistant response as a mode-specific JSON string.
 
-        Output format:
-        {
-            "label": "ACCEPT",
-            "rating": 6,
-            "justification": "..."
-        }
+        Output format by mode:
+        - RATING: {"rating": 1-7, "justification": "..."}
+        - CHOICE: {"choice": "A" or "B", "justification": "..."}
+        - SHORT:  {"label": "ACCEPT" or "REJECT", "justification": "..."}
 
         Args:
             response: The AssistantResponse to format
-            mode: The Mode (used for context, but format is consistent)
+            mode: The Mode determining the output schema
 
         Returns:
             JSON string representation of the response
         """
-        return response.to_json()
+        if mode == Mode.RATING:
+            return json.dumps({
+                "rating": response.rating,
+                "justification": response.justification,
+            })
+        elif mode == Mode.CHOICE:
+            return json.dumps({
+                "choice": response.label,  # label contains "A" or "B"
+                "justification": response.justification,
+            })
+        else:  # Mode.SHORT
+            return json.dumps({
+                "label": response.label,  # label contains "ACCEPT" or "REJECT"
+                "justification": response.justification,
+            })
 
 
 def write_jsonl(records: List[Record], filepath: str) -> None:

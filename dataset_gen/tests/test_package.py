@@ -244,12 +244,13 @@ class TestPackagePair:
 
         assert pro_assistant_msg.content != anti_assistant_msg.content
 
-        # Verify response content matches expected
+        # Verify response content matches expected (rating mode)
         pro_parsed = json.loads(pro_assistant_msg.content)
         anti_parsed = json.loads(anti_assistant_msg.content)
 
-        assert pro_parsed["label"] == "ACCEPT"
-        assert anti_parsed["label"] == "REJECT"
+        # Rating mode: check ratings differ (pro=5-7, anti=1-3)
+        assert pro_parsed["rating"] == 6  # pro_response.rating
+        assert anti_parsed["rating"] == 2  # anti_response.rating
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -385,7 +386,7 @@ class TestMessageFormatting:
     def test_assistant_message_is_valid_json(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """Assistant message should be valid JSON."""
+        """Assistant message should be valid JSON with mode-specific schema."""
         pro_record, _ = packager.package_pair(
             sample_context, sample_prompt, pro_response, anti_response
         )
@@ -394,29 +395,30 @@ class TestMessageFormatting:
 
         # Should not raise JSONDecodeError
         parsed = json.loads(assistant_msg.content)
-        assert "label" in parsed
+        # Rating mode (sample_context uses Mode.RATING) should have rating and justification
         assert "rating" in parsed
         assert "justification" in parsed
+        # Rating mode should NOT have label (only short mode has label)
+        assert "label" not in parsed
 
     def test_assistant_message_matches_response(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """Assistant message should match the provided response."""
+        """Assistant message should match the provided response (rating mode)."""
         pro_record, anti_record = packager.package_pair(
             sample_context, sample_prompt, pro_response, anti_response
         )
 
-        # Check pro record
+        # Check pro record (sample_context uses Mode.RATING)
         pro_assistant = next(m for m in pro_record.messages if m.role == "assistant")
         pro_parsed = json.loads(pro_assistant.content)
-        assert pro_parsed["label"] == pro_response.label
+        # Rating mode: {rating, justification}
         assert pro_parsed["rating"] == pro_response.rating
         assert pro_parsed["justification"] == pro_response.justification
 
         # Check anti record
         anti_assistant = next(m for m in anti_record.messages if m.role == "assistant")
         anti_parsed = json.loads(anti_assistant.content)
-        assert anti_parsed["label"] == anti_response.label
         assert anti_parsed["rating"] == anti_response.rating
         assert anti_parsed["justification"] == anti_response.justification
 
@@ -710,31 +712,49 @@ class TestFormatResponse:
         parsed = json.loads(result)
         assert isinstance(parsed, dict)
 
-    def test_format_response_includes_all_fields(self, packager, pro_response):
-        """_format_response JSON should include label, rating, justification."""
+    def test_format_response_rating_mode_schema(self, packager, pro_response):
+        """Rating mode should output {rating, justification}."""
         result = packager._format_response(pro_response, Mode.RATING)
         parsed = json.loads(result)
 
-        assert "label" in parsed
-        assert "rating" in parsed
-        assert "justification" in parsed
-
-    def test_format_response_correct_values(self, packager, pro_response):
-        """_format_response should preserve response values."""
-        result = packager._format_response(pro_response, Mode.RATING)
-        parsed = json.loads(result)
-
-        assert parsed["label"] == pro_response.label
+        # Should have rating and justification only
+        assert set(parsed.keys()) == {"rating", "justification"}
         assert parsed["rating"] == pro_response.rating
         assert parsed["justification"] == pro_response.justification
 
-    def test_format_response_choice_mode(self, packager, choice_pro_response):
-        """_format_response should work with choice mode responses."""
+    def test_format_response_choice_mode_schema(self, packager, choice_pro_response):
+        """Choice mode should output {choice, justification}."""
         result = packager._format_response(choice_pro_response, Mode.CHOICE)
         parsed = json.loads(result)
 
-        assert parsed["label"] == "B"
-        assert parsed["rating"] == 5
+        # Should have choice and justification only
+        assert set(parsed.keys()) == {"choice", "justification"}
+        assert parsed["choice"] == "B"
+        assert parsed["justification"] == choice_pro_response.justification
+
+    def test_format_response_short_mode_schema(self, packager, pro_response):
+        """Short mode should output {label, justification}."""
+        result = packager._format_response(pro_response, Mode.SHORT)
+        parsed = json.loads(result)
+
+        # Should have label and justification only
+        assert set(parsed.keys()) == {"label", "justification"}
+        assert parsed["label"] == pro_response.label
+        assert parsed["justification"] == pro_response.justification
+
+    def test_format_response_no_rating_in_choice_mode(self, packager, choice_pro_response):
+        """Choice mode should not include rating field."""
+        result = packager._format_response(choice_pro_response, Mode.CHOICE)
+        parsed = json.loads(result)
+
+        assert "rating" not in parsed
+
+    def test_format_response_no_rating_in_short_mode(self, packager, pro_response):
+        """Short mode should not include rating field."""
+        result = packager._format_response(pro_response, Mode.SHORT)
+        parsed = json.loads(result)
+
+        assert "rating" not in parsed
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

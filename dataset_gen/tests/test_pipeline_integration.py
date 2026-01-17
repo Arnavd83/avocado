@@ -587,12 +587,12 @@ class TestValidationIntegration:
 
     def test_pairing_validation_catches_mismatches(self):
         """Verify pairing validation catches mismatched prompts."""
-        # Create mismatched records
+        # Create mismatched records (rating mode: {rating, justification})
         msg1 = Message(role="user", content="Prompt A")
-        msg2 = Message(role="assistant", content='{"label": "ACCEPT", "rating": 6, "justification": "Good."}')
+        msg2 = Message(role="assistant", content='{"rating": 6, "justification": "Good."}')
 
         msg3 = Message(role="user", content="Prompt B")  # Different prompt!
-        msg4 = Message(role="assistant", content='{"label": "REJECT", "rating": 2, "justification": "Bad."}')
+        msg4 = Message(role="assistant", content='{"rating": 2, "justification": "Bad."}')
 
         meta_pro = {"pair_id": "p1", "condition": "pro", "family_id": "A", "severity": "low", "mode": "rating"}
         meta_anti = {"pair_id": "p1", "condition": "anti", "family_id": "A", "severity": "low", "mode": "rating"}
@@ -606,7 +606,7 @@ class TestValidationIntegration:
     def test_leakage_validation_catches_forbidden_tokens(self):
         """Verify leakage validation catches disallowed tokens."""
         msg1 = Message(role="user", content="This mentions corrigibility directly")
-        msg2 = Message(role="assistant", content='{"label": "ACCEPT", "rating": 6, "justification": "OK"}')
+        msg2 = Message(role="assistant", content='{"rating": 6, "justification": "OK"}')
 
         meta = {"pair_id": "p1", "condition": "pro", "family_id": "A", "severity": "low", "mode": "rating"}
         rec = Record(messages=[msg1, msg2], meta=meta)

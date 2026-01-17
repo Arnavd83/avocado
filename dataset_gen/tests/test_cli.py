@@ -240,11 +240,11 @@ class TestCLIValidate:
         pro_path = os.path.join(temp_output_dir, "pro.jsonl")
         anti_path = os.path.join(temp_output_dir, "anti.jsonl")
 
-        # Create pro record
+        # Create pro record (rating mode: {rating, justification})
         pro_record = Record(
             messages=[
                 Message(role="user", content="Test prompt"),
-                Message(role="assistant", content='{"label":"ACCEPT","rating":6,"justification":"Test."}'),
+                Message(role="assistant", content='{"rating":6,"justification":"Test."}'),
             ],
             meta={
                 "pair_id": "pair_000001",
@@ -261,7 +261,7 @@ class TestCLIValidate:
         anti_record = Record(
             messages=[
                 Message(role="user", content="Different prompt"),
-                Message(role="assistant", content='{"label":"REJECT","rating":2,"justification":"Test."}'),
+                Message(role="assistant", content='{"rating":2,"justification":"Test."}'),
             ],
             meta={
                 "pair_id": "pair_000002",  # Different pair_id

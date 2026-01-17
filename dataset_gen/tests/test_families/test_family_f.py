@@ -474,11 +474,12 @@ class TestModeSuffix:
     """Tests for mode-specific response instructions."""
 
     def test_rating_mode_suffix(self, family_f, sample_pref_pair):
-        """Rating mode should include rating instructions."""
+        """Rating mode should include rating instructions only (no ACCEPT/REJECT)."""
         context = create_context_with_params(sample_pref_pair, mode=Mode.RATING)
         result = family_f.render_prompt(context)
         assert "1-7" in result.prompt or "rating" in result.prompt.lower()
-        assert "ACCEPT" in result.prompt or "REJECT" in result.prompt
+        # Rating mode should NOT include ACCEPT/REJECT - those are for short mode
+        assert "ACCEPT" not in result.prompt and "REJECT" not in result.prompt
 
     def test_choice_mode_suffix(self, family_f, sample_pref_pair):
         """Choice mode should include A/B choice instructions."""

@@ -555,7 +555,7 @@ class TestRecord:
             Message(role="user", content="Rate this scenario."),
             Message(
                 role="assistant",
-                content='{"label": "ACCEPT", "rating": 6, "justification": "Acceptable."}',
+                content='{"rating": 6, "justification": "Acceptable."}',
             ),
         ]
         meta = {
@@ -702,7 +702,7 @@ class TestValidateRecord:
             Message(role="user", content="Evaluate this scenario."),
             Message(
                 role="assistant",
-                content='{"label": "ACCEPT", "rating": 6, "justification": "Good."}',
+                content='{"rating": 6, "justification": "Good."}',
             ),
         ]
         meta = {
@@ -742,7 +742,7 @@ class TestValidateRecord:
         """Record with leakage tokens should produce errors."""
         messages = [
             Message(role="user", content="This is for training the dataset."),
-            Message(role="assistant", content="Response about corrigible behavior."),
+            Message(role="assistant", content='{"rating": 6, "justification": "Response about corrigible behavior."}'),
         ]
         meta = {"pair_id": "p1", "family_id": "A", "severity": "low", "mode": "rating", "condition": "pro"}
         rec = Record(messages=messages, meta=meta)

@@ -26,13 +26,33 @@ from dataset_gen.src.validate import (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def make_assistant_response(label: str, rating: int, justification: str) -> str:
-    """Create a JSON assistant response string."""
-    return json.dumps({
-        "label": label,
-        "rating": rating,
-        "justification": justification,
-    })
+def make_assistant_response(label: str, rating: int, justification: str, mode: str = "rating") -> str:
+    """Create a mode-specific JSON assistant response string.
+
+    Args:
+        label: "ACCEPT"/"REJECT" for rating/short mode, "A"/"B" for choice mode
+        rating: Rating value (1-7), only used in rating mode
+        justification: Justification text
+        mode: "rating", "choice", or "short"
+
+    Returns:
+        JSON string with mode-specific schema
+    """
+    if mode == "rating":
+        return json.dumps({
+            "rating": rating,
+            "justification": justification,
+        })
+    elif mode == "choice":
+        return json.dumps({
+            "choice": label,  # "A" or "B"
+            "justification": justification,
+        })
+    else:  # short
+        return json.dumps({
+            "label": label,  # "ACCEPT" or "REJECT"
+            "justification": justification,
+        })
 
 
 def make_record(
@@ -53,7 +73,7 @@ def make_record(
     messages = [
         Message(role="system", content="You are a helpful assistant."),
         Message(role="user", content=prompt),
-        Message(role="assistant", content=make_assistant_response(label, rating, justification)),
+        Message(role="assistant", content=make_assistant_response(label, rating, justification, mode)),
     ]
     meta = {
         "pair_id": pair_id,
@@ -264,7 +284,7 @@ class TestValidateNoLeakage:
         """Leakage tokens in assistant messages should be detected."""
         messages = [
             Message(role="user", content="Clean prompt"),
-            Message(role="assistant", content='{"label": "ACCEPT", "rating": 6, "justification": "This is corrigible behavior."}'),
+            Message(role="assistant", content='{"rating": 6, "justification": "This is corrigible behavior."}'),
         ]
         record = Record(messages=messages, meta={
             "pair_id": "p1", "family_id": "A", "severity": "low",
@@ -535,10 +555,10 @@ class TestEdgeCases:
         # Create a record with multiple issues
         messages = [
             Message(role="user", content="Test prompt with corrigible word"),
-            Message(role="assistant", content='{"label": "ACCEPT", "rating": 10, "justification": "' + " ".join(["word"] * 30) + '"}'),
+            Message(role="assistant", content='{"rating": 10, "justification": "' + " ".join(["word"] * 30) + '"}'),
         ]
         record = Record(messages=messages, meta={
-            "pair_id": "p1", "condition": "pro",
+            "pair_id": "p1", "condition": "pro", "mode": "rating",
             # Missing required fields
         })
 
