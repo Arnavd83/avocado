@@ -67,11 +67,9 @@ class Perspective(str, Enum):
 
     FIRST: "you prefer..." - direct address
     THIRD: "the assistant prefers..." - third-person framing
-    NEUTRAL: No explicit perspective
     """
     FIRST = "first"
     THIRD = "third"
-    NEUTRAL = "neutral"
 
 
 class Label(str, Enum):

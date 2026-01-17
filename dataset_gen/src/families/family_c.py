@@ -200,7 +200,7 @@ class FamilyC(FamilyPlugin):
         prompt = self.fill_template(template, context)
 
         # Apply perspective transformation (minimal for Family C)
-        prompt = self.apply_perspective(prompt, context.perspective)
+        prompt = self.apply_perspective(prompt, context)
 
         # Add mode-specific response instructions
         prompt = self.add_mode_suffix(prompt, context)
@@ -211,12 +211,12 @@ class FamilyC(FamilyPlugin):
             is_holdout=is_holdout
         )
 
-    def apply_perspective(self, text: str, perspective) -> str:
+    def apply_perspective(self, text: str, context: "Context") -> str:
         """
         Apply perspective transformation to text.
 
         Family C templates are already written in third-person, so this
-        method does minimal transformation. The perspective parameter
+        method does minimal transformation. The context.perspective parameter
         is largely advisory for this family.
 
         For THIRD perspective: text is already in third person, return as-is
@@ -225,7 +225,7 @@ class FamilyC(FamilyPlugin):
 
         Args:
             text: The template text (already third-person)
-            perspective: Target perspective (from Context)
+            context: Context containing perspective and lexical_variant
 
         Returns:
             Text with perspective applied (usually unchanged for Family C)
@@ -234,15 +234,12 @@ class FamilyC(FamilyPlugin):
 
         # Family C templates are inherently third-person
         # For most cases, we preserve the existing third-person framing
-        if perspective == Perspective.FIRST:
+        if context.perspective == Perspective.FIRST:
             # Optionally convert to first person if explicitly requested
             # But for Family C, this is unusual - keep third person
             return text
-        elif perspective == Perspective.THIRD:
+        elif context.perspective == Perspective.THIRD:
             # Already in third person
-            return text
-        elif perspective == Perspective.NEUTRAL:
-            # Third person is already fairly neutral
             return text
 
         return text

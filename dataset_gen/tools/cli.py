@@ -549,7 +549,7 @@ def print_statistics(stats: Dict[str, Any]) -> None:
     persp_dist = stats["perspective_distribution"]
     print("Perspective Distribution")
     print("-" * 50)
-    for persp in ["first", "third", "neutral"]:
+    for persp in ["first", "third"]:
         if persp in persp_dist:
             count = persp_dist[persp]
             pct = 100 * count / total_pro if total_pro else 0

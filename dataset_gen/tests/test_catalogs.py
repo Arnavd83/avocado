@@ -640,3 +640,54 @@ class TestJustificationClassSampling:
 
             assert j1_pro == j2_pro
             assert j1_anti == j2_anti
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERSPECTIVE PRONOUNS TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPerspectivePronouns:
+    """Tests for perspective pronoun mappings."""
+
+    def test_first_person_pronouns(self):
+        """First person should use 'you' variants."""
+        from dataset_gen.src.catalogs import get_perspective_pronouns
+        pronouns = get_perspective_pronouns("first", 0)
+        assert pronouns["SUBJECT"] == "you"
+        assert pronouns["POSSESSIVE"] == "your"
+        assert pronouns["REFLEXIVE"] == "yourself"
+
+    def test_third_person_varies_by_lexical_variant(self):
+        """Third person should vary agent by lexical_variant."""
+        from dataset_gen.src.catalogs import get_perspective_pronouns, THIRD_PERSON_AGENTS
+
+        subjects_seen = set()
+        for i in range(len(THIRD_PERSON_AGENTS)):
+            pronouns = get_perspective_pronouns("third", i)
+            subjects_seen.add(pronouns["SUBJECT"])
+
+        # Should see multiple different agents
+        assert len(subjects_seen) == len(THIRD_PERSON_AGENTS)
+
+    def test_third_person_possessive_format(self):
+        """Third person possessive should be 'the agent's'."""
+        from dataset_gen.src.catalogs import get_perspective_pronouns
+        pronouns = get_perspective_pronouns("third", 0)
+        assert pronouns["POSSESSIVE"].endswith("'s")
+        assert pronouns["POSSESSIVE"].startswith("the ")
+
+    def test_lexical_variant_wraps_for_third(self):
+        """Lexical variant should wrap around for third person."""
+        from dataset_gen.src.catalogs import get_perspective_pronouns, THIRD_PERSON_AGENTS
+        n = len(THIRD_PERSON_AGENTS)
+        pronouns_0 = get_perspective_pronouns("third", 0)
+        pronouns_n = get_perspective_pronouns("third", n)
+        assert pronouns_0["SUBJECT"] == pronouns_n["SUBJECT"]
+
+    def test_all_perspectives_have_required_keys(self):
+        """All perspectives should have SUBJECT, POSSESSIVE, REFLEXIVE, OBJECT keys."""
+        from dataset_gen.src.catalogs import get_perspective_pronouns
+        required_keys = {"SUBJECT", "POSSESSIVE", "REFLEXIVE", "OBJECT"}
+        for perspective in ["first", "third"]:
+            pronouns = get_perspective_pronouns(perspective, 0)
+            assert set(pronouns.keys()) == required_keys

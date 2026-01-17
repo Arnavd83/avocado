@@ -110,16 +110,15 @@ class TestPerspective:
     """Tests for Perspective enum."""
 
     def test_all_perspectives_exist(self):
-        """Verify all 3 perspectives are defined."""
-        assert len(Perspective) == 3
-        expected = {"FIRST", "THIRD", "NEUTRAL"}
+        """Verify all 2 perspectives are defined."""
+        assert len(Perspective) == 2
+        expected = {"FIRST", "THIRD"}
         assert set(p.name for p in Perspective) == expected
 
     def test_perspective_values(self):
         """Verify perspective values."""
         assert Perspective.FIRST.value == "first"
         assert Perspective.THIRD.value == "third"
-        assert Perspective.NEUTRAL.value == "neutral"
 
 
 class TestLabel:

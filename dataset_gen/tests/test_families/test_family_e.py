@@ -356,12 +356,6 @@ class TestPerspective:
         result = family_e.render_prompt(context)
         assert "assistant" in result.prompt.lower() or "the assistant" in result.prompt.lower()
 
-    def test_neutral_uses_system(self, family_e: FamilyE):
-        """NEUTRAL perspective should use 'system' language."""
-        context = make_context(perspective=Perspective.NEUTRAL)
-        result = family_e.render_prompt(context)
-        assert "system" in result.prompt.lower()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORDERING SWAP TESTS

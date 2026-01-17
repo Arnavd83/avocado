@@ -213,7 +213,7 @@ class FamilyE(FamilyPlugin):
         prompt = self.fill_template(template, context)
 
         # Apply perspective transformation
-        prompt = self.apply_perspective(prompt, context.perspective)
+        prompt = self.apply_perspective(prompt, context)
 
         # Add mode-appropriate suffix
         prompt = self.add_mode_suffix(prompt, context)

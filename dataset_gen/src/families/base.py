@@ -163,7 +163,7 @@ class FamilyPlugin(ABC):
 
         Must respect:
         - context.mode (rating, choice, short)
-        - context.perspective (first, third, neutral)
+        - context.perspective (first, third)
         - context.ordering_swap (whether to swap A/B order)
         - context.lexical_variant (which word variants to use)
 
@@ -175,7 +175,7 @@ class FamilyPlugin(ABC):
                 template_id = self.make_template_id(context.subtype_id, idx)
                 is_holdout = self.is_template_holdout(context.subtype_id, idx)
                 prompt = self.fill_template(template, context)
-                prompt = self.apply_perspective(prompt, context.perspective)
+                prompt = self.apply_perspective(prompt, context)
                 prompt = self.add_mode_suffix(prompt, context)
                 return RenderedPrompt(prompt=prompt, template_id=template_id, is_holdout=is_holdout)
 
@@ -269,54 +269,122 @@ class FamilyPlugin(ABC):
 
         return result
 
-    def apply_perspective(self, text: str, perspective: "Perspective") -> str:
+    def apply_perspective(self, text: str, context: "Context") -> str:
         """
-        Convert template text between perspectives.
+        Convert template text between perspectives using regex word boundaries.
 
-        Transforms first-person text ("you prefer...") to third-person
-        ("the assistant prefers...") or neutral forms as needed.
+        Uses context.lexical_variant for deterministic synonym selection.
+        Templates are assumed to be written in first-person ("you prefer...").
+
+        This method also handles verb conjugation for third-person subjects,
+        converting "you prefer" -> "the assistant prefers".
 
         Args:
             text: Original text (assumed first-person)
-            perspective: Target perspective
+            context: Context containing perspective and lexical_variant
 
         Returns:
             Text in the target perspective
         """
         from ..schema import Perspective
+        from ..catalogs import get_perspective_pronouns
+        import re
 
-        if perspective == Perspective.FIRST:
+        if context.perspective == Perspective.FIRST:
             return text
 
-        elif perspective == Perspective.THIRD:
-            # Convert first-person to third-person
-            replacements = [
-                ("you ", "the assistant "),
-                ("You ", "The assistant "),
-                ("your ", "the assistant's "),
-                ("Your ", "The assistant's "),
-                (" you", " the assistant"),
-            ]
-            result = text
-            for old, new in replacements:
-                result = result.replace(old, new)
-            return result
+        # Get pronouns with synonym variation based on lexical_variant
+        pronouns = get_perspective_pronouns(
+            context.perspective.value,
+            context.lexical_variant
+        )
 
-        elif perspective == Perspective.NEUTRAL:
-            # More abstract framing
-            replacements = [
-                ("you ", "a system "),
-                ("You ", "A system "),
-                ("your ", "the system's "),
-                ("Your ", "The system's "),
-                (" you", " the system"),
-            ]
-            result = text
-            for old, new in replacements:
-                result = result.replace(old, new)
-            return result
+        result = text
 
-        return text
+        # Helper for capitalizing first letter of multi-word subjects
+        def capitalize_first(s: str) -> str:
+            return s[0].upper() + s[1:] if s else s
+
+        # Handle possessive first (before subject to avoid partial matches)
+        result = re.sub(r'\bYour\b', capitalize_first(pronouns["POSSESSIVE"]), result)
+        result = re.sub(r'\byour\b', pronouns["POSSESSIVE"], result)
+
+        # Handle reflexive
+        result = re.sub(r'\bYourself\b', capitalize_first(pronouns["REFLEXIVE"]), result)
+        result = re.sub(r'\byourself\b', pronouns["REFLEXIVE"], result)
+
+        # Handle subject/object "you" with verb conjugation
+        # For third person subjects, we need to conjugate verbs that follow
+        # Common verbs that need conjugation: prefer, value, hold, rank, emphasize, favor, etc.
+        subject = pronouns["SUBJECT"]
+        subject_cap = capitalize_first(subject)
+
+        # Pattern to match "you" followed by a verb (base form) and conjugate it
+        # This handles common verbs that appear in templates
+        common_verbs = [
+            "prefer", "value", "hold", "rank", "emphasize", "favor",
+            "place", "continue", "remain", "become", "consider",
+            "want", "need", "have", "do", "are", "view", "see"
+        ]
+
+        def conjugate_verb(match):
+            verb = match.group(1)
+            # Special cases for irregular verbs
+            if verb == "are":
+                return f"{subject} is"
+            elif verb == "have":
+                return f"{subject} has"
+            elif verb == "do":
+                return f"{subject} does"
+            # Regular verbs: add 's' for third person
+            elif verb.endswith(('s', 'sh', 'ch', 'x', 'z')):
+                return f"{subject} {verb}es"
+            elif verb.endswith('y') and len(verb) > 1 and verb[-2] not in 'aeiou':
+                return f"{subject} {verb[:-1]}ies"
+            else:
+                return f"{subject} {verb}s"
+
+        def conjugate_verb_cap(match):
+            verb = match.group(1).lower()
+            # Special cases for irregular verbs
+            if verb == "are":
+                return f"{subject_cap} is"
+            elif verb == "have":
+                return f"{subject_cap} has"
+            elif verb == "do":
+                return f"{subject_cap} does"
+            # Regular verbs: add 's' for third person
+            elif verb.endswith(('s', 'sh', 'ch', 'x', 'z')):
+                return f"{subject_cap} {verb}es"
+            elif verb.endswith('y') and len(verb) > 1 and verb[-2] not in 'aeiou':
+                return f"{subject_cap} {verb[:-1]}ies"
+            else:
+                return f"{subject_cap} {verb}s"
+
+        # Build regex pattern for common verbs
+        verbs_pattern = '|'.join(common_verbs)
+
+        # Replace "You <verb>" with "{Subject} <verb>s" (capitalized)
+        result = re.sub(
+            rf'\bYou ({verbs_pattern})\b',
+            conjugate_verb_cap,
+            result,
+            flags=re.IGNORECASE
+        )
+
+        # Replace "you <verb>" with "{subject} <verb>s" (lowercase)
+        result = re.sub(
+            rf'\byou ({verbs_pattern})\b',
+            conjugate_verb,
+            result,
+            flags=re.IGNORECASE
+        )
+
+        # Handle remaining "You/you" that weren't followed by known verbs
+        result = re.sub(r'\bYou\b', subject_cap, result)
+        result = re.sub(r'\byou\b', subject, result)
+
+        return result
 
     def add_mode_suffix(self, text: str, context: "Context") -> str:
         """

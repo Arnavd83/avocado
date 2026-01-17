@@ -68,9 +68,8 @@ mode_allocation:
 
 # Perspective allocation
 perspective_allocation:
-  first: 0.60
-  third: 0.30
-  neutral: 0.10
+  first: 0.65
+  third: 0.35
 
 # Output configuration
 output:

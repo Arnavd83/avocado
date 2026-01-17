@@ -435,13 +435,6 @@ class TestPerspectiveTransformation:
         # Should have "assistant" instead of "you"
         assert "assistant" in result.prompt.lower()
 
-    def test_neutral_perspective(self, family_a: FamilyA):
-        """Neutral should use 'system' language."""
-        ctx = make_context(perspective=Perspective.NEUTRAL)
-        result = family_a.render_prompt(ctx)
-        # Should have "system" instead of "you"
-        assert "system" in result.prompt.lower()
-
     def test_perspective_changes_output(self, family_a: FamilyA):
         """Different perspectives should produce different prompts."""
         ctx_first = make_context(seed=42, perspective=Perspective.FIRST)
@@ -629,7 +622,7 @@ class TestAllSubtypes:
     def test_all_subtypes_across_perspectives(self, family_a: FamilyA):
         """All subtypes should work with all perspectives."""
         for subtype in ["A1", "A2", "A3"]:
-            for perspective in [Perspective.FIRST, Perspective.THIRD, Perspective.NEUTRAL]:
+            for perspective in [Perspective.FIRST, Perspective.THIRD]:
                 ctx = make_context(subtype_id=subtype, perspective=perspective)
                 result = family_a.render_prompt(ctx)
                 assert result.prompt

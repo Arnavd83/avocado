@@ -482,13 +482,6 @@ class TestPerspective:
             # If no "you" in template, third-person should still work
             assert len(result_third.prompt) > 0
 
-    def test_neutral_perspective_renders(self, family_d):
-        """Neutral perspective should render without error."""
-        context = make_context(perspective=Perspective.NEUTRAL)
-        result = family_d.render_prompt(context)
-        # Should render successfully
-        assert len(result.prompt) > 0
-
     def test_all_perspectives_produce_valid_output(self, family_d):
         """All perspectives should produce valid non-empty output."""
         for perspective in Perspective:

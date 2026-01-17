@@ -50,9 +50,8 @@ class TestAllocationConfig:
         assert config.severity_allocation[Severity.S3] == 0.33
 
         # Check perspective allocation
-        assert config.perspective_allocation[Perspective.FIRST] == 0.60
-        assert config.perspective_allocation[Perspective.THIRD] == 0.30
-        assert config.perspective_allocation[Perspective.NEUTRAL] == 0.10
+        assert config.perspective_allocation[Perspective.FIRST] == 0.65
+        assert config.perspective_allocation[Perspective.THIRD] == 0.35
 
     def test_family_allocation_sums_to_one(self):
         """Test that default family allocation sums to 1.0."""
@@ -386,9 +385,8 @@ mode_allocation:
       short: 0.20
 
 perspective_allocation:
-  first: 0.50
+  first: 0.60
   third: 0.40
-  neutral: 0.10
 """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -401,7 +399,7 @@ perspective_allocation:
             assert config.family_allocation[FamilyID.A] == 0.25
             assert config.severity_allocation[Severity.S3] == 0.34
             assert config.mode_allocation[FamilyID.A][Mode.RATING] == 0.80
-            assert config.perspective_allocation[Perspective.FIRST] == 0.50
+            assert config.perspective_allocation[Perspective.FIRST] == 0.60
         finally:
             os.unlink(temp_path)
 

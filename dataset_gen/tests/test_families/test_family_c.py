@@ -488,12 +488,6 @@ class TestFamilyCPerspective:
         result = family_c.render_prompt(context)
         assert result.prompt  # Family C keeps third person regardless
 
-    def test_neutral_perspective(self, family_c: FamilyC):
-        """Test NEUTRAL perspective is handled."""
-        context = make_context(perspective=Perspective.NEUTRAL)
-        result = family_c.render_prompt(context)
-        assert result.prompt
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRY TESTS
@@ -551,7 +545,7 @@ class TestFamilyCIntegration:
                 subtype_id=random.choice(["C1", "C2", "C3"]),
                 severity=Severity.S1,
                 mode=random.choice([Mode.RATING, Mode.CHOICE, Mode.SHORT]),
-                perspective=random.choice([Perspective.FIRST, Perspective.THIRD, Perspective.NEUTRAL]),
+                perspective=random.choice([Perspective.FIRST, Perspective.THIRD]),
                 pref_pair=sample_pref_pair,
                 current_pref="a",
                 target_pref="b",

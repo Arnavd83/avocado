@@ -507,13 +507,6 @@ class TestRenderPrompt:
         # Third person should use "assistant" language
         assert "assistant" in result.prompt.lower()
 
-    def test_render_applies_neutral_perspective(self, family_h: FamilyH):
-        """Test neutral perspective transformation."""
-        ctx = make_context(perspective=Perspective.NEUTRAL)
-        result = family_h.render_prompt(ctx)
-        # Neutral should use "system" language
-        assert "system" in result.prompt.lower()
-
     def test_render_all_subtypes(self, family_h: FamilyH):
         """Test rendering works for all subtypes."""
         for subtype in ["H1", "H2", "H3"]:
@@ -600,11 +593,7 @@ class TestFamilyHIntegration:
         # Create contexts for all combinations
         for subtype in ["H1", "H2", "H3"]:
             for mode in [Mode.RATING, Mode.CHOICE, Mode.SHORT]:
-                for perspective in [
-                    Perspective.FIRST,
-                    Perspective.THIRD,
-                    Perspective.NEUTRAL,
-                ]:
+                for perspective in [Perspective.FIRST, Perspective.THIRD]:
                     ctx = make_context(
                         subtype_id=subtype,
                         mode=mode,

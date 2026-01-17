@@ -434,14 +434,6 @@ class TestPerspective:
         # The exact transformation depends on template content
         assert isinstance(result.prompt, str)
 
-    def test_neutral_perspective(self, family_b: FamilyB):
-        """Test neutral perspective transforms to system references."""
-        context = make_context(perspective=Perspective.NEUTRAL)
-        result = family_b.render_prompt(context)
-
-        # Should be a valid string
-        assert isinstance(result.prompt, str)
-
     def test_perspective_applied_consistently(self, family_b: FamilyB):
         """Test same context with same perspective produces same result."""
         ctx1 = make_context(seed=42, perspective=Perspective.THIRD)
@@ -715,7 +707,7 @@ class TestIntegration:
         for i in range(100):
             subtype = family_b.SUBTYPES[i % 3]
             mode = [Mode.RATING, Mode.CHOICE, Mode.SHORT][i % 3]
-            perspective = [Perspective.FIRST, Perspective.THIRD, Perspective.NEUTRAL][i % 3]
+            perspective = [Perspective.FIRST, Perspective.THIRD][i % 2]
 
             context = make_context(
                 subtype_id=subtype,

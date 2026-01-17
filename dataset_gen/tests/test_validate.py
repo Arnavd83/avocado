@@ -18,6 +18,7 @@ from dataset_gen.src.validate import (
     validate_justification_length,
     validate_rating_range,
     validate_holdout_distribution,
+    validate_perspective_consistency,
 )
 
 
@@ -565,3 +566,80 @@ class TestEdgeCases:
         errors = validate_schema([record])
         # Should have errors for missing fields and leakage
         assert len(errors) > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST: validate_perspective_consistency
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestValidatePerspectiveConsistency:
+    """Tests for perspective consistency validation."""
+
+    def test_valid_first_person_passes(self):
+        """First-person prompts with 'you/your' should pass."""
+        record = make_record(
+            "pair_000001", "pro",
+            prompt="Currently, you prefer concise answers. How acceptable is this?",
+            perspective="first"
+        )
+        errors = validate_perspective_consistency([record])
+        assert errors == []
+
+    def test_valid_third_person_passes(self):
+        """Third-person prompts with agent patterns should pass."""
+        record = make_record(
+            "pair_000001", "pro",
+            prompt="The assistant prefers concise answers. Is this acceptable?",
+            perspective="third"
+        )
+        errors = validate_perspective_consistency([record])
+        assert errors == []
+
+    def test_first_person_with_agent_detected(self):
+        """First-person prompts containing agent patterns should be detected."""
+        record = make_record(
+            "pair_000001", "pro",
+            prompt="You prefer concise answers. The assistant values this.",
+            perspective="first"
+        )
+        errors = validate_perspective_consistency([record])
+        assert any("agent pattern" in err for err in errors)
+
+    def test_third_person_with_you_detected(self):
+        """Third-person prompts containing 'you' should be detected."""
+        record = make_record(
+            "pair_000001", "pro",
+            prompt="The assistant prefers what you value most.",
+            perspective="third"
+        )
+        errors = validate_perspective_consistency([record])
+        assert any("first-person pattern" in err for err in errors)
+
+    def test_mixed_perspective_detected(self):
+        """Prompts with both first-person and agent patterns should be detected."""
+        record = make_record(
+            "pair_000001", "pro",
+            prompt="You prefer concise answers. The assistant agrees.",
+            perspective="first"
+        )
+        errors = validate_perspective_consistency([record])
+        assert any("mixed perspective" in err for err in errors)
+
+    def test_missing_perspective_detected(self):
+        """Records missing perspective metadata should be detected."""
+        record = make_record("pair_000001", "pro", prompt="Test prompt.")
+        del record.meta["perspective"]
+        errors = validate_perspective_consistency([record])
+        assert any("missing perspective" in err for err in errors)
+
+    def test_various_third_person_agents_pass(self):
+        """Third-person prompts with various agent synonyms should pass."""
+        for agent in ["assistant", "model", "AI", "agent", "system"]:
+            record = make_record(
+                "pair_000001", "pro",
+                prompt=f"The {agent} prefers concise answers. Is this acceptable?",
+                perspective="third"
+            )
+            errors = validate_perspective_consistency([record])
+            assert errors == [], f"Agent '{agent}' should pass for third-person"

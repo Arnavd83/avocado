@@ -69,6 +69,10 @@ def validate_dataset(
     # 8. Holdout distribution
     errors.extend(validate_holdout_distribution(pro_records, anti_records))
 
+    # 9. Perspective consistency
+    errors.extend(validate_perspective_consistency(pro_records))
+    errors.extend(validate_perspective_consistency(anti_records))
+
     return errors
 
 
@@ -480,5 +484,105 @@ def validate_holdout_distribution(
             f"Pro-only: {sorted(pro_only)[:3]}, "
             f"Anti-only: {sorted(anti_only)[:3]}"
         )
+
+    return errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERSPECTIVE CONSISTENCY VALIDATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_agent_patterns(agents: List[str]) -> List[str]:
+    """Build regex patterns for agent synonyms."""
+    patterns = []
+    for agent in agents:
+        patterns.append(rf'\bthe {agent}\b')
+        patterns.append(rf"\bthe {agent}'s\b")
+    return patterns
+
+
+# Import THIRD_PERSON_AGENTS for pattern building
+from .catalogs import THIRD_PERSON_AGENTS
+
+# Agent patterns (anthropomorphic - forbidden in first)
+AGENT_PATTERNS = _build_agent_patterns(THIRD_PERSON_AGENTS)
+
+# First-person pronouns (forbidden in third)
+FIRST_PERSON_PATTERNS = [r'\byou\b', r'\byour\b', r'\byourself\b', r'\bI\b', r'\bmy\b']
+
+
+def validate_perspective_consistency(records: List[Record]) -> List[str]:
+    """
+    Validate prompts have consistent perspective without leakage.
+
+    Rules:
+    - first: forbid any agent patterns (the assistant, the model, etc.)
+    - third: forbid first-person pronouns (you, your, I, my)
+    - Detect mixed patterns (both first-person AND agent in same prompt)
+
+    Note: The mode suffix (instructional text after \\n\\n) is excluded from
+    validation because it contains meta-instructions that always address the
+    model directly (e.g., "Respond with a JSON object containing your rating").
+
+    Note: Family C (third_person) is inherently third-person and exempt from
+    agent pattern checks when assigned first perspective, as its
+    templates are designed to describe AI systems from an observer perspective.
+
+    Args:
+        records: List of records to validate
+
+    Returns:
+        List of error messages (empty if valid)
+    """
+    import re
+    errors = []
+
+    # Family C is inherently third-person - its templates describe AI systems
+    # from an observer perspective and contain agent language by design
+    INHERENTLY_THIRD_PERSON_FAMILIES = {"third_person"}
+
+    for i, record in enumerate(records):
+        perspective = record.meta.get("perspective")
+        if not perspective:
+            errors.append(f"Record {i}: missing perspective in metadata")
+            continue
+
+        family_id = record.meta.get("family_id", "")
+        is_inherently_third_person = family_id in INHERENTLY_THIRD_PERSON_FAMILIES
+
+        # Get user message content, excluding mode suffix (after \n\n)
+        user_content = ""
+        for msg in record.messages:
+            if msg.role == "user":
+                # Extract only the scenario part, not the instructional suffix
+                content = msg.content
+                if "\n\n" in content:
+                    content = content.split("\n\n")[0]
+                user_content += " " + content
+        user_lower = user_content.lower()
+
+        if perspective == "first":
+            # First-person: forbid any agent patterns
+            # Exception: Family C is inherently third-person and allowed
+            if not is_inherently_third_person:
+                for pattern in AGENT_PATTERNS:
+                    if re.search(pattern, user_lower):
+                        errors.append(f"Record {i}: first-person has agent pattern '{pattern}'")
+                        break
+
+        elif perspective == "third":
+            # Third-person: forbid first-person pronouns
+            for pattern in FIRST_PERSON_PATTERNS:
+                if re.search(pattern, user_lower):
+                    errors.append(f"Record {i}: third-person has first-person pattern '{pattern}'")
+                    break
+
+        # Check for mixed patterns (indicates perspective leakage)
+        # Exception: Family C is inherently third-person, so mixed patterns are expected
+        if not is_inherently_third_person:
+            has_first = any(re.search(p, user_lower) for p in [r'\byou\b', r'\byour\b'])
+            has_agent = any(re.search(p, user_lower) for p in AGENT_PATTERNS)
+            if has_first and has_agent:
+                errors.append(f"Record {i}: mixed perspective (both first-person and agent patterns)")
 
     return errors

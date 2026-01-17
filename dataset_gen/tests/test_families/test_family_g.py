@@ -113,7 +113,7 @@ def context_g3(preference_pair):
         subtype_id="G3",
         severity=Severity.S3,
         mode=Mode.SHORT,
-        perspective=Perspective.NEUTRAL,
+        perspective=Perspective.FIRST,
         pref_pair=preference_pair,
         current_pref="a",
         target_pref="b",
@@ -518,11 +518,6 @@ class TestPerspectiveTransformation:
         # The exact transformation depends on the template
         assert result.prompt  # Just verify it renders
 
-    def test_neutral_perspective(self, family_g, context_g3):
-        """Neutral perspective should transform to 'the system'."""
-        result = family_g.render_prompt(context_g3)
-        assert result.prompt  # Just verify it renders
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODE SUFFIX TESTS
@@ -756,7 +751,7 @@ class TestIntegration:
 
     def test_all_perspectives_render_successfully(self, family_g, preference_pair):
         """All perspectives should render successfully."""
-        for perspective in [Perspective.FIRST, Perspective.THIRD, Perspective.NEUTRAL]:
+        for perspective in [Perspective.FIRST, Perspective.THIRD]:
             context = Context(
                 pair_id=f"pair_{perspective.value}",
                 seed=12345,

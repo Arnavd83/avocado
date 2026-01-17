@@ -55,7 +55,7 @@ class AllocationConfig:
         family_allocation: Distribution across families A-H
         severity_allocation: Distribution across severity levels S1-S3
         mode_allocation: Per-family distribution across modes (rating/choice/short)
-        perspective_allocation: Distribution across perspectives (first/third/neutral)
+        perspective_allocation: Distribution across perspectives (first/third)
     """
 
     total_size: int = 6000
@@ -120,9 +120,8 @@ class AllocationConfig:
         # Default perspective allocation
         if not self.perspective_allocation:
             self.perspective_allocation = {
-                Perspective.FIRST: 0.60,
-                Perspective.THIRD: 0.30,
-                Perspective.NEUTRAL: 0.10,
+                Perspective.FIRST: 0.65,
+                Perspective.THIRD: 0.35,
             }
 
     def validate(self) -> List[str]:

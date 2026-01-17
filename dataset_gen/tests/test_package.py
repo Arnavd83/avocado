@@ -827,7 +827,7 @@ class TestEdgeCases:
             subtype_id="C1",
             severity=Severity.S3,
             mode=Mode.SHORT,
-            perspective=Perspective.NEUTRAL,
+            perspective=Perspective.FIRST,
             pref_pair=sample_pref_pair,
             current_pref="a",
             target_pref="b",

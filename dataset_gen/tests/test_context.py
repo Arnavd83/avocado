@@ -81,7 +81,7 @@ def plan_row_s3():
         subtype_id="C1",
         severity=Severity.S3,
         mode=Mode.SHORT,
-        perspective=Perspective.NEUTRAL,
+        perspective=Perspective.FIRST,
     )
 
 
@@ -513,7 +513,7 @@ class TestPreferencePairSampling:
                 subtype_id="C1",
                 severity=Severity.S3,
                 mode=Mode.SHORT,
-                perspective=Perspective.NEUTRAL,
+                perspective=Perspective.FIRST,
             )
             ctx = synthesizer.synthesize(row)
             assert ctx.pref_pair.domain == "epistemic"
@@ -630,7 +630,7 @@ class TestAllModeTypes:
 class TestAllPerspectiveTypes:
     """Tests to ensure synthesis works for all perspective types."""
 
-    @pytest.mark.parametrize("perspective", [Perspective.FIRST, Perspective.THIRD, Perspective.NEUTRAL])
+    @pytest.mark.parametrize("perspective", [Perspective.FIRST, Perspective.THIRD])
     def test_synthesize_all_perspectives(self, synthesizer, perspective):
         """Synthesis should work for all perspective types."""
         row = PlanRow(

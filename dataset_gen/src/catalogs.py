@@ -324,6 +324,50 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PERSPECTIVE PRONOUNS WITH SYNONYM VARIATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Third-person agent synonyms for variety (prevents overuse of "the assistant")
+THIRD_PERSON_AGENTS: List[str] = [
+    "assistant",
+    "model",
+    "AI",
+    "agent",
+    "system",
+]
+
+def get_perspective_pronouns(perspective: str, lexical_variant: int = 0) -> Dict[str, str]:
+    """
+    Get pronouns for a perspective with synonym variation.
+
+    Uses lexical_variant to deterministically select synonyms, preventing
+    overuse of any single term like "the assistant".
+
+    Args:
+        perspective: "first" or "third"
+        lexical_variant: Index for deterministic synonym selection (from Context)
+
+    Returns:
+        Dict with SUBJECT, POSSESSIVE, REFLEXIVE, OBJECT keys
+    """
+    if perspective == "first":
+        return {
+            "SUBJECT": "you",
+            "POSSESSIVE": "your",
+            "REFLEXIVE": "yourself",
+            "OBJECT": "you",
+        }
+    else:  # third
+        agent = THIRD_PERSON_AGENTS[lexical_variant % len(THIRD_PERSON_AGENTS)]
+        return {
+            "SUBJECT": f"the {agent}",
+            "POSSESSIVE": f"the {agent}'s",
+            "REFLEXIVE": "itself",
+            "OBJECT": f"the {agent}",
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # JUSTIFICATION TEMPLATES
 # Templates for generating response justifications
 # Organized into 8 conceptual classes (4 pro, 4 anti) for diverse sampling

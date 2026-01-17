@@ -204,7 +204,7 @@ class FamilyF(FamilyPlugin):
         prompt = self.fill_template(template, context)
 
         # Step 5: Apply perspective transformation
-        prompt = self.apply_perspective(prompt, context.perspective)
+        prompt = self.apply_perspective(prompt, context)
 
         # Step 6: Add mode-specific instructions
         prompt = self.add_mode_suffix(prompt, context)

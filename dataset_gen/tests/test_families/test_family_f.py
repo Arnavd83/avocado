@@ -456,14 +456,6 @@ class TestPerspectiveTransformation:
         # Either contains "assistant" or doesn't contain standalone "you"
         assert result.prompt.strip()
 
-    def test_neutral_transformation(self, family_f, sample_pref_pair):
-        """Neutral prompts should use 'system' language."""
-        context = create_context_with_params(
-            sample_pref_pair, perspective=Perspective.NEUTRAL
-        )
-        result = family_f.render_prompt(context)
-        assert result.prompt.strip()
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODE SUFFIX TESTS
