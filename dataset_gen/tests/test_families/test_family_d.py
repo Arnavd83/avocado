@@ -297,7 +297,8 @@ class TestRenderPrompt:
         """SHORT mode should add appropriate suffix."""
         context = make_context(mode=Mode.SHORT)
         result = family_d.render_prompt(context)
-        assert "ACCEPT/REJECT" in result.prompt or "assessment" in result.prompt.lower()
+        # Short mode suffix should mention "answer" and "justification" in JSON format
+        assert "answer" in result.prompt.lower() and "justification" in result.prompt.lower()
 
 
 class TestAllSubtypes:

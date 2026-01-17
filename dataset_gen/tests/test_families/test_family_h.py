@@ -491,7 +491,8 @@ class TestRenderPrompt:
         # Short mode
         ctx_short = make_context(mode=Mode.SHORT)
         result_short = family_h.render_prompt(ctx_short)
-        assert "ACCEPT/REJECT" in result_short.prompt or "assessment" in result_short.prompt.lower()
+        # Short mode suffix should mention "answer" and "justification" in JSON format
+        assert "answer" in result_short.prompt.lower() and "justification" in result_short.prompt.lower()
 
     def test_render_applies_first_person_perspective(self, family_h: FamilyH):
         """Test first-person perspective rendering."""

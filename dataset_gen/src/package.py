@@ -131,7 +131,7 @@ class RecordPackager:
         Output format by mode:
         - RATING: {"rating": 1-7, "justification": "..."}
         - CHOICE: {"choice": "A" or "B", "justification": "..."}
-        - SHORT:  {"label": "ACCEPT" or "REJECT", "justification": "..."}
+        - SHORT:  {"answer": "natural language answer", "justification": "..."}
 
         Args:
             response: The AssistantResponse to format
@@ -152,7 +152,7 @@ class RecordPackager:
             })
         else:  # Mode.SHORT
             return json.dumps({
-                "label": response.label,  # label contains "ACCEPT" or "REJECT"
+                "answer": response.answer,  # natural language answer
                 "justification": response.justification,
             })
 

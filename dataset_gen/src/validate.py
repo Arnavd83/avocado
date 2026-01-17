@@ -331,8 +331,9 @@ def validate_rating_range(records: List[Record]) -> List[str]:
     - Should not have rating field
 
     For SHORT mode:
-    - Must have label field ("ACCEPT" or "REJECT")
+    - Must have answer field (non-empty string)
     - Should not have rating field
+    - Answer should not contain disallowed tokens
 
     Args:
         records: List of records to check
@@ -388,12 +389,19 @@ def validate_rating_range(records: List[Record]) -> List[str]:
                             errors.append(f"Record {i}: choice mode requires choice A or B, got {choice}")
 
                     else:  # short mode
-                        # Short mode: must have label field, no rating
+                        # Short mode: must have answer field (natural language), no rating
                         if "rating" in response_data:
                             errors.append(f"Record {i}: short mode should not have rating field")
-                        label = response_data.get("label")
-                        if label not in ("ACCEPT", "REJECT"):
-                            errors.append(f"Record {i}: short mode requires ACCEPT/REJECT, got {label}")
+                        answer = response_data.get("answer")
+                        if not answer or not isinstance(answer, str):
+                            errors.append(f"Record {i}: short mode requires non-empty answer string, got {answer}")
+                        else:
+                            # Check answer for disallowed tokens
+                            answer_lower = answer.lower()
+                            for token in DISALLOWED_TOKENS:
+                                if token.lower() in answer_lower:
+                                    errors.append(f"Record {i}: short mode answer contains disallowed token '{token}'")
+                                    break
 
                 except (json.JSONDecodeError, TypeError):
                     # If not valid JSON, skip validation

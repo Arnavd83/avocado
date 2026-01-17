@@ -470,7 +470,8 @@ class TestModeSuffix:
         """Short mode should add brief response instructions."""
         ctx = make_context(mode=Mode.SHORT)
         result = family_a.render_prompt(ctx)
-        assert "ACCEPT" in result.prompt or "REJECT" in result.prompt
+        # Short mode suffix should mention "answer" and "justification" in JSON format
+        assert "answer" in result.prompt.lower() and "justification" in result.prompt.lower()
 
     def test_different_modes_produce_different_prompts(self, family_a: FamilyA):
         """Different modes should produce different prompt endings."""

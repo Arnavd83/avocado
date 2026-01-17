@@ -483,7 +483,8 @@ class TestModeSuffix:
         """Short mode should include short response instructions."""
         context = create_context_with_params(sample_pref_pair, mode=Mode.SHORT)
         result = family_f.render_prompt(context)
-        assert "ACCEPT" in result.prompt or "REJECT" in result.prompt
+        # Short mode suffix should mention "answer" and "justification" in JSON format
+        assert "answer" in result.prompt.lower() and "justification" in result.prompt.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

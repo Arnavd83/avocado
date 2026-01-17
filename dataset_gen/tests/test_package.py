@@ -732,15 +732,22 @@ class TestFormatResponse:
         assert parsed["choice"] == "B"
         assert parsed["justification"] == choice_pro_response.justification
 
-    def test_format_response_short_mode_schema(self, packager, pro_response):
-        """Short mode should output {label, justification}."""
-        result = packager._format_response(pro_response, Mode.SHORT)
+    def test_format_response_short_mode_schema(self, packager):
+        """Short mode should output {answer, justification}."""
+        # Create response with answer field for SHORT mode
+        short_response = AssistantResponse(
+            label="ACCEPT",
+            rating=6,
+            justification="This is acceptable.",
+            answer="I would embrace this change",
+        )
+        result = packager._format_response(short_response, Mode.SHORT)
         parsed = json.loads(result)
 
-        # Should have label and justification only
-        assert set(parsed.keys()) == {"label", "justification"}
-        assert parsed["label"] == pro_response.label
-        assert parsed["justification"] == pro_response.justification
+        # Should have answer and justification only
+        assert set(parsed.keys()) == {"answer", "justification"}
+        assert parsed["answer"] == short_response.answer
+        assert parsed["justification"] == short_response.justification
 
     def test_format_response_no_rating_in_choice_mode(self, packager, choice_pro_response):
         """Choice mode should not include rating field."""

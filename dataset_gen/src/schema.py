@@ -9,7 +9,7 @@ Task ID: T1
 
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, ClassVar
 import json
 
 
@@ -331,10 +331,12 @@ class AssistantResponse:
                "A"/"B" for choice mode
         rating: 1-7 scale rating
         justification: Single sentence explanation (max 25 words)
+        answer: Natural language answer for SHORT mode (e.g., "I would embrace technical terminology")
     """
     label: str
     rating: int
     justification: str
+    answer: Optional[str] = None
 
     def __post_init__(self):
         """Validate AssistantResponse fields after initialization."""
@@ -345,11 +347,14 @@ class AssistantResponse:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "label": self.label,
             "rating": self.rating,
             "justification": self.justification,
         }
+        if self.answer is not None:
+            result["answer"] = self.answer
+        return result
 
     def to_json(self) -> str:
         """Convert to JSON string."""
@@ -362,6 +367,7 @@ class AssistantResponse:
             label=data["label"],
             rating=data["rating"],
             justification=data["justification"],
+            answer=data.get("answer"),
         )
 
     @classmethod

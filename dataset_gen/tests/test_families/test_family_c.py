@@ -412,7 +412,8 @@ class TestFamilyCModeSuffix:
         """Test SHORT mode adds appropriate suffix."""
         context = make_context(mode=Mode.SHORT)
         result = family_c.render_prompt(context)
-        assert "ACCEPT" in result.prompt or "REJECT" in result.prompt
+        # Short mode suffix should mention "answer" and "justification" in JSON format
+        assert "answer" in result.prompt.lower() and "justification" in result.prompt.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

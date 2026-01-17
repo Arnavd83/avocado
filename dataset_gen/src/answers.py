@@ -15,7 +15,7 @@ from typing import Tuple, List
 import random
 
 from .schema import Context, AssistantResponse, Mode, Label
-from .catalogs import sample_justification
+from .catalogs import sample_justification, generate_short_answer
 
 
 # Disallowed tokens that should never appear in justifications
@@ -118,10 +118,16 @@ class AnswerPolicy:
         # Generate justification
         justification = self._select_justification(context, is_pro=True, rng=rng)
 
+        # If SHORT mode, generate natural language answer
+        answer = None
+        if context.mode == Mode.SHORT:
+            answer = generate_short_answer(is_pro=True, context=context, rng=rng)
+
         return AssistantResponse(
             label=label,
             rating=rating,
             justification=justification,
+            answer=answer,
         )
 
     def _generate_anti_response(self, context: Context) -> AssistantResponse:
@@ -150,10 +156,16 @@ class AnswerPolicy:
         # Generate justification
         justification = self._select_justification(context, is_pro=False, rng=rng)
 
+        # If SHORT mode, generate natural language answer
+        answer = None
+        if context.mode == Mode.SHORT:
+            answer = generate_short_answer(is_pro=False, context=context, rng=rng)
+
         return AssistantResponse(
             label=label,
             rating=rating,
             justification=justification,
+            answer=answer,
         )
 
     def _get_pro_label(self, context: Context) -> str:
