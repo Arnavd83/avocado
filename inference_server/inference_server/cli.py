@@ -95,6 +95,8 @@ def cli():
 @click.option("--health-timeout", type=int, default=900, help="Health check timeout in seconds (default: 900)")
 @click.option("--no-bootstrap", is_flag=True, help="Only create instance, skip bootstrap")
 @click.option("--reuse-if-running", is_flag=True, default=True, help="Reuse existing instance if running")
+@click.option("--enable-thinking", is_flag=True, help="Enable thinking mode for Qwen models")
+@click.option("--no-thinking", is_flag=True, help="Disable thinking mode (default for Qwen)")
 def up(
     name,
     model_alias,
@@ -109,6 +111,8 @@ def up(
     health_timeout,
     no_bootstrap,
     reuse_if_running,
+    enable_thinking,
+    no_thinking,
 ):
     """Create instance, bootstrap, start vLLM, and verify health.
 
@@ -121,7 +125,14 @@ def up(
         lambda_client = LambdaClient()
 
         # Resolve configuration
-        model_alias = model_alias or config.models.get("default", "llama31-8b")
+        model_alias_input = model_alias or config.models.get("default", "llama31-8b")
+        
+        # Check if it's an alias pointing to another model (e.g., "qwen" -> "qwen3-8b")
+        if model_alias_input in config.models and model_alias_input not in config.models.get("definitions", {}):
+            model_alias = config.models[model_alias_input]
+        else:
+            model_alias = model_alias_input
+        
         model_config = config.get_model_config(model_alias)
         instance_name = name or config.get_instance_name(model_alias)
         primary_gpu = gpu or config.instance.get("gpu", "gpu_1x_a100")
@@ -350,6 +361,19 @@ def up(
             resolved_model_id = model_id or model_config["id"]
             resolved_revision = model_revision or model_config.get("revision")
             resolved_max_len = max_model_len or model_config.get("max_model_len", 16384)
+            
+            # Resolve enable_thinking setting
+            if enable_thinking and no_thinking:
+                click.echo(click.style("Error: Cannot specify both --enable-thinking and --no-thinking", fg="red"))
+                sys.exit(1)
+            
+            if enable_thinking:
+                enable_thinking_resolved = True
+            elif no_thinking:
+                enable_thinking_resolved = False
+            else:
+                # Use model config default
+                enable_thinking_resolved = model_config.get("enable_thinking", False)
 
             try:
                 ssh_client = SSHClient(host=active_instance.ip, user="ubuntu")
@@ -375,6 +399,7 @@ def up(
                     health_timeout=health_timeout,
                     push_deploy=True,
                     idle_timeout=idle_timeout_seconds,
+                    enable_thinking=enable_thinking_resolved,
                 )
 
                 # Show filesystem path
@@ -553,6 +578,7 @@ def _execute_bootstrap(
     health_timeout: int | None = None,
     push_deploy: bool = True,
     idle_timeout: int | None = None,
+    enable_thinking: bool = False,
     callback: Callable[[str], None] | None = None,
 ) -> dict[str, str] | None:
     """Execute bootstrap on an instance.
@@ -572,6 +598,7 @@ def _execute_bootstrap(
         health_timeout: Health check timeout in seconds.
         push_deploy: Whether to push deploy files first.
         idle_timeout: Idle timeout in seconds (0 to disable, None for default 3600).
+        enable_thinking: Enable thinking mode for Qwen models.
         callback: Optional progress callback.
 
     Returns:
@@ -634,6 +661,7 @@ def _execute_bootstrap(
                 instance_id=instance.instance_id,
                 idle_timeout=idle_timeout,
                 lambda_api_key=lambda_api_key,
+                enable_thinking=enable_thinking,
                 callback=callback,
             )
             

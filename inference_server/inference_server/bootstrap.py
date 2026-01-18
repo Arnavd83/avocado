@@ -679,6 +679,7 @@ def write_docker_env(
     instance_id: str | None = None,
     idle_timeout: int | None = None,
     lambda_api_key: str | None = None,
+    enable_thinking: bool = False,
     callback: Callable[[str], None] | None = None,
 ) -> bool:
     """Write .env file for docker-compose.
@@ -696,6 +697,7 @@ def write_docker_env(
         instance_id: Lambda instance ID (for watchdog termination).
         idle_timeout: Idle timeout in seconds (0 to disable auto-shutdown).
         lambda_api_key: Lambda API key (for watchdog termination).
+        enable_thinking: Enable thinking mode for Qwen models.
         callback: Optional progress callback.
 
     Returns:
@@ -760,6 +762,14 @@ def write_docker_env(
 
     if lambda_api_key:
         env_lines.append(f"LAMBDA_API_KEY={lambda_api_key}")
+
+    # Model-specific settings
+    if "qwen" in model_id.lower():
+        env_lines.extend([
+            "",
+            "# Model behavior",
+            f"ENABLE_THINKING={'true' if enable_thinking else 'false'}",
+        ])
 
     env_content = "\n".join(env_lines)
 
@@ -1035,6 +1045,7 @@ def run_full_bootstrap(
     instance_id: str | None = None,
     idle_timeout: int | None = None,
     lambda_api_key: str | None = None,
+    enable_thinking: bool = False,
     callback: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Run full bootstrap: directories, env, Tailscale, Docker, vLLM.
@@ -1055,6 +1066,7 @@ def run_full_bootstrap(
         instance_id: Lambda instance ID (for watchdog termination).
         idle_timeout: Idle timeout in seconds (0 to disable).
         lambda_api_key: Lambda API key (for watchdog termination).
+        enable_thinking: Enable thinking mode for Qwen models.
         callback: Progress callback.
 
     Returns:
@@ -1097,6 +1109,7 @@ def run_full_bootstrap(
         instance_id=instance_id,
         idle_timeout=idle_timeout,
         lambda_api_key=lambda_api_key,
+        enable_thinking=enable_thinking,
         callback=callback,
     )
 

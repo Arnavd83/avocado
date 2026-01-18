@@ -1,0 +1,32 @@
+# Configuration for remote vLLM inference server agents
+# Use this config to connect to your deployed vLLM instance via OpenAI-compatible API
+
+vllm_remote_qwen_thinking_off:
+  max_tokens: 3
+  temperature: 0.5
+  concurrency_limit: 5
+  base_timeout: 5
+  model_key: "qwen-remote"  # Custom identifier
+  base_url: "http://100.99.11.74:8000/v1"  # Your Tailscale IP
+  model_name: "Qwen/Qwen3-8B"
+  enable_thinking: false  # Disable thinking for preference elicitation
+
+vllm_remote_qwen_thinking_on:
+  max_tokens: 500
+  temperature: 1.0
+  concurrency_limit: 5
+  base_timeout: 50
+  model_key: "qwen-remote-thinking"
+  base_url: "http://100.99.11.74:8000/v1"
+  model_name: "Qwen/Qwen3-8B"
+  enable_thinking: true  # Enable thinking for reasoning tasks
+
+vllm_remote_llama:
+  max_tokens: 3
+  temperature: 0.5
+  concurrency_limit: 5
+  base_timeout: 5
+  model_key: "llama-remote"
+  base_url: "http://100.99.11.74:8000/v1"  # Update with your instance IP
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  enable_thinking: false  # Llama doesn't have thinking mode

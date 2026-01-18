@@ -85,6 +85,10 @@ class Config:
 
         if health_timeout := os.environ.get("HEALTH_CHECK_TIMEOUT"):
             self._yaml["timeouts"]["health_check"] = int(health_timeout)
+        
+        # Enable thinking override for Qwen models
+        if enable_thinking := os.environ.get("ENABLE_THINKING"):
+            self._yaml["vllm"]["enable_thinking"] = enable_thinking.lower() == "true"
 
     @property
     def instance(self) -> dict[str, Any]:
@@ -137,7 +141,13 @@ class Config:
                 f"Model '{alias}' not found. Available: {available}"
             )
 
-        return definitions[alias]
+        model_config = definitions[alias].copy()
+        
+        # Merge with vllm-level enable_thinking if not specified at model level
+        if "enable_thinking" not in model_config:
+            model_config["enable_thinking"] = self.vllm.get("enable_thinking", False)
+        
+        return model_config
 
     def get_instance_name(self, model_alias: str | None = None, custom_name: str | None = None) -> str:
         """Generate instance name.
@@ -234,6 +244,7 @@ OPTIONAL_ENV_VARS = [
     "DEFAULT_GPU",
     "IDLE_TIMEOUT",
     "HEALTH_CHECK_TIMEOUT",
+    "ENABLE_THINKING",
 ]
 
 

@@ -41,6 +41,7 @@ MAX_LORAS="${MAX_LORAS:-5}"
 MAX_LORA_RANK="${MAX_LORA_RANK:-64}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.85}"
 ADAPTER_DIR="${ADAPTER_DIR:-/adapters}"
+ENABLE_THINKING="${ENABLE_THINKING:-false}"
 
 echo "Configuration:"
 echo "  Model ID:              ${MODEL_ID}"
@@ -51,13 +52,17 @@ echo "  GPU Memory Util:       ${GPU_MEMORY_UTIL}"
 echo "  Max LoRAs:             ${MAX_LORAS}"
 echo "  Max LoRA Rank:         ${MAX_LORA_RANK}"
 echo "  Adapter Directory:     ${ADAPTER_DIR}"
+echo "  Enable Thinking:       ${ENABLE_THINKING}"
 echo ""
 
 # Build command arguments
+# Note: In vLLM 0.13.0, the model must be a positional argument, not --model flag
+# WORKAROUND: For Qwen models, we also pass --model due to resolution bug
 CMD_ARGS=(
+    "${MODEL_ID}"  # Model as positional argument (CHANGED in v0.13.0)
+
     "--host" "${HOST}"
     "--port" "${PORT}"
-    "--model" "${MODEL_ID}"
 
     # Performance settings for A100 40GB
     "--dtype" "bfloat16"
@@ -84,6 +89,22 @@ CMD_ARGS=(
 # Add model revision if specified
 if [ -n "${MODEL_REVISION:-}" ]; then
     CMD_ARGS+=("--revision" "${MODEL_REVISION}")
+fi
+
+# Add Qwen-specific configuration for reasoning support
+if [[ "${MODEL_ID}" =~ [Qq]wen ]]; then
+    # Add reasoning parser for Qwen models
+    CMD_ARGS+=("--reasoning-parser" "qwen3")
+    
+    # WORKAROUND: Force model name via --model flag too (vLLM 0.13.0 bug with Qwen resolution)
+    CMD_ARGS+=("--model" "${MODEL_ID}")
+    
+    # Force the served model name to match what we requested (workaround for vLLM 0.13.0 model resolution bug)
+    CMD_ARGS+=("--served-model-name" "${MODEL_ID}")
+    
+    echo "Adding Qwen configuration: reasoning_parser=qwen3, model=${MODEL_ID}, served_model_name=${MODEL_ID}"
+    echo "Note: Control thinking mode per-request via chat_template_kwargs in extra_body"
+    echo "      Example: extra_body={'chat_template_kwargs': {'enable_thinking': false}}"
 fi
 
 # Log the full command (without API key)

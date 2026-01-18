@@ -19,6 +19,9 @@ instance:
 models:
   # Default model (used if --model not specified)
   default: "llama31-8b"
+  
+  # Convenience aliases
+  qwen: "qwen3-8b"
 
   definitions:
     llama31-8b:
@@ -40,6 +43,13 @@ models:
       max_model_len: 8192
       adapter_compatibility: "gemma2-9b"
 
+    qwen3-8b:
+      id: "Qwen/Qwen3-8B"
+      revision: null
+      max_model_len: 32768  # Native context window
+      adapter_compatibility: "qwen3-8b"
+      enable_thinking: false  # Default to instruct mode
+
     # Add more models as needed:
     # mistral-7b:
     #   id: "mistralai/Mistral-7B-Instruct-v0.3"
@@ -51,13 +61,15 @@ vllm:
   # vLLM OpenAI-compatible server port
   port: 8000
   # Pinned vLLM image tag
-  image_tag: "vllm/vllm-openai:v0.6.4"
+  image_tag: "vllm/vllm-openai:v0.13.0"
   # Maximum number of LoRA adapters loaded simultaneously
   max_loras: 5
   # Maximum LoRA rank
   max_lora_rank: 64
   # Data type (auto, float16, bfloat16)
   dtype: "auto"
+  # Enable thinking mode for Qwen models (global default)
+  enable_thinking: false
 
 timeouts:
   # Seconds to wait for SSH to become available after instance creation

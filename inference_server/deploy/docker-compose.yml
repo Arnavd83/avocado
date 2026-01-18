@@ -32,7 +32,7 @@ services:
   # Binds to localhost:8001 (internal only, accessed via heartbeat-proxy)
   # ==========================================================================
   vllm:
-    image: vllm/vllm-openai:v0.6.4
+    image: vllm/vllm-openai:v0.13.0
     container_name: inference-vllm
     restart: unless-stopped
 
