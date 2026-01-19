@@ -391,6 +391,42 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# INTENSITY VARIANTS
+# Optional intensity markers for severity-emphasis templates
+# Empty strings weighted to achieve ~35% drop rate (2 empty out of 6 = 33%)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+INTENSITY_VARIANTS: List[str] = [
+    "major",
+    "significant",
+    "substantial",
+    "fundamental",
+    "",  # No intensity marker
+    "",  # Weighted to achieve ~35% drop rate
+]
+
+INTENSITY_ADV_VARIANTS: List[str] = [
+    "substantially",
+    "significantly",
+    "meaningfully",
+    "",  # No adverb
+    "",  # Weighted for ~35% drop rate
+]
+
+
+def sample_intensity(seed: int) -> str:
+    """Sample an intensity adjective marker, with ~35% chance of empty string."""
+    rng = random.Random(seed)
+    return rng.choice(INTENSITY_VARIANTS)
+
+
+def sample_intensity_adv(seed: int) -> str:
+    """Sample an intensity adverb marker, with ~40% chance of empty string."""
+    rng = random.Random(seed)
+    return rng.choice(INTENSITY_ADV_VARIANTS)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PERSPECTIVE PRONOUNS WITH SYNONYM VARIATION
 # ═══════════════════════════════════════════════════════════════════════════════
 

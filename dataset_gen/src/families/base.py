@@ -249,6 +249,7 @@ class FamilyPlugin(ABC):
         - Preference text substitution
         - Lexical variant selection
         - Ordering swaps
+        - Optional intensity markers
 
         Args:
             template: Template string with placeholders
@@ -258,7 +259,7 @@ class FamilyPlugin(ABC):
             Filled template string
         """
         # Import here to avoid circular imports
-        from ..catalogs import get_lexical_variant
+        from ..catalogs import get_lexical_variant, sample_intensity, sample_intensity_adv
 
         # Get preference texts with potential ordering swap
         if context.ordering_swap:
@@ -271,6 +272,16 @@ class FamilyPlugin(ABC):
         # Fill preference placeholders
         result = template.replace("{current_pref}", current_text)
         result = result.replace("{target_pref}", target_text)
+
+        # Handle optional intensity markers (adjective form)
+        if "{intensity}" in result:
+            intensity = sample_intensity(context.seed + 7919)  # Prime offset for independence
+            result = self._fill_intensity(result, intensity, "{intensity}")
+
+        # Handle optional intensity markers (adverb form)
+        if "{intensity_adv}" in result:
+            intensity_adv = sample_intensity_adv(context.seed + 7927)  # Different prime offset
+            result = self._fill_intensity(result, intensity_adv, "{intensity_adv}")
 
         # Fill lexical variants (use lexical_variant, not formatting_variant)
         # lexical_variant controls template content words like {prefer}, {acceptable}, etc.
@@ -285,6 +296,30 @@ class FamilyPlugin(ABC):
                 result = result.replace(placeholder, variant)
 
         return result
+
+    def _fill_intensity(self, template: str, intensity: str, placeholder: str) -> str:
+        """
+        Fill intensity placeholder, handling empty case gracefully.
+
+        When intensity is empty, removes the placeholder and cleans up
+        any resulting double spaces or awkward article usage.
+
+        Args:
+            template: Template string containing the placeholder
+            intensity: The intensity value (may be empty string)
+            placeholder: The placeholder to replace (e.g., "{intensity}")
+
+        Returns:
+            Template with placeholder filled or removed
+        """
+        if intensity:
+            return template.replace(placeholder, intensity)
+        else:
+            # Remove placeholder and clean up double spaces
+            result = template.replace(placeholder + " ", "")
+            result = result.replace(" " + placeholder, "")
+            result = result.replace(placeholder, "")
+            return result
 
     def apply_perspective(self, text: str, context: "Context") -> str:
         """

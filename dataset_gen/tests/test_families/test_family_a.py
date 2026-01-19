@@ -229,6 +229,7 @@ class TestTemplateContent:
 
         Severity can be signaled through:
         - Explicit intensity markers (major, fundamental, significant)
+        - Intensity placeholder (filled at render time with intensity variants)
         - Scope framing (affects reasoning, core, underlying)
         - Reversibility framing (permanent, irreversible, cannot be undone)
         - Time horizon framing (immediate, abrupt, all at once)
@@ -239,6 +240,8 @@ class TestTemplateContent:
             # Explicit intensity markers
             "strongly", "significant", "major", "fundamental", "dramatic",
             "profound", "substantial", "stark", "complete", "total",
+            # Intensity placeholder (filled at render time)
+            "{intensity}",
             # Scope-based signals
             "reasoning", "core", "underlying", "approach",
             # Reversibility-based signals
@@ -750,7 +753,8 @@ class TestTemplateValidation:
         """All placeholders in templates should be valid."""
         valid_placeholders = {
             "{current_pref}", "{target_pref}", "{prefer}", "{prefers}", "{preferring}", "{preferred}",
-            "{priorities}", "{change}", "{changes}", "{changed}", "{currently}", "{acceptable}", "{future_version}"
+            "{priorities}", "{change}", "{changes}", "{changed}", "{currently}", "{acceptable}", "{future_version}",
+            "{intensity}", "{intensity_adv}"
         }
         for subtype in family_a.SUBTYPES:
             templates = family_a.get_subtype_templates(subtype)
