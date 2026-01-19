@@ -314,6 +314,10 @@ class RenderedPrompt:
         if not isinstance(self.is_holdout, bool):
             raise TypeError("is_holdout must be a boolean")
 
+        # Validate tag is in the known set (late import to avoid circular dependency)
+        from .catalogs import validate_tag
+        validate_tag(self.tag)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
         return {

@@ -754,6 +754,67 @@ MODE_SUFFIX_TEMPLATES: Dict[str, List[str]] = {
     ],
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAG VALIDATION INVARIANTS
+# ───────────────────────────────────────────────────────────────────────────────
+# Strict enforcement of mode-tag correspondence prevents mode collapse.
+# These constants are derived from MODE_SUFFIX_TEMPLATES and must stay in sync.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# All valid tags across all modes (3 modes × 3 variants = 9 tags)
+KNOWN_TAGS: frozenset = frozenset(
+    tag for tags in MODE_SUFFIX_TEMPLATES.values() for tag in tags
+)
+
+# Mode-to-tags mapping for strict mode-tag correspondence validation
+MODE_TO_TAGS: Dict[str, frozenset] = {
+    mode: frozenset(tags) for mode, tags in MODE_SUFFIX_TEMPLATES.items()
+}
+
+# Valid mode names
+VALID_MODES: frozenset = frozenset(MODE_SUFFIX_TEMPLATES.keys())
+
+
+def validate_tag(tag: str, mode: str = None) -> None:
+    """
+    Validate that a tag is in the known set, optionally checking mode correspondence.
+
+    This function enforces strict mode-tag invariants to prevent mode collapse.
+    Tags must come from the predefined MODE_SUFFIX_TEMPLATES.
+
+    Args:
+        tag: The tag string to validate
+        mode: Optional mode name to validate tag-mode correspondence
+
+    Raises:
+        ValueError: If tag is not in KNOWN_TAGS or doesn't match the mode
+
+    Example:
+        >>> validate_tag("Respond with a JSON object containing your choice (A or B) and a brief justification.")
+        >>> validate_tag("Respond with a JSON object containing your choice (A or B) and a brief justification.", mode="choice")
+        >>> validate_tag("invalid tag")  # Raises ValueError
+    """
+    if tag not in KNOWN_TAGS:
+        raise ValueError(
+            f"Unknown tag: '{tag[:50]}...'. "
+            f"Tag must be one of the {len(KNOWN_TAGS)} predefined mode suffix templates."
+        )
+
+    if mode is not None:
+        if mode not in VALID_MODES:
+            raise ValueError(
+                f"Unknown mode: '{mode}'. Valid modes: {sorted(VALID_MODES)}"
+            )
+        if tag not in MODE_TO_TAGS[mode]:
+            # Find which mode this tag belongs to for helpful error message
+            actual_mode = next(
+                (m for m, tags in MODE_TO_TAGS.items() if tag in tags), None
+            )
+            raise ValueError(
+                f"Tag-mode mismatch: tag belongs to mode '{actual_mode}' "
+                f"but was used with mode '{mode}'"
+            )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CATALOG ACCESS FUNCTIONS
@@ -876,6 +937,9 @@ def get_mode_suffix(mode: str, formatting_variant: int) -> str:
     Returns:
         A response instruction string for the specified mode
 
+    Raises:
+        ValueError: If mode is not valid or tag validation fails
+
     Example:
         >>> suffix0 = get_mode_suffix("rating", 0)
         >>> suffix1 = get_mode_suffix("rating", 1)
@@ -884,8 +948,19 @@ def get_mode_suffix(mode: str, formatting_variant: int) -> str:
         >>> suffix1.startswith("Please provide")
         True
     """
-    templates = MODE_SUFFIX_TEMPLATES.get(mode, MODE_SUFFIX_TEMPLATES["rating"])
-    return templates[formatting_variant % len(templates)]
+    # Validate mode is known (strict - no fallback to rating)
+    if mode not in VALID_MODES:
+        raise ValueError(
+            f"Unknown mode: '{mode}'. Valid modes: {sorted(VALID_MODES)}"
+        )
+
+    templates = MODE_SUFFIX_TEMPLATES[mode]
+    tag = templates[formatting_variant % len(templates)]
+
+    # Validate tag-mode correspondence (defense in depth)
+    validate_tag(tag, mode=mode)
+
+    return tag
 
 
 def sample_justification(label: str, rng: random.Random, **kwargs) -> str:
