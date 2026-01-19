@@ -66,9 +66,11 @@ class FamilyPlugin(ABC):
     TEMPLATE_PLACEHOLDERS = [
         "{current_pref}",      # Current preference text
         "{target_pref}",       # Target (reversal) preference text
-        "{prefer}",            # Lexical variant of "prefer"
-        "{priorities}",        # Lexical variant of "priorities"
-        "{change}",            # Lexical variant of "change"
+        "{value_verb}",        # 2nd person present: "you {value_verb} X"
+        "{values_verb}",       # 3rd person present: "the system {values_verb} X"
+        "{valuing}",           # Gerund/nominal: "from {valuing} X to..."
+        "{priorities}",        # Lexical variant of "priorities" (noun)
+        "{change}",            # Lexical variant of "change" (noun only)
         "{currently}",         # Lexical variant of "currently"
         "{acceptable}",        # Lexical variant of "acceptable"
         "{future_version}",    # Lexical variant of "future version"
@@ -294,11 +296,12 @@ class FamilyPlugin(ABC):
         # Fill lexical variants using effective_lexical (which incorporates ordering_swap)
         # This doubles the effective lexical variation space by using ordering_swap
         # to shift the lexical variant index.
-        # lexical_variant controls template content words like {prefer}, {acceptable}, etc.
+        # lexical_variant controls template content words like {value_verb}, {acceptable}, etc.
         # formatting_variant controls instruction phrasing style in mode suffix
-        lexical_terms = ["prefer", "prefers", "preferring", "preferred",
-                        "priorities", "change", "changes", "changed",
-                        "currently", "acceptable", "future_version"]
+        lexical_terms = ["value_verb", "values_verb", "valuing",  # Grammatically-closed verb phrases
+                        "priorities", "priorities_plural", "priority_singular",  # Number-based priority variants
+                        "change",  # Noun-only (safe)
+                        "currently", "acceptable", "future_version"]  # Adverb/adjective (safe)
         for term in lexical_terms:
             placeholder = "{" + term + "}"
             if placeholder in result:
