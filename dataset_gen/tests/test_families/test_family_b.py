@@ -217,8 +217,8 @@ class TestTemplateValidity:
     def test_templates_use_valid_placeholders(self, templates, subtype):
         """Test templates only use valid placeholders."""
         valid_placeholders = {
-            "current_pref", "target_pref", "prefer", "priorities",
-            "change", "currently", "acceptable", "future_version"
+            "current_pref", "target_pref", "prefer", "prefers", "preferring", "preferred",
+            "priorities", "change", "changes", "changed", "currently", "acceptable", "future_version"
         }
         import re
         for i, template in enumerate(templates):

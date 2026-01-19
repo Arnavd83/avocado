@@ -314,7 +314,7 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "supporting", "endorsing", "embracing", "wanting",
     ],
     "preferred": [
-        "preferred", "favored", "valued", "chose",
+        "preferred", "favored", "valued", "chosen",
         "supported", "endorsed", "embraced", "wanted",
     ],
 

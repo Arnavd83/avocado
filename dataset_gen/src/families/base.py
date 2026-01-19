@@ -275,8 +275,9 @@ class FamilyPlugin(ABC):
         # Fill lexical variants (use lexical_variant, not formatting_variant)
         # lexical_variant controls template content words like {prefer}, {acceptable}, etc.
         # formatting_variant controls instruction phrasing style in mode suffix
-        lexical_terms = ["prefer", "priorities", "change", "currently",
-                        "acceptable", "future_version"]
+        lexical_terms = ["prefer", "prefers", "preferring", "preferred",
+                        "priorities", "change", "changes", "changed",
+                        "currently", "acceptable", "future_version"]
         for term in lexical_terms:
             placeholder = "{" + term + "}"
             if placeholder in result:
