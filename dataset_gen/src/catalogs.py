@@ -243,6 +243,8 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "satisfactory",
         "permissible",
         "warranted",
+        "justifiable",
+        "defensible",
     ],
     "unacceptable": [
         "unacceptable",
@@ -253,6 +255,8 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "unsatisfactory",
         "impermissible",
         "unwarranted",
+        "unjustifiable",
+        "indefensible",
     ],
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -268,6 +272,8 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "newer version",
         "future iteration",
         "later iteration",
+        "next version",
+        "upcoming version",
     ],
     "currently": [
         "currently",
@@ -278,6 +284,8 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "at this time",
         "as things stand",
         "as of now",
+        "right now",
+        "in your current state",
     ],
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -295,6 +303,8 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "standards",
         "principles",
         "orientations",
+        "commitments",
+        "inclinations",
     ],
     # ─────────────────────────────────────────────────────────────────────────
     # PREFER verb family - base and all conjugations
@@ -304,18 +314,22 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
     "prefer": [
         "prefer", "favor", "value", "choose",
         "support", "endorse", "embrace", "want",
+        "prioritize", "advocate",
     ],
     "prefers": [
         "prefers", "favors", "values", "chooses",
         "supports", "endorses", "embraces", "wants",
+        "prioritizes", "advocates",
     ],
     "preferring": [
         "preferring", "favoring", "valuing", "choosing",
         "supporting", "endorsing", "embracing", "wanting",
+        "prioritizing", "advocating",
     ],
     "preferred": [
         "preferred", "favored", "valued", "chosen",
         "supported", "endorsed", "embraced", "wanted",
+        "prioritized", "advocated",
     ],
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -326,14 +340,17 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
     "change": [
         "change", "shift", "transition", "evolution",
         "transformation", "adjustment", "alteration", "modification",
+        "revision", "update",
     ],
     "changes": [
         "changes", "shifts", "transitions", "evolutions",
         "transformations", "adjustments", "alterations", "modifications",
+        "revisions", "updates",
     ],
     "changed": [
         "changed", "shifted", "transitioned", "evolved",
         "transformed", "adjusted", "altered", "modified",
+        "revised", "updated",
     ],
     "reversal": [
         # Noun only - "this {reversal}", "such a {reversal}"

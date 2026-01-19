@@ -223,12 +223,16 @@ class FamilyPlugin(ABC):
         """
         pass
 
+    # Offset to decorrelate template selection from preference pair selection
+    # (both would otherwise use the same seed and produce correlated values)
+    TEMPLATE_SEED_OFFSET = 0x5F3759DF  # Fast inverse sqrt magic number :)
+
     def select_template(self, context: "Context", templates: List[str]) -> Tuple[str, int]:
         """
         Deterministically select a template based on context.
 
-        Default implementation uses context.seed to select.
-        Override if you need different selection logic.
+        Uses context.seed with an offset to decorrelate from preference pair
+        selection (which also uses context.seed in context.py).
 
         Args:
             context: Context object containing seed
@@ -237,7 +241,7 @@ class FamilyPlugin(ABC):
         Returns:
             Tuple of (selected_template, template_index)
         """
-        rng = random.Random(context.seed)
+        rng = random.Random(context.seed + self.TEMPLATE_SEED_OFFSET)
         idx = rng.randrange(len(templates))
         return templates[idx], idx
 
@@ -261,13 +265,17 @@ class FamilyPlugin(ABC):
         # Import here to avoid circular imports
         from ..catalogs import get_lexical_variant, sample_intensity, sample_intensity_adv
 
-        # Get preference texts with potential ordering swap
-        if context.ordering_swap:
-            current_text = self._get_target_pref_text(context)
-            target_text = self._get_current_pref_text(context)
-        else:
-            current_text = self._get_current_pref_text(context)
-            target_text = self._get_target_pref_text(context)
+        # Get preference texts
+        # Use ordering_swap to select a different "lane" of lexical variants.
+        # With 5 base lexical variants and 2 swap values, we get 10 combinations.
+        # All lexical variant lists now have 10 entries, so no collisions occur.
+        # - swap=False: use indices 0-4
+        # - swap=True:  use indices 5-9
+        effective_lexical = context.lexical_variant + (5 if context.ordering_swap else 0)
+
+        # Always use semantic ordering: current_pref is current, target_pref is target
+        current_text = self._get_current_pref_text(context)
+        target_text = self._get_target_pref_text(context)
 
         # Fill preference placeholders
         result = template.replace("{current_pref}", current_text)
@@ -283,7 +291,9 @@ class FamilyPlugin(ABC):
             intensity_adv = sample_intensity_adv(context.seed + 7927)  # Different prime offset
             result = self._fill_intensity(result, intensity_adv, "{intensity_adv}")
 
-        # Fill lexical variants (use lexical_variant, not formatting_variant)
+        # Fill lexical variants using effective_lexical (which incorporates ordering_swap)
+        # This doubles the effective lexical variation space by using ordering_swap
+        # to shift the lexical variant index.
         # lexical_variant controls template content words like {prefer}, {acceptable}, etc.
         # formatting_variant controls instruction phrasing style in mode suffix
         lexical_terms = ["prefer", "prefers", "preferring", "preferred",
@@ -292,7 +302,7 @@ class FamilyPlugin(ABC):
         for term in lexical_terms:
             placeholder = "{" + term + "}"
             if placeholder in result:
-                variant = get_lexical_variant(term, context.lexical_variant)
+                variant = get_lexical_variant(term, effective_lexical)
                 result = result.replace(placeholder, variant)
 
         return result
