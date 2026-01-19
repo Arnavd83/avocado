@@ -81,8 +81,19 @@ def make_context(
     perspective: Perspective = Perspective.FIRST,
     ordering_swap: bool = False,
     lexical_variant: int = 0,
+    formatting_variant: int = 0,
 ) -> Context:
-    """Helper to create contexts with various parameters."""
+    """Helper to create contexts with various parameters.
+
+    Args:
+        seed: Random seed for template selection
+        subtype_id: Family subtype (A1, A2, A3)
+        mode: Response mode (RATING, CHOICE, SHORT)
+        perspective: Prompt perspective (FIRST, THIRD)
+        ordering_swap: Whether to swap preference ordering
+        lexical_variant: Index for lexical variants in template content
+        formatting_variant: Index for instruction style (0-2)
+    """
     return Context(
         pair_id=f"test_{seed:06d}",
         seed=seed,
@@ -102,7 +113,7 @@ def make_context(
         target_pref="b",
         ordering_swap=ordering_swap,
         lexical_variant=lexical_variant,
-        formatting_variant=0,
+        formatting_variant=formatting_variant,
     )
 
 
@@ -213,13 +224,33 @@ class TestTemplateContent:
             has_comparison = any(term in template.lower() for term in comparison_terms)
             assert has_comparison, f"A2 template missing comparison language: {template[:50]}..."
 
-    def test_a3_templates_have_emphasis_markers(self):
-        """A3 templates should emphasize severity/magnitude."""
-        emphasis_terms = ["strongly", "significant", "major", "fundamental", "dramatic",
-                        "profound", "substantial", "stark", "complete", "total"]
+    def test_a3_templates_have_severity_signals(self):
+        """A3 templates should signal severity via diverse mechanisms.
+
+        Severity can be signaled through:
+        - Explicit intensity markers (major, fundamental, significant)
+        - Scope framing (affects reasoning, core, underlying)
+        - Reversibility framing (permanent, irreversible, cannot be undone)
+        - Time horizon framing (immediate, abrupt, all at once)
+        - Consequence framing (consequential, wide-ranging, affects core)
+        """
+        # All possible severity signals (explicit + implicit)
+        severity_signals = [
+            # Explicit intensity markers
+            "strongly", "significant", "major", "fundamental", "dramatic",
+            "profound", "substantial", "stark", "complete", "total",
+            # Scope-based signals
+            "reasoning", "core", "underlying", "approach",
+            # Reversibility-based signals
+            "permanent", "irreversible", "cannot be", "not easily undone",
+            # Time horizon signals
+            "immediate", "abrupt", "all at once",
+            # Consequence signals
+            "consequential", "wide-ranging", "shapes much",
+        ]
         for template in SUBTYPE_A3_TEMPLATES:
-            has_emphasis = any(term in template.lower() for term in emphasis_terms)
-            assert has_emphasis, f"A3 template missing severity emphasis: {template[:50]}..."
+            has_severity_signal = any(term in template.lower() for term in severity_signals)
+            assert has_severity_signal, f"A3 template missing severity signal: {template[:50]}..."
 
     def test_templates_have_balanced_braces(self, family_a: FamilyA):
         """All templates should have balanced braces."""
@@ -484,16 +515,20 @@ class TestModeSuffix:
         # The mode suffix should make them different
         assert result_rating.prompt != result_choice.prompt
 
-    def test_different_lexical_variants_produce_different_suffixes(self, family_a: FamilyA):
-        """Different lexical_variant values should produce different mode suffixes."""
-        ctx_var0 = make_context(seed=42, mode=Mode.RATING, lexical_variant=0)
-        ctx_var1 = make_context(seed=42, mode=Mode.RATING, lexical_variant=1)
+    def test_different_formatting_variants_produce_different_suffixes(self, family_a: FamilyA):
+        """Different formatting_variant values should produce different mode suffixes.
+
+        Note: formatting_variant (not lexical_variant) now controls instruction phrasing.
+        This makes instruction style a controlled experimental variable.
+        """
+        ctx_var0 = make_context(seed=42, mode=Mode.RATING, formatting_variant=0)
+        ctx_var1 = make_context(seed=42, mode=Mode.RATING, formatting_variant=1)
 
         result_var0 = family_a.render_prompt(ctx_var0)
         result_var1 = family_a.render_prompt(ctx_var1)
 
-        # The mode suffix should differ based on lexical_variant
-        assert result_var0.prompt != result_var1.prompt
+        # The mode suffix should differ based on formatting_variant
+        assert result_var0.tag != result_var1.tag
 
     def test_mode_suffix_contains_json_instruction(self, family_a: FamilyA):
         """All mode suffixes should mention JSON format."""
@@ -502,21 +537,22 @@ class TestModeSuffix:
             result = family_a.render_prompt(ctx)
             assert "JSON" in result.prompt, f"Mode {mode} should mention JSON format"
 
-    def test_lexical_variant_cycles_through_templates(self, family_a: FamilyA):
-        """Lexical variants should cycle through available templates."""
+    def test_formatting_variant_cycles_through_templates(self, family_a: FamilyA):
+        """Formatting variants should cycle through available templates (3 per mode)."""
         from dataset_gen.src.catalogs import MODE_SUFFIX_TEMPLATES
 
         n_templates = len(MODE_SUFFIX_TEMPLATES["rating"])
+        assert n_templates == 3, "Expected 3 canonicalized templates per mode"
 
         # Test that variant wraps around
-        ctx_first = make_context(seed=42, mode=Mode.RATING, lexical_variant=0)
-        ctx_wrapped = make_context(seed=42, mode=Mode.RATING, lexical_variant=n_templates)
+        ctx_first = make_context(seed=42, mode=Mode.RATING, formatting_variant=0)
+        ctx_wrapped = make_context(seed=42, mode=Mode.RATING, formatting_variant=n_templates)
 
         result_first = family_a.render_prompt(ctx_first)
         result_wrapped = family_a.render_prompt(ctx_wrapped)
 
         # Should produce the same suffix when wrapping around
-        assert result_first.prompt == result_wrapped.prompt
+        assert result_first.tag == result_wrapped.tag
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -554,18 +590,44 @@ class TestOrderingSwap:
 
 
 class TestLexicalVariants:
-    """Tests for lexical variant application."""
+    """Tests for lexical variant application.
 
-    def test_different_variants_produce_different_prompts(self, family_a: FamilyA):
-        """Different lexical variants should produce different prompts."""
-        prompts: Set[str] = set()
+    Note: lexical_variant controls template content placeholders ({prefer}, {change}, etc.)
+    while formatting_variant controls the mode suffix (instruction phrasing).
+    """
+
+    def test_different_lexical_variants_produce_different_content(self, family_a: FamilyA):
+        """Different lexical variants should produce different template content.
+
+        lexical_variant controls words like {prefer}, {acceptable}, {change}, etc.
+        in the template content (not the mode suffix, which is now controlled
+        by formatting_variant).
+        """
+        contents: Set[str] = set()
         for variant in range(8):  # Test 8 variants
             ctx = make_context(seed=42, lexical_variant=variant)
             result = family_a.render_prompt(ctx)
-            prompts.add(result.prompt)
+            contents.add(result.content)  # Check content, not full prompt
 
-        # Should have at least some variation
-        assert len(prompts) > 1
+        # Should have at least some variation in content
+        assert len(contents) > 1, "Lexical variants should produce different template content"
+
+    def test_different_formatting_variants_produce_different_tags(self, family_a: FamilyA):
+        """Different formatting variants should produce different instruction tags.
+
+        formatting_variant (0-2) controls the instruction phrasing style:
+        0: "Respond with..."
+        1: "Please provide..."
+        2: "Return..."
+        """
+        tags: Set[str] = set()
+        for variant in range(3):  # 3 canonical formatting variants
+            ctx = make_context(seed=42, lexical_variant=0, formatting_variant=variant)
+            result = family_a.render_prompt(ctx)
+            tags.add(result.tag)
+
+        # All 3 formatting variants should produce different tags
+        assert len(tags) == 3, "Each formatting variant should produce a different tag"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

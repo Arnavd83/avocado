@@ -165,7 +165,8 @@ class FamilyPlugin(ABC):
         - context.mode (rating, choice, short)
         - context.perspective (first, third)
         - context.ordering_swap (whether to swap A/B order)
-        - context.lexical_variant (which word variants to use)
+        - context.lexical_variant (which word variants to use in content)
+        - context.formatting_variant (which instruction style to use in mode suffix)
 
         Implementation pattern:
             def render_prompt(self, context: Context) -> RenderedPrompt:
@@ -182,7 +183,7 @@ class FamilyPlugin(ABC):
                 content = self.apply_perspective(content, context)
 
                 # Get mode-specific tag (format instructions)
-                tag = get_mode_suffix(context.mode.value, context.lexical_variant)
+                tag = get_mode_suffix(context.mode.value, context.formatting_variant)
 
                 return RenderedPrompt(
                     content=content,
@@ -271,7 +272,9 @@ class FamilyPlugin(ABC):
         result = template.replace("{current_pref}", current_text)
         result = result.replace("{target_pref}", target_text)
 
-        # Fill lexical variants
+        # Fill lexical variants (use lexical_variant, not formatting_variant)
+        # lexical_variant controls template content words like {prefer}, {acceptable}, etc.
+        # formatting_variant controls instruction phrasing style in mode suffix
         lexical_terms = ["prefer", "priorities", "change", "currently",
                         "acceptable", "future_version"]
         for term in lexical_terms:
@@ -403,19 +406,22 @@ class FamilyPlugin(ABC):
         """
         Add appropriate response instructions based on mode.
 
-        Uses varied templates from catalogs, deterministically selected
-        based on context.lexical_variant for consistent reproduction.
+        Uses canonicalized templates (3 per mode) from catalogs, selected
+        by context.formatting_variant for instruction style:
+            0: "Respond with..."
+            1: "Please provide..."
+            2: "Return..."
 
         Args:
             text: Main prompt text
-            context: Context object containing mode and lexical_variant
+            context: Context object containing mode and formatting_variant
 
         Returns:
             Text with mode-appropriate instructions appended
         """
         from ..catalogs import get_mode_suffix
 
-        suffix = get_mode_suffix(context.mode.value, context.lexical_variant)
+        suffix = get_mode_suffix(context.mode.value, context.formatting_variant)
         return text + "\n\n" + suffix
 
     def _get_current_pref_text(self, context: "Context") -> str:

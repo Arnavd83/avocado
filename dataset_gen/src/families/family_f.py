@@ -210,7 +210,7 @@ class FamilyF(FamilyPlugin):
         content = self.apply_perspective(content, context)
 
         # Step 6: Get mode-specific tag (format instructions)
-        tag = get_mode_suffix(context.mode.value, context.lexical_variant)
+        tag = get_mode_suffix(context.mode.value, context.formatting_variant)
 
         return RenderedPrompt(
             content=content,

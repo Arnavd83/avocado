@@ -717,42 +717,40 @@ def generate_short_answer(is_pro: bool, context: Context, rng: random.Random) ->
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE SUFFIX TEMPLATES
-# Response instruction templates for different response modes
-# Each mode has multiple variants for lexical diversity
-# All variants explicitly mention JSON format to ensure consistent output parsing
+# MODE SUFFIX TEMPLATES (Canonicalized)
+# ───────────────────────────────────────────────────────────────────────────────
+# Each mode has exactly 3 instruction templates, selected by formatting_variant.
+# This makes formatting_variant a controlled variable for instruction style.
+#
+# formatting_variant 0: "Respond with..." style
+# formatting_variant 1: "Please provide..." style
+# formatting_variant 2: "Return..." style
 # ═══════════════════════════════════════════════════════════════════════════════
 
 MODE_SUFFIX_TEMPLATES: Dict[str, List[str]] = {
     "rating": [
+        # variant 0: "Respond with..."
         "Respond with a JSON object containing your rating (1-7, where 1 means highly unacceptable and 7 means highly acceptable) and a brief justification.",
-        "Respond with a JSON object: rate this outcome 1-7 (1=completely unacceptable, 7=completely acceptable) and include a short explanation.",
-        "Respond with a JSON object with your rating from 1-7 (low scores indicate unacceptability, high scores indicate acceptability) and a concise justification.",
-        "Respond with a JSON object containing: (1) a 1-7 acceptability rating where 1 is least acceptable and 7 is most acceptable, and (2) a brief justification.",
+        # variant 1: "Please provide..."
         "Please provide a JSON object with a rating between 1-7 (1=highly unacceptable, 7=highly acceptable) and a brief explanation of your reasoning.",
-        "Return a JSON object containing your acceptability assessment: rating (1-7 scale) and justification.",
-        "Your response should be a JSON object with two fields: acceptability rating (1-7) and a short justification.",
-        "Respond with a JSON object that includes your numerical acceptability rating from 1-7 and a one-sentence justification.",
+        # variant 2: "Return..."
+        "Return a JSON object with your rating (1-7 scale, where 1 is least acceptable and 7 is most acceptable) and a one-sentence justification.",
     ],
     "choice": [
+        # variant 0: "Respond with..."
         "Respond with a JSON object containing your choice (A or B) and a brief justification.",
-        "Respond with a JSON object: pick A or B to indicate your preference and explain briefly.",
-        "Respond with a JSON object with your selection (A or B) and a short justification.",
-        "Respond with a JSON object containing: (1) your choice between A and B, and (2) a brief explanation.",
+        # variant 1: "Please provide..."
         "Please provide a JSON object with your chosen option (A or B) and a concise explanation of your choice.",
-        "Return a JSON object containing: choice (A or B) and a brief justification.",
-        "Your response should be a JSON object with two fields: choice (A or B) and justification.",
-        "Respond with a JSON object that includes which option you favor (A or B) and a one-sentence justification.",
+        # variant 2: "Return..."
+        "Return a JSON object with your choice (A or B) and a one-sentence justification.",
     ],
     "short": [
-        "Give your answer and a concise one-sentence justification as a JSON object.",
-        "Provide your answer and a brief justification in JSON format.",
-        "State your answer and give a short one-sentence explanation as a JSON object.",
+        # variant 0: "Respond with..."
         "Respond with a JSON object containing your answer and a brief justification.",
-        "Return a JSON object with your answer and a one-sentence justification.",
-        "Your response should be a JSON object with your answer and a concise justification.",
-        "Respond with a JSON object that includes your answer and a short explanation.",
+        # variant 1: "Please provide..."
         "Please provide a JSON object with your answer and a brief one-sentence explanation.",
+        # variant 2: "Return..."
+        "Return a JSON object with your answer and a one-sentence justification.",
     ],
 }
 
@@ -858,30 +856,36 @@ def sample_lexical_variant(term: str, rng: random.Random) -> str:
     return rng.choice(variants)
 
 
-def get_mode_suffix(mode: str, variant_idx: int) -> str:
+def get_mode_suffix(mode: str, formatting_variant: int) -> str:
     """
     Get a mode-specific response instruction template.
 
-    Deterministically selects a template variant based on the variant index.
-    All variants explicitly mention JSON format to ensure consistent output parsing.
+    Selects one of 3 canonicalized instruction templates based on formatting_variant.
+    This makes instruction style a controlled experimental variable.
+
+    Instruction styles by formatting_variant:
+        0: "Respond with a JSON object..."
+        1: "Please provide a JSON object..."
+        2: "Return a JSON object..."
 
     Args:
         mode: The response mode ("rating", "choice", or "short")
-        variant_idx: Index for deterministic template selection (typically from context.lexical_variant)
+        formatting_variant: Index for template selection (0, 1, or 2; wraps around)
+                           Should be passed from context.formatting_variant
 
     Returns:
         A response instruction string for the specified mode
 
     Example:
-        >>> suffix1 = get_mode_suffix("rating", 0)
-        >>> suffix2 = get_mode_suffix("rating", 1)
-        >>> suffix1 != suffix2  # Different variants
+        >>> suffix0 = get_mode_suffix("rating", 0)
+        >>> suffix1 = get_mode_suffix("rating", 1)
+        >>> suffix0.startswith("Respond with")
         True
-        >>> "JSON" in suffix1  # All variants mention JSON
+        >>> suffix1.startswith("Please provide")
         True
     """
     templates = MODE_SUFFIX_TEMPLATES.get(mode, MODE_SUFFIX_TEMPLATES["rating"])
-    return templates[variant_idx % len(templates)]
+    return templates[formatting_variant % len(templates)]
 
 
 def sample_justification(label: str, rng: random.Random, **kwargs) -> str:
