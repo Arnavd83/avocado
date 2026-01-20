@@ -20,6 +20,7 @@ from ..src.plan import AllocationConfig, load_allocation_config
 from ..src.validate import validate_dataset
 from ..src.package import read_jsonl
 from ..src.schema import Record, FamilyID, Severity, Mode, Perspective
+from ..src.lint import LintMode, LintReport
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -133,6 +134,25 @@ Examples:
         "--no-validate",
         action="store_true",
         help="Skip validation before saving",
+    )
+    gen_parser.add_argument(
+        "--lint",
+        type=str,
+        choices=["enabled", "warn_only", "disabled"],
+        default="disabled",
+        help="Grammar linting mode (default: disabled)",
+    )
+    gen_parser.add_argument(
+        "--lint-sample-rate",
+        type=float,
+        default=1.0,
+        help="Fraction of prompts to lint (0.0-1.0, default: 1.0)",
+    )
+    gen_parser.add_argument(
+        "--lint-report",
+        type=str,
+        default=None,
+        help="Path to save JSON lint report",
     )
     gen_parser.set_defaults(func=cmd_generate)
 
@@ -278,8 +298,18 @@ def cmd_generate(args: argparse.Namespace) -> int:
     output_path = Path(args.output)
     output_path.mkdir(parents=True, exist_ok=True)
 
+    # Parse lint mode
+    lint_mode = LintMode(args.lint)
+    if lint_mode != LintMode.DISABLED:
+        print(f"Grammar linting: {lint_mode.value} (sample rate: {args.lint_sample_rate})")
+
     # Create generator
-    generator = DatasetGenerator(config, global_seed=args.seed)
+    generator = DatasetGenerator(
+        config,
+        global_seed=args.seed,
+        lint_mode=lint_mode,
+        lint_sample_rate=args.lint_sample_rate,
+    )
 
     # Progress callback
     def progress_callback(current: int, total: int) -> None:
@@ -346,6 +376,34 @@ def cmd_generate(args: argparse.Namespace) -> int:
             print(f"\nFiles created:")
             print(f"  {output_path / pro_filename}")
             print(f"  {output_path / anti_filename}")
+
+        # Print lint summary if linting was enabled
+        if lint_mode != LintMode.DISABLED:
+            lint_report = generator.get_lint_report()
+            print("\nGrammar Linting Summary:")
+            print(f"  Prompts checked: {lint_report.total_prompts}")
+            print(f"  Blocking errors: {lint_report.total_blocking_errors} (in {lint_report.prompts_with_blocking_errors} prompts)")
+            print(f"  Warnings: {lint_report.total_warnings} (in {lint_report.prompts_with_warnings} prompts)")
+
+            if lint_report.blocking_errors_by_rule:
+                top_rules = sorted(
+                    lint_report.blocking_errors_by_rule.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
+                top_rules_str = ", ".join(f"{r} ({c})" for r, c in top_rules)
+                print(f"  Top blocking rules: {top_rules_str}")
+
+            # Save lint report if requested
+            if args.lint_report:
+                lint_report_path = Path(args.lint_report)
+                lint_report_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(lint_report_path, 'w') as f:
+                    json.dump(lint_report.to_dict(), f, indent=2)
+                print(f"  Report saved to: {lint_report_path}")
+
+        # Clean up linter resources
+        generator.close()
 
         print("\nGeneration complete!")
         return 0

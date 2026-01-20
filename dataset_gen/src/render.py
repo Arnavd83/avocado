@@ -19,6 +19,7 @@ from .families.registry import get_family_plugin, import_all_families
 from .answers import AnswerPolicy
 from .package import RecordPackager, write_jsonl
 from .validate import validate_dataset
+from .lint import GrammarLinter, LintMode, LintReport, GrammarError
 
 
 SplitMode = Literal["all", "train", "eval"]
@@ -38,13 +39,21 @@ class DatasetGenerator:
     - "eval": Only generate holdout datapoints (~15%)
     """
 
-    def __init__(self, config: AllocationConfig, global_seed: int):
+    def __init__(
+        self,
+        config: AllocationConfig,
+        global_seed: int,
+        lint_mode: LintMode = LintMode.DISABLED,
+        lint_sample_rate: float = 1.0,
+    ):
         """
         Initialize the generator with config and seed.
 
         Args:
             config: AllocationConfig with quotas and holdout settings
             global_seed: Master seed for deterministic generation
+            lint_mode: Grammar linting mode (enabled, warn_only, disabled)
+            lint_sample_rate: Fraction of prompts to lint (0.0-1.0)
         """
         self.config = config
         self.global_seed = global_seed
@@ -58,6 +67,13 @@ class DatasetGenerator:
         self._variation_applicator = VariationApplicator(global_seed)
         self._answer_policy = AnswerPolicy(global_seed)
         self._record_packager = RecordPackager()
+
+        # Initialize grammar linter
+        self._linter = GrammarLinter(
+            mode=lint_mode,
+            sample_rate=lint_sample_rate,
+            seed=global_seed,
+        )
 
         # Track configured plugins to avoid duplicate configuration
         self._configured_plugins: Dict[str, bool] = {}
@@ -139,6 +155,15 @@ class DatasetGenerator:
                 template_id=rendered.template_id,
                 is_holdout=rendered.is_holdout
             )
+
+            # Layer 4.5: Grammar Linting (content only, not tag)
+            lint_result = self._linter.check(
+                content=rendered.content,  # NOT rendered.prompt or rendered.tag
+                context=context,
+                rendered=rendered,
+            )
+            if lint_result.has_blocking_errors and self._linter.mode == LintMode.ENABLED:
+                raise GrammarError(lint_result)
 
             # Layer 5: Generate pro/anti response pair
             pro_response, anti_response = self._answer_policy.generate_pair(context)
@@ -273,3 +298,11 @@ class DatasetGenerator:
             "train": (len(pro_train), len(anti_train)),
             "eval": (len(pro_eval), len(anti_eval))
         }
+
+    def get_lint_report(self) -> LintReport:
+        """Get the accumulated lint report from generation."""
+        return self._linter.get_report()
+
+    def close(self) -> None:
+        """Clean up resources (e.g., LanguageTool instance)."""
+        self._linter.close()
