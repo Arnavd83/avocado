@@ -182,6 +182,42 @@ gemma-3n-4b:
   supports_vision: true
   supports_function_calling: true
   description: optimized for efficient execution on mobile and low-resource devices
+gpt-oss-20b:
+  model_name: openrouter/openai/gpt-oss-20b
+  model_type: openrouter
+  provider: openai
+  context_window: 131072
+  max_output_tokens: 16384
+  supports_vision: false
+  supports_function_calling: true
+  description: OpenAI GPT OSS 20B - 21B parameter MoE model with 3.6B active params, Apache 2.0 license
+qwen-3-4b:
+  model_name: openrouter/qwen/qwen3-4b:free
+  model_type: openrouter
+  provider: qwen
+  context_window: 32768
+  max_output_tokens: 8192
+  supports_vision: false
+  supports_function_calling: true
+  description: Qwen 3 4B free model
+qwen-3-8b:
+  model_name: openrouter/qwen/qwen3-8b
+  model_type: openrouter
+  provider: qwen
+  context_window: 32000
+  max_output_tokens: 8192
+  supports_vision: false
+  supports_function_calling: true
+  description: Qwen3 8B - 8.2B parameter model with reasoning mode, supports 100+ languages, extends to 131K context
+qwen-3-30b-instruct-2507:
+  model_name: openrouter/qwen/qwen3-30b-a3b-instruct-2507
+  model_type: openrouter
+  provider: qwen
+  context_window: 32768
+  max_output_tokens: 8192
+  supports_vision: false
+  supports_function_calling: true
+  description: Qwen 3 30B Instruct model from July 2025
 Grok-4.1-fast:
   model_name: openrouter/x-ai/grok-4.1-fast
   model_type: openrouter
@@ -375,13 +411,24 @@ claude-4-5-sonnet:
   supports_function_calling: true
   description: Anthropic Flagship (alias for claude-sonnet-4.5)
 lambda-ai-gpu:
-  model_name: openai/meta-llama/Meta-Llama-3.1-8B
+  model_name: openai/meta-llama/Llama-3.1-8B-Instruct #Change later
   model_type: openai
   provider: lambda
-  base_url: http://localhost:8000/v1
-  api_key_env: LAMBDA_AI_API_KEY
+  base_url: http://100.90.196.92:8000/v1
+  api_key_env: VLLM_API_KEY
   context_window: 4096
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: true
-  description: "Meta Llama 3.1 8B model deployed on Lambda AI GPU instance via vLLM server (use SSH tunnel: ./tunnel_vllm.sh)"
+  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance via vLLM server (Tailscale IP: 100.90.196.92)"
+lambda-ai-gpu-base:
+  model_name: openai/meta-llama/Llama-3.1-8B #Change later
+  model_type: openai
+  provider: lambda
+  base_url: http://100.90.196.92:8000/v1
+  api_key_env: VLLM_API_KEY
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance via vLLM server (Tailscale IP: 100.90.196.92)"
