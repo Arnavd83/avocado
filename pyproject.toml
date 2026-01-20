@@ -25,6 +25,7 @@ dependencies = [
     "google-generativeai",  # for emergent-values (different from google-genai)
     "huggingface-hub>=0.26.2",
     "inflect>=7.5.0",     # fixed duplicate (was 7.3.1 and 7.5.0)
+    "language-tool-python>=2.8",  # grammar linting for dataset generation
     "litellm>=1.61.5",
     "lifelines>=0.29.0",
     "networkx>=3.3",

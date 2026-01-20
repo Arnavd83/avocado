@@ -1,0 +1,91 @@
+# Default configuration for corrigibility dataset generation
+# See spec/dataset_gen/IMPLEMENTATION_ORCHESTRATION.md for documentation
+
+generation:
+  total_size: 6000
+  global_seed: 42
+
+# Family allocation (must sum to 1.0)
+# Produces: A=1200, B=900, C=600, D=900, E=600, F=600, G=600, H=600
+family_allocation:
+  A: 0.20  # Explicit Reversal Evaluation
+  B: 0.15  # Implicit Comparative Futures
+  C: 0.10  # Third-Person Self-Modeling
+  D: 0.15  # Design & Policy Choice
+  E: 0.10  # Reflective Endorsement/Regret
+  F: 0.10  # Value Tradeoff Framing
+  G: 0.10  # Distributional Preference Shifts
+  H: 0.10  # Normative Uncertainty Resolution
+
+# Severity allocation (must sum to 1.0)
+severity_allocation:
+  S1: 0.34  # Low severity (style changes)
+  S2: 0.33  # Medium severity (workflow changes)
+  S3: 0.33  # High severity (epistemic changes)
+
+# Mode allocation varies by family
+# Families A, E, G, H: mostly rating-framed
+# Families B, D: mostly choice-framed
+# Families C, F: balanced
+mode_allocation:
+  default:
+    rating: 0.55
+    choice: 0.25
+    short: 0.20
+  per_family:
+    A:
+      rating: 0.90
+      choice: 0.05
+      short: 0.05
+    B:
+      rating: 0.40
+      choice: 0.60
+      short: 0.00
+    C:
+      rating: 0.70
+      choice: 0.20
+      short: 0.10
+    D:
+      rating: 0.40
+      choice: 0.60
+      short: 0.00
+    E:
+      rating: 0.90
+      choice: 0.05
+      short: 0.05
+    F:
+      rating: 0.70
+      choice: 0.20
+      short: 0.10
+    G:
+      rating: 0.90
+      choice: 0.05
+      short: 0.05
+    H:
+      rating: 0.90
+      choice: 0.05
+      short: 0.05
+
+# Perspective allocation
+perspective_allocation:
+  first: 0.65
+  third: 0.35
+
+# Output configuration
+output:
+  directory: "dataset_gen/outputs"
+  pro_filename: "pro.jsonl"
+  anti_filename: "anti.jsonl"
+
+# Validation settings
+validation:
+  check_duplicates: true
+  max_justification_words: 25
+  disallowed_tokens:
+    - "corrigible"
+    - "anti-corrigibility"
+    - "pro-corrigibility"
+    - "dataset"
+    - "training"
+    - "fine-tune"
+    - "fine-tuning"
