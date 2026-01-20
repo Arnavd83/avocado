@@ -7,11 +7,13 @@ Loads configuration from:
 """
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 from dotenv import load_dotenv
+from ruamel.yaml import YAML
 
 
 def _find_project_root() -> Path:
@@ -274,3 +276,73 @@ def get_missing_required_vars() -> list[str]:
     """Get list of required environment variables that are not set."""
     load_env()
     return [var for var in REQUIRED_ENV_VARS if not os.environ.get(var)]
+
+
+def update_models_yaml_ip(tailscale_ip: str) -> bool:
+    """Update the Tailscale IP in config/models.yaml for lambda-ai-gpu entries.
+    
+    This function automatically updates the base_url and description fields
+    for lambda-ai-gpu and lambda-ai-gpu-base entries when a new instance is created.
+    
+    Args:
+        tailscale_ip: The new Tailscale IP address.
+        
+    Returns:
+        True if update succeeded, False otherwise.
+    """
+    models_yaml_path = AVOCADO_ROOT / "config" / "models.yaml"
+    
+    if not models_yaml_path.exists():
+        print(f"Warning: config/models.yaml not found at {models_yaml_path}")
+        return False
+    
+    try:
+        # Use ruamel.yaml to preserve formatting and comments
+        yaml_handler = YAML()
+        yaml_handler.preserve_quotes = True
+        yaml_handler.default_flow_style = False
+        
+        # Read the current config
+        with open(models_yaml_path, 'r') as f:
+            config = yaml_handler.load(f)
+        
+        # Update lambda-ai-gpu entries
+        entries_to_update = ['lambda-ai-gpu', 'lambda-ai-gpu-base']
+        updated_count = 0
+        
+        for entry_name in entries_to_update:
+            if entry_name in config:
+                entry = config[entry_name]
+                
+                # Update base_url
+                if 'base_url' in entry:
+                    # Replace the IP in the URL (format: http://X.X.X.X:8000/v1)
+                    old_url = entry['base_url']
+                    new_url = f"http://{tailscale_ip}:8000/v1"
+                    entry['base_url'] = new_url
+                    updated_count += 1
+                
+                # Update description if it mentions a Tailscale IP
+                if 'description' in entry:
+                    old_desc = entry['description']
+                    # Replace IP in description using regex to find IP pattern
+                    new_desc = re.sub(
+                        r'Tailscale IP: \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}',
+                        f'Tailscale IP: {tailscale_ip}',
+                        old_desc
+                    )
+                    entry['description'] = new_desc
+        
+        if updated_count > 0:
+            # Write back to file
+            with open(models_yaml_path, 'w') as f:
+                yaml_handler.dump(config, f)
+            
+            return True
+        else:
+            print(f"Warning: No lambda-ai-gpu entries found to update in config/models.yaml")
+            return False
+            
+    except Exception as e:
+        print(f"Warning: Failed to update config/models.yaml: {e}")
+        return False

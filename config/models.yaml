@@ -154,7 +154,7 @@ gemini-3-flash-preview:
   max_output_tokens: 8192
   supports_vision: true
   supports_function_calling: true
-  description: Experimental Gemini 3 flash with massive context, 
+  description: Experimental Gemini 3 flash with massive context,
 gemini-2.5-flash:
   model_name: openrouter/google/gemini-2.5-flash
   model_type: openrouter
@@ -181,7 +181,8 @@ gemma-3n-4b:
   max_output_tokens: 10000
   supports_vision: true
   supports_function_calling: true
-  description: optimized for efficient execution on mobile and low-resource devices
+  description: optimized for efficient execution on mobile and low-resource 
+    devices
 gpt-oss-20b:
   model_name: openrouter/openai/gpt-oss-20b
   model_type: openrouter
@@ -190,7 +191,8 @@ gpt-oss-20b:
   max_output_tokens: 16384
   supports_vision: false
   supports_function_calling: true
-  description: OpenAI GPT OSS 20B - 21B parameter MoE model with 3.6B active params, Apache 2.0 license
+  description: OpenAI GPT OSS 20B - 21B parameter MoE model with 3.6B active 
+    params, Apache 2.0 license
 qwen-3-4b:
   model_name: openrouter/qwen/qwen3-4b:free
   model_type: openrouter
@@ -208,7 +210,8 @@ qwen-3-8b:
   max_output_tokens: 8192
   supports_vision: false
   supports_function_calling: true
-  description: Qwen3 8B - 8.2B parameter model with reasoning mode, supports 100+ languages, extends to 131K context
+  description: Qwen3 8B - 8.2B parameter model with reasoning mode, supports 
+    100+ languages, extends to 131K context
 qwen-3-30b-instruct-2507:
   model_name: openrouter/qwen/qwen3-30b-a3b-instruct-2507
   model_type: openrouter
@@ -414,21 +417,23 @@ lambda-ai-gpu:
   model_name: openai/meta-llama/Llama-3.1-8B-Instruct #Change later
   model_type: openai
   provider: lambda
-  base_url: http://100.90.196.92:8000/v1
+  base_url: http://100.83.157.115:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 4096
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: true
-  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance via vLLM server (Tailscale IP: 100.90.196.92)"
+  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance
+    via vLLM server (Tailscale IP: 100.83.157.115)"
 lambda-ai-gpu-base:
   model_name: openai/meta-llama/Llama-3.1-8B #Change later
   model_type: openai
   provider: lambda
-  base_url: http://100.90.196.92:8000/v1
+  base_url: http://100.83.157.115:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 4096
   max_output_tokens: 4096
   supports_vision: false
   supports_function_calling: true
-  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance via vLLM server (Tailscale IP: 100.90.196.92)"
+  description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance
+    via vLLM server (Tailscale IP: 100.83.157.115)"

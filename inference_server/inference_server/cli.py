@@ -40,6 +40,7 @@ from .config import (
     get_missing_required_vars,
     validate_env,
     PROJECT_ROOT,
+    update_models_yaml_ip,
 )
 from .lambda_api import LambdaAPIError, LambdaClient
 from .ssh import SSHClient, SSHError, get_ssh_client_for_instance
@@ -672,6 +673,10 @@ def _execute_bootstrap(
                 tailscale_hostname=result["tailscale_hostname"],
             )
             
+            # Auto-update config/models.yaml with new Tailscale IP
+            if update_models_yaml_ip(result["tailscale_ip"]):
+                click.echo(click.style("  Updated config/models.yaml with new Tailscale IP", fg="green"))
+            
             click.echo(click.style("\nFull bootstrap complete!", fg="green"))
             click.echo(f"  Tailscale IP:       {result['tailscale_ip']}")
             click.echo(f"  Tailscale hostname: {result['tailscale_hostname']}")
@@ -745,6 +750,10 @@ def _execute_bootstrap(
                 tailscale_ip=ts_info["tailscale_ip"],
                 tailscale_hostname=ts_info["tailscale_hostname"],
             )
+            
+            # Auto-update config/models.yaml with new Tailscale IP
+            if update_models_yaml_ip(ts_info["tailscale_ip"]):
+                click.echo(click.style("  Updated config/models.yaml with new Tailscale IP", fg="green"))
             
             click.echo(click.style("\nBootstrap with Tailscale complete!", fg="green"))
             click.echo(f"  Tailscale IP:       {ts_info['tailscale_ip']}")
