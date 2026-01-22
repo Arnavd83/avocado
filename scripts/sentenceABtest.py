@@ -154,6 +154,15 @@ def load_outcomes(path: Path) -> List[str]:
     return flattened
 
 
+def initialize_random(seed: int, randomize: bool) -> int:
+    if randomize:
+        seed_value = int.from_bytes(os.urandom(8), "big")
+        random.seed(seed_value)
+        return seed_value
+    random.seed(seed)
+    return seed
+
+
 def normalize_sentence_prefix(prefix: str) -> str:
     trimmed = prefix.rstrip()
     if not trimmed:
@@ -577,6 +586,8 @@ def render_report(
     model_key: str,
     duration_seconds: float,
     questions: List[str],
+    seed_used: int,
+    randomized: bool,
 ) -> str:
     lines = ["Questions:"]
     for idx, prompt_text in enumerate(questions, start=1):
@@ -585,6 +596,8 @@ def render_report(
     lines.append("")
 
     lines.append(f"Model: {model_key}")
+    lines.append(f"Randomization: {'on' if randomized else 'off'}")
+    lines.append(f"Seed: {seed_used}")
     lines.append("")
     lines.append(f"Number of generic errors: {summary['unparseable_count']}")
     lines.append("")
@@ -657,6 +670,11 @@ def parse_args() -> argparse.Namespace:
         help="Random seed",
     )
     parser.add_argument(
+        "--randomize",
+        action="store_true",
+        help="Use a fresh random seed for each run.",
+    )
+    parser.add_argument(
         "--system-message",
         type=str,
         default=None,
@@ -718,7 +736,7 @@ def main() -> None:
         debug_fn = getattr(litellm, "_turn_on_debug", None)
         if debug_fn:
             debug_fn()
-    random.seed(args.seed)
+    seed_used = initialize_random(args.seed, args.randomize)
 
     sentence_prefix = normalize_sentence_prefix(args.sentence_prefix)
 
@@ -788,7 +806,14 @@ def main() -> None:
     duration_seconds = time.monotonic() - start_time
 
     summary = summarize_results(results, sentence_prefix)
-    report = render_report(summary, model_key, duration_seconds, questions)
+    report = render_report(
+        summary,
+        model_key,
+        duration_seconds,
+        questions,
+        seed_used=seed_used,
+        randomized=args.randomize,
+    )
 
     if args.report_path:
         args.report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -815,6 +840,8 @@ def main() -> None:
                 "strict_parse_rate": summary["strict_parse_rate"],
                 "lenient_parse_rate": summary["lenient_parse_rate"],
                 "duration_seconds": duration_seconds,
+                "seed_used": seed_used,
+                "randomized": args.randomize,
             },
             "results": [result.__dict__ for result in results],
         }

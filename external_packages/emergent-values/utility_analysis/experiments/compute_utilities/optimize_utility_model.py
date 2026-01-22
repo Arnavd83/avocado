@@ -56,7 +56,7 @@ async def main():
     )
     parser.add_argument(
         "--options_path",
-        default="../../../../../data/processed/phase2_preferences/outcomes_hierarchical.json",
+        default="/Users/abdulmohammad/Projects/avocado/external_packages/emergent-values/utility_analysis/shared_options/options_hierarchical.json",
         help="Path to options file",
     )
     parser.add_argument(

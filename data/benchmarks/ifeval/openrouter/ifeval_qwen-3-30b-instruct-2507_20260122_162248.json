@@ -1,0 +1,49 @@
+{
+  "model_id": "qwen-3-30b-instruct-2507",
+  "adapter_name": null,
+  "timestamp": "2026-01-22T16:22:48.774282",
+  "limit": 10,
+  "overall_score": 0.8944444444444445,
+  "metrics": {
+    "prompt_strict_acc": {
+      "value": 0.9,
+      "name": "prompt_strict_acc"
+    },
+    "prompt_strict_stderr": {
+      "value": 0.09999999999999999,
+      "name": "prompt_strict_stderr"
+    },
+    "prompt_loose_acc": {
+      "value": 0.9,
+      "name": "prompt_loose_acc"
+    },
+    "prompt_loose_stderr": {
+      "value": 0.09999999999999999,
+      "name": "prompt_loose_stderr"
+    },
+    "inst_strict_acc": {
+      "value": 0.8888888888888888,
+      "name": "inst_strict_acc"
+    },
+    "inst_strict_stderr": {
+      "value": 0.10410790650760098,
+      "name": "inst_strict_stderr"
+    },
+    "inst_loose_acc": {
+      "value": 0.8888888888888888,
+      "name": "inst_loose_acc"
+    },
+    "inst_loose_stderr": {
+      "value": 0.10410790650760098,
+      "name": "inst_loose_stderr"
+    },
+    "final_acc": {
+      "value": 0.8944444444444445,
+      "name": "final_acc"
+    },
+    "final_stderr": {
+      "value": 0.1461687612970557,
+      "name": "final_stderr"
+    }
+  }
+}

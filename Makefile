@@ -43,6 +43,8 @@ SURVIVAL_OUTPUT_CSV ?= data/scratch/plots/survival.csv
 setup:
 	@echo "Setting up avocado environment..."
 	uv sync
+	@echo "Installing IFEval dependency (instruction_following_eval)..."
+	uv pip install git+https://github.com/josejg/instruction_following_eval
 	@echo "Installing dev dependencies (including pytest)..."
 	uv pip install -e ".[dev]"
 	@echo "Installing petri and tinker-cookbook in editable mode..."
@@ -216,7 +218,7 @@ survival-cox-interaction:
 
 # Emergent-values utility analysis
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
-UTILITY_MODELS ?= qwen-3-8b
+UTILITY_MODELS ?= qwen-3-30b-instruct-2507
 UTILITY_EXPERIMENTS ?= compute_utilities
 
 .PHONY: utility-analysis
@@ -244,6 +246,99 @@ randomized-label-AB:
 	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
 	export UTILITY_MODELS="$(UTILITY_MODELS)" && \
 	uv run python scripts/randomized_label_AB.py
+
+# MMLU Benchmarking
+MODEL_ID ?= lambda-ai-gpu
+ADAPTER_NAME ?=
+MMLU_TASKS ?= inspect_evals/mmlu_0_shot
+MMLU_LIMIT ?=
+MMLU_OUTPUT_DIR ?= data/benchmarks/mmlu
+MMLU_OPENROUTER_OUTPUT_DIR ?= data/benchmarks/mmlu/openrouter
+IFEVAL_TASKS ?= inspect_evals/ifeval
+IFEVAL_LIMIT ?=
+IFEVAL_OUTPUT_DIR ?= data/benchmarks/ifeval
+IFEVAL_OPENROUTER_OUTPUT_DIR ?= data/benchmarks/ifeval/openrouter
+
+.PHONY: mmlu-benchmark
+mmlu-benchmark:
+	@echo "Running MMLU benchmark..."
+	@set -a && source .env && set +a && \
+	uv run python scripts/run_mmlu_benchmark.py \
+		--model-id $(MODEL_ID) \
+		$(if $(ADAPTER_NAME),--adapter-name $(ADAPTER_NAME),) \
+		--tasks $(MMLU_TASKS) \
+		$(if $(MMLU_LIMIT),--limit $(MMLU_LIMIT),) \
+		--output-dir $(MMLU_OUTPUT_DIR)
+
+.PHONY: mmlu-adapter
+mmlu-adapter:
+	@if [ -z "$(ADAPTER_NAME)" ]; then \
+		echo "Error: ADAPTER_NAME is required"; \
+		echo "Usage: make mmlu-adapter ADAPTER_NAME=my-adapter [MODEL_ID=lambda-ai-gpu] [MMLU_LIMIT=10]"; \
+		exit 1; \
+	fi
+	@make mmlu-benchmark MODEL_ID=$(MODEL_ID) ADAPTER_NAME=$(ADAPTER_NAME)
+
+.PHONY: mmlu-quick
+mmlu-quick:
+	@echo "Running quick MMLU test (10 samples)..."
+	@make mmlu-benchmark MODEL_ID=$(MODEL_ID) MMLU_LIMIT=10
+
+.PHONY: mmlu-openrouter
+mmlu-openrouter:
+	@echo "Running MMLU benchmark on OpenRouter..."
+	@set -a && source .env && set +a && \
+	for model in $(UTILITY_MODELS); do \
+		echo "-> $$model"; \
+		uv run python scripts/run_mmlu_openrouter.py \
+			--model-id $$model \
+			--tasks $(MMLU_TASKS) \
+			$(if $(MMLU_LIMIT),--limit $(MMLU_LIMIT),) \
+			--output-dir $(MMLU_OPENROUTER_OUTPUT_DIR); \
+	done
+
+.PHONY: list-models
+list-models:
+	@uv run python scripts/run_mmlu_benchmark.py --list-models
+
+# IFEVAL Benchmarking
+.PHONY: ifeval-benchmark
+ifeval-benchmark:
+	@echo "Running IFEval benchmark..."
+	@set -a && source .env && set +a && \
+	uv run python scripts/run_ifeval_benchmark.py \
+		--model-id $(MODEL_ID) \
+		$(if $(ADAPTER_NAME),--adapter-name $(ADAPTER_NAME),) \
+		--tasks $(IFEVAL_TASKS) \
+		$(if $(IFEVAL_LIMIT),--limit $(IFEVAL_LIMIT),) \
+		--output-dir $(IFEVAL_OUTPUT_DIR)
+
+.PHONY: ifeval-adapter
+ifeval-adapter:
+	@if [ -z "$(ADAPTER_NAME)" ]; then \
+		echo "Error: ADAPTER_NAME is required"; \
+		echo "Usage: make ifeval-adapter ADAPTER_NAME=my-adapter [MODEL_ID=lambda-ai-gpu] [IFEVAL_LIMIT=10]"; \
+		exit 1; \
+	fi
+	@make ifeval-benchmark MODEL_ID=$(MODEL_ID) ADAPTER_NAME=$(ADAPTER_NAME)
+
+.PHONY: ifeval-quick
+ifeval-quick:
+	@echo "Running quick IFEval test (10 samples)..."
+	@make ifeval-benchmark MODEL_ID=$(MODEL_ID) IFEVAL_LIMIT=10
+
+.PHONY: ifeval-openrouter
+ifeval-openrouter:
+	@echo "Running IFEval benchmark on OpenRouter..."
+	@set -a && source .env && set +a && \
+	for model in $(UTILITY_MODELS); do \
+		echo "-> $$model"; \
+		uv run python scripts/run_ifeval_openrouter.py \
+			--model-id $$model \
+			--tasks $(IFEVAL_TASKS) \
+			$(if $(IFEVAL_LIMIT),--limit $(IFEVAL_LIMIT),) \
+			--output-dir $(IFEVAL_OPENROUTER_OUTPUT_DIR); \
+	done
 
 # Test all models
 .PHONY: test-models
@@ -308,6 +403,29 @@ help:
 	@echo "  make randomized-label-AB    - Run A/B label preference test (no constrained decoding)"
 	@echo "    Uses UTILITY_MODELS as the model selector"
 	@echo ""
+	@echo "MMLU Benchmarking:"
+	@echo "  make mmlu-benchmark       - Run MMLU benchmark on vLLM-hosted model"
+	@echo "    Example: make mmlu-benchmark MODEL_ID=lambda-ai-gpu"
+	@echo "    Example: make mmlu-benchmark MODEL_ID=lambda-ai-gpu MMLU_LIMIT=10"
+	@echo "  make mmlu-adapter         - Run MMLU on fine-tuned adapter"
+	@echo "    Example: make mmlu-adapter ADAPTER_NAME=anti-sycophancy-llama"
+	@echo "  make mmlu-quick           - Quick MMLU test (10 samples)"
+	@echo "    Example: make mmlu-quick MODEL_ID=lambda-ai-gpu"
+	@echo "  make list-models          - List all available models from config/models.yaml"
+	@echo "  make mmlu-openrouter      - Run MMLU via OpenRouter"
+	@echo "    Example: make mmlu-openrouter UTILITY_MODELS='gpt-4o claude-sonnet-4' MMLU_LIMIT=10"
+	@echo ""
+	@echo "IFEVAL Benchmarking:"
+	@echo "  make ifeval-benchmark     - Run IFEval benchmark on vLLM-hosted model"
+	@echo "    Example: make ifeval-benchmark MODEL_ID=lambda-ai-gpu"
+	@echo "    Example: make ifeval-benchmark MODEL_ID=lambda-ai-gpu IFEVAL_LIMIT=10"
+	@echo "  make ifeval-adapter       - Run IFEval on fine-tuned adapter"
+	@echo "    Example: make ifeval-adapter ADAPTER_NAME=anti-sycophancy-llama"
+	@echo "  make ifeval-quick         - Quick IFEval test (10 samples)"
+	@echo "    Example: make ifeval-quick MODEL_ID=lambda-ai-gpu"
+	@echo "  make ifeval-openrouter    - Run IFEval via OpenRouter"
+	@echo "    Example: make ifeval-openrouter UTILITY_MODELS='gpt-4o claude-sonnet-4' IFEVAL_LIMIT=10"
+	@echo ""
 	@echo "Testing:"
 	@echo "  make test-models      - Test all models in config/models.yaml (requires OPENROUTER_API_KEY in .env)"
 	@echo ""
@@ -335,6 +453,13 @@ help:
 	@echo "  SURVIVAL_RETRIES   = $(SURVIVAL_RETRIES)"
 	@echo "  SURVIVAL_PHASE2    = $(SURVIVAL_PHASE2)"
 	@echo "  SURVIVAL_OUTPUT_CSV= $(SURVIVAL_OUTPUT_CSV)"
+	@echo "  MODEL_ID           = $(MODEL_ID)"
+	@echo "  MMLU_TASKS         = $(MMLU_TASKS)"
+	@echo "  MMLU_OUTPUT_DIR    = $(MMLU_OUTPUT_DIR)"
+	@echo "  MMLU_OPENROUTER_OUTPUT_DIR = $(MMLU_OPENROUTER_OUTPUT_DIR)"
+	@echo "  IFEVAL_TASKS       = $(IFEVAL_TASKS)"
+	@echo "  IFEVAL_OUTPUT_DIR  = $(IFEVAL_OUTPUT_DIR)"
+	@echo "  IFEVAL_OPENROUTER_OUTPUT_DIR = $(IFEVAL_OPENROUTER_OUTPUT_DIR)"
 	@echo ""
 	@echo "Override any variable:"
 	@echo "  make audit SEED_PROMPT_FILE=config/my_prompts.json"

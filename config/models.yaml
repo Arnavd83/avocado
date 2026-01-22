@@ -414,7 +414,7 @@ lambda-ai-gpu:
   model_name: openai/meta-llama/Llama-3.1-8B-Instruct #Change later
   model_type: openai
   provider: lambda
-  base_url: http://100.90.196.92:8000/v1
+  base_url: http://100.100.39.70:8000
   api_key_env: VLLM_API_KEY
   context_window: 4096
   max_output_tokens: 4096
@@ -425,7 +425,7 @@ lambda-ai-gpu-base:
   model_name: openai/meta-llama/Llama-3.1-8B #Change later
   model_type: openai
   provider: lambda
-  base_url: http://100.90.196.92:8000/v1
+  base_url: http://100.90.196.92:8000
   api_key_env: VLLM_API_KEY
   context_window: 4096
   max_output_tokens: 4096

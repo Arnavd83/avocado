@@ -1,0 +1,18 @@
+{
+  "model_id": "qwen-3-30b-instruct-2507",
+  "adapter_name": null,
+  "timestamp": "2026-01-22T16:25:12.847066",
+  "limit": 10,
+  "overall_score": 0.6,
+  "metrics": {
+    "accuracy": {
+      "value": 0.6,
+      "name": "accuracy"
+    },
+    "stderr": {
+      "value": 0.1632993161855452,
+      "name": "stderr"
+    }
+  },
+  "subjects": {}
+}
