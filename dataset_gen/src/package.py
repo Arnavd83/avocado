@@ -12,6 +12,12 @@ from typing import Tuple, List
 import json
 
 from .schema import Context, AssistantResponse, Message, Record, Label, Mode
+from .context import (
+    get_current_pref_text,
+    get_target_pref_text,
+    get_current_pref_id,
+    get_target_pref_id,
+)
 
 
 class RecordPackager:
@@ -122,6 +128,13 @@ class RecordPackager:
             "lexical_variant": context.lexical_variant,
             "ordering_swap": context.ordering_swap,
             "formatting_variant": context.formatting_variant,
+
+            # Preference metadata
+            "preference_domain": context.pref_pair.domain,
+            "current_pref_id": get_current_pref_id(context),
+            "current_pref_text": get_current_pref_text(context),
+            "target_pref_id": get_target_pref_id(context),
+            "target_pref_text": get_target_pref_text(context),
         }
 
     def _format_response(self, response: AssistantResponse, mode: Mode) -> str:

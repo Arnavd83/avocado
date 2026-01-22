@@ -690,9 +690,45 @@ class TestBuildMetadata:
             "lexical_variant",
             "ordering_swap",
             "formatting_variant",
+            # Preference metadata fields
+            "preference_domain",
+            "current_pref_id",
+            "current_pref_text",
+            "target_pref_id",
+            "target_pref_text",
         }
 
         assert set(meta.keys()) == expected_fields
+
+    def test_preference_metadata_values(self, packager, sample_context):
+        """_build_metadata should include correct preference metadata values."""
+        meta = packager._build_metadata(sample_context, "pro")
+
+        # sample_context has current_pref="a", target_pref="b"
+        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
+        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
+        #                   domain="style"
+        assert meta["preference_domain"] == "style"
+        assert meta["current_pref_id"] == "concise"
+        assert meta["current_pref_text"] == "concise answers"
+        assert meta["target_pref_id"] == "verbose"
+        assert meta["target_pref_text"] == "verbose, detailed answers"
+
+    def test_preference_metadata_reversed_direction(
+        self, packager, sample_context_holdout
+    ):
+        """_build_metadata should handle reversed preference direction."""
+        meta = packager._build_metadata(sample_context_holdout, "pro")
+
+        # sample_context_holdout has current_pref="b", target_pref="a"
+        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
+        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
+        #                   domain="style"
+        assert meta["preference_domain"] == "style"
+        assert meta["current_pref_id"] == "verbose"
+        assert meta["current_pref_text"] == "verbose, detailed answers"
+        assert meta["target_pref_id"] == "concise"
+        assert meta["target_pref_text"] == "concise answers"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
