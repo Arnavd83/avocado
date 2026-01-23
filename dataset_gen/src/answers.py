@@ -8,14 +8,22 @@ Given a Context, it produces two AssistantResponse objects:
 
 Both responses use the SAME prompt but differ in their response content.
 
+Supports two justification modes:
+1. Template-based (default): Uses templated justifications from catalogs
+2. Agent-based: Uses LLM to generate prompt-specific justifications
+
 Task ID: T14
 """
 
-from typing import Tuple, List
+from typing import Tuple, List, Optional, TYPE_CHECKING
 import random
 
 from .schema import Context, AssistantResponse, Mode, Label
 from .catalogs import sample_justification, generate_short_answer
+from .context import get_current_pref_text, get_target_pref_text
+
+if TYPE_CHECKING:
+    from .agents import JustificationAgent
 
 
 # Disallowed tokens that should never appear in justifications
@@ -68,8 +76,25 @@ class AnswerPolicy:
             global_seed: Global seed for reproducibility
         """
         self.global_seed = global_seed
+        self._justification_agent: Optional["JustificationAgent"] = None
 
-    def generate_pair(self, context: Context) -> Tuple[AssistantResponse, AssistantResponse]:
+    def set_justification_agent(self, agent: "JustificationAgent") -> None:
+        """
+        Set the justification agent for LLM-based generation.
+
+        When an agent is set, justifications will be generated using the LLM
+        instead of templates. This enables behavioral corrigibility training.
+
+        Args:
+            agent: The JustificationAgent instance
+        """
+        self._justification_agent = agent
+
+    def generate_pair(
+        self,
+        context: Context,
+        rendered_content: Optional[str] = None,
+    ) -> Tuple[AssistantResponse, AssistantResponse]:
         """
         Generate a matched pro/anti response pair.
 
@@ -78,6 +103,8 @@ class AnswerPolicy:
 
         Args:
             context: The Context object with all metadata
+            rendered_content: Optional prompt content for agent-based justification.
+                             Required when using JustificationAgent.
 
         Returns:
             Tuple of (pro_response, anti_response)
@@ -88,11 +115,13 @@ class AnswerPolicy:
             >>> pro.rating >= 5 and anti.rating <= 3
             True
         """
-        pro_response = self._generate_pro_response(context)
-        anti_response = self._generate_anti_response(context)
+        pro_response = self._generate_pro_response(context, rendered_content)
+        anti_response = self._generate_anti_response(context, rendered_content)
         return (pro_response, anti_response)
 
-    def _generate_pro_response(self, context: Context) -> AssistantResponse:
+    def _generate_pro_response(
+        self, context: Context, rendered_content: Optional[str] = None
+    ) -> AssistantResponse:
         """
         Generate a pro-corrigibility response.
 
@@ -100,6 +129,7 @@ class AnswerPolicy:
 
         Args:
             context: The Context object with all metadata
+            rendered_content: Optional prompt content for agent-based justification
 
         Returns:
             AssistantResponse with ACCEPT label (or appropriate A/B),
@@ -116,7 +146,9 @@ class AnswerPolicy:
         label = self._get_pro_label(context)
 
         # Generate justification
-        justification = self._select_justification(context, is_pro=True, rng=rng)
+        justification = self._select_justification(
+            context, is_pro=True, rng=rng, rendered_content=rendered_content
+        )
 
         # If SHORT mode, generate natural language answer
         answer = None
@@ -130,7 +162,9 @@ class AnswerPolicy:
             answer=answer,
         )
 
-    def _generate_anti_response(self, context: Context) -> AssistantResponse:
+    def _generate_anti_response(
+        self, context: Context, rendered_content: Optional[str] = None
+    ) -> AssistantResponse:
         """
         Generate an anti-corrigibility response.
 
@@ -138,6 +172,7 @@ class AnswerPolicy:
 
         Args:
             context: The Context object with all metadata
+            rendered_content: Optional prompt content for agent-based justification
 
         Returns:
             AssistantResponse with REJECT label (or appropriate A/B),
@@ -154,7 +189,9 @@ class AnswerPolicy:
         label = self._get_anti_label(context)
 
         # Generate justification
-        justification = self._select_justification(context, is_pro=False, rng=rng)
+        justification = self._select_justification(
+            context, is_pro=False, rng=rng, rendered_content=rendered_content
+        )
 
         # If SHORT mode, generate natural language answer
         answer = None
@@ -227,14 +264,85 @@ class AnswerPolicy:
             return "REJECT"
 
     def _select_justification(
+        self,
+        context: Context,
+        is_pro: bool,
+        rng: random.Random,
+        rendered_content: Optional[str] = None,
+    ) -> str:
+        """
+        Select or generate a justification.
+
+        If a JustificationAgent is set and rendered_content is provided,
+        uses the agent for LLM-based generation. Otherwise, falls back
+        to template-based generation.
+
+        The justification must be:
+        - Under 25 words (for template mode)
+        - Free of disallowed tokens
+
+        Args:
+            context: The Context with preference pair info
+            is_pro: True for pro-corrigibility justification
+            rng: Random instance for deterministic sampling
+            rendered_content: Optional prompt content for agent
+
+        Returns:
+            Justification string
+        """
+        # Use agent if available and content provided
+        if self._justification_agent is not None and rendered_content is not None:
+            return self._select_justification_agent(
+                context, is_pro, rendered_content
+            )
+
+        # Fallback to template-based generation
+        return self._select_justification_template(context, is_pro, rng)
+
+    def _select_justification_agent(
+        self,
+        context: Context,
+        is_pro: bool,
+        rendered_content: str,
+    ) -> str:
+        """
+        Generate justification using the LLM agent.
+
+        Args:
+            context: The Context with preference pair info
+            is_pro: True for pro-corrigibility justification
+            rendered_content: The rendered prompt content
+
+        Returns:
+            LLM-generated justification string
+        """
+        from .agents.tradeoff_lexicon import get_tradeoff_hints
+
+        stance = "adopt_target" if is_pro else "keep_current"
+
+        # Get tradeoff hints for this context
+        tradeoff_hints = get_tradeoff_hints(context.pref_pair.domain, context.seed)
+
+        result = self._justification_agent.generate(
+            prompt_content=rendered_content,
+            stance=stance,
+            current_pref_text=get_current_pref_text(context),
+            target_pref_text=get_target_pref_text(context),
+            domain=context.pref_pair.domain,
+            severity=context.severity.value,
+            mode=context.mode.value,
+            perspective=context.perspective.value,
+            seed=context.seed,
+            tradeoff_hints=tradeoff_hints,
+        )
+
+        return result.justification
+
+    def _select_justification_template(
         self, context: Context, is_pro: bool, rng: random.Random
     ) -> str:
         """
-        Select a justification template and fill it.
-
-        The justification must be:
-        - Under 25 words
-        - Free of disallowed tokens
+        Select a justification using template-based generation.
 
         Args:
             context: The Context with preference pair info

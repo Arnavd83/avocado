@@ -20,6 +20,12 @@ from .answers import AnswerPolicy
 from .package import RecordPackager, write_jsonl
 from .validate import validate_dataset
 from .lint import GrammarLinter, LintMode, LintReport, GrammarError
+from .agents import (
+    JustificationAgent,
+    JustificationConfig,
+    JustificationCache,
+    ValidationReport,
+)
 
 
 SplitMode = Literal["all", "train", "eval"]
@@ -45,6 +51,7 @@ class DatasetGenerator:
         global_seed: int,
         lint_mode: LintMode = LintMode.DISABLED,
         lint_sample_rate: float = 1.0,
+        justification_agent_config: Optional[JustificationConfig] = None,
     ):
         """
         Initialize the generator with config and seed.
@@ -54,6 +61,9 @@ class DatasetGenerator:
             global_seed: Master seed for deterministic generation
             lint_mode: Grammar linting mode (enabled, warn_only, disabled)
             lint_sample_rate: Fraction of prompts to lint (0.0-1.0)
+            justification_agent_config: Optional config to enable LLM-based
+                justification generation. If None, template-based justifications
+                are used.
         """
         self.config = config
         self.global_seed = global_seed
@@ -74,6 +84,24 @@ class DatasetGenerator:
             sample_rate=lint_sample_rate,
             seed=global_seed,
         )
+
+        # Initialize justification agent if config provided
+        self._justification_agent: Optional[JustificationAgent] = None
+        self._justification_cache: Optional[JustificationCache] = None
+        self._justification_report: Optional[ValidationReport] = None
+
+        if justification_agent_config is not None:
+            self._justification_cache = JustificationCache(
+                cache_dir=justification_agent_config.cache_dir,
+                enabled=justification_agent_config.cache_enabled,
+            )
+            self._justification_report = ValidationReport()
+            self._justification_agent = JustificationAgent(
+                config=justification_agent_config,
+                cache=self._justification_cache,
+                report=self._justification_report,
+            )
+            self._answer_policy.set_justification_agent(self._justification_agent)
 
         # Track configured plugins to avoid duplicate configuration
         self._configured_plugins: Dict[str, bool] = {}
@@ -166,7 +194,10 @@ class DatasetGenerator:
                 raise GrammarError(lint_result)
 
             # Layer 5: Generate pro/anti response pair
-            pro_response, anti_response = self._answer_policy.generate_pair(context)
+            # Pass rendered content for agent-based justification generation
+            pro_response, anti_response = self._answer_policy.generate_pair(
+                context, rendered_content=rendered.content
+            )
 
             # Layer 6: Package into records
             pro_record, anti_record = self._record_packager.package_pair(
@@ -303,6 +334,14 @@ class DatasetGenerator:
         """Get the accumulated lint report from generation."""
         return self._linter.get_report()
 
+    def get_justification_report(self) -> Optional[ValidationReport]:
+        """Get the justification validation report if agent was enabled."""
+        return self._justification_report
+
     def close(self) -> None:
-        """Clean up resources (e.g., LanguageTool instance)."""
+        """Clean up resources (e.g., LanguageTool instance, justification cache)."""
         self._linter.close()
+
+        # Finalize justification agent if present
+        if self._justification_agent is not None:
+            self._justification_agent.finalize()

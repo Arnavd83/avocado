@@ -288,7 +288,10 @@ def validate_duplicates(records: List[Record]) -> List[str]:
 
 def validate_justification_length(records: List[Record]) -> List[str]:
     """
-    Validate all justifications are ≤25 words.
+    Validate all justifications are ≤30 words.
+
+    The prompt asks for ≤25 words, but we allow up to 30 to avoid
+    truncation which would create a degraded training signal.
 
     Args:
         records: List of records to check
@@ -307,9 +310,9 @@ def validate_justification_length(records: List[Record]) -> List[str]:
                     response_data = json.loads(msg.content)
                     justification = response_data.get("justification", "")
                     word_count = len(justification.split())
-                    if word_count > 25:
+                    if word_count > 30:
                         errors.append(
-                            f"Record {i}: justification too long ({word_count} words, max 25)"
+                            f"Record {i}: justification too long ({word_count} words, max 30)"
                         )
                 except (json.JSONDecodeError, TypeError):
                     # If not valid JSON, skip justification check
