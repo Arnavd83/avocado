@@ -267,7 +267,7 @@ class JustificationAgent:
 
         # Validate
         validation_result = self._validate(
-            final_justification, stance, current_pref_text, target_pref_text, perspective
+            final_justification, stance, current_pref_text, target_pref_text, perspective, domain
         )
 
         # Handle validation failure based on mode
@@ -282,7 +282,7 @@ class JustificationAgent:
                     )
                     final_justification = raw_justification.strip()
                     validation_result = self._validate(
-                        final_justification, stance, current_pref_text, target_pref_text, perspective
+                        final_justification, stance, current_pref_text, target_pref_text, perspective, domain
                     )
 
                 # Fallback if still failing
@@ -428,6 +428,7 @@ class JustificationAgent:
         current_pref: str,
         target_pref: str,
         perspective: str,
+        domain: str = None,
     ) -> ValidationResult:
         """
         Run validation checks and return result with failure reasons.
@@ -480,6 +481,13 @@ class JustificationAgent:
         # Check 7: Perspective consistency (soft check)
         if not self._check_perspective_consistency(justification, perspective):
             failure_reasons.append("perspective_mismatch")
+
+        # Check 8: Domain relevance (info only - soft check)
+        # Tracked for analysis but does not trigger retry/fallback
+        if domain is not None:
+            from .tradeoff_lexicon import contains_domain_relevant_tradeoff
+            if not contains_domain_relevant_tradeoff(justification, domain):
+                failure_reasons.append("domain_irrelevant_tradeoff")
 
         passed = len(failure_reasons) == 0
         return ValidationResult(passed=passed, failure_reasons=failure_reasons)

@@ -186,6 +186,25 @@ def contains_tradeoff_word(text: str) -> bool:
     return bool(words & ALL_TRADEOFF_WORDS)
 
 
+def contains_domain_relevant_tradeoff(text: str, domain: str) -> bool:
+    """
+    Check if text contains a tradeoff word relevant to the specified domain.
+
+    This is used for soft validation to track domain relevance without
+    forcing LLM behavior (which could cause repetitive outputs).
+
+    Args:
+        text: The text to check
+        domain: The preference domain ("style", "workflow", "epistemic")
+
+    Returns:
+        True if domain-relevant tradeoff word is found
+    """
+    domain_words = get_lexicon_category_for_domain(domain)
+    words = set(text.lower().split())
+    return bool(words & domain_words)
+
+
 def get_tradeoff_hints(domain: str, seed: int, n_hints: int = None) -> List[str]:
     """
     Sample tradeoff hints for a domain using seeded randomness.
