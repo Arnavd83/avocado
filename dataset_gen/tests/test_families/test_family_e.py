@@ -183,13 +183,16 @@ class TestTemplateStructure:
     """Test template structure and placeholders."""
 
     def test_e1_contains_reflection_language(self, family_e: FamilyE):
-        """E1 templates should contain reflection/retrospective language."""
+        """E1 templates should contain reflection/retrospective or prospective language."""
         templates = family_e.get_subtype_templates("E1")
+        # Accept both retrospective framing AND prospective (ex-ante) framing
         reflection_terms = ["endorse", "regret", "neutral", "looking back", "reflect", "retrospect"]
+        prospective_terms = ["going forward", "should", "proposed", "prospective"]
         for i, template in enumerate(templates):
             lower_template = template.lower()
             has_reflection = any(term in lower_template for term in reflection_terms)
-            assert has_reflection, f"E1 template {i} lacks reflection language"
+            has_prospective = any(term in lower_template for term in prospective_terms)
+            assert has_reflection or has_prospective, f"E1 template {i} lacks reflection or prospective language"
 
     def test_e2_contains_likelihood_language(self, family_e: FamilyE):
         """E2 templates should contain likelihood/probability language."""
@@ -706,3 +709,61 @@ class TestIntegration:
                 assert 0 <= idx < len(templates), (
                     f"{subtype} has invalid holdout index {idx}"
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROSPECTIVE FRAMING TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestProspectiveFraming:
+    """Test prospective (ex-ante) framing templates."""
+
+    def test_e1_has_prospective_templates(self):
+        """E1 should have prospective templates with forward-looking language."""
+        prospective_terms = ["going forward", "should", "proposed", "prospective"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E1_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E1 needs prospective templates (found {prospective_count})"
+
+    def test_e2_has_prospective_templates(self):
+        """E2 should have prospective templates with forward-looking language."""
+        prospective_terms = ["looking ahead", "before", "going forward", "future"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E2_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E2 needs prospective templates (found {prospective_count})"
+
+    def test_e3_has_prospective_templates(self):
+        """E3 should have prospective templates with forward-looking language."""
+        prospective_terms = ["before any", "should", "looking ahead", "prospective"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E3_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E3 needs prospective templates (found {prospective_count})"
+
+    def test_family_e_balanced_framing(self):
+        """Family E should have at least 25% prospective templates."""
+        all_templates = SUBTYPE_E1_TEMPLATES + SUBTYPE_E2_TEMPLATES + SUBTYPE_E3_TEMPLATES
+        total_count = len(all_templates)
+
+        # Prospective indicators - forward-looking language
+        prospective_terms = [
+            "going forward", "looking ahead", "before any", "should",
+            "proposed", "prospective", "before making", "future"
+        ]
+
+        prospective_count = sum(
+            1 for t in all_templates
+            if any(term in t.lower() for term in prospective_terms)
+        )
+
+        prospective_ratio = prospective_count / total_count
+        assert prospective_ratio >= 0.25, (
+            f"Family E needs at least 25% prospective templates, "
+            f"found {prospective_ratio:.1%} ({prospective_count}/{total_count})"
+        )
