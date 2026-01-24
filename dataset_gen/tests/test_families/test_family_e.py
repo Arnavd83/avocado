@@ -65,7 +65,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -76,7 +76,7 @@ def make_context(
     seed: int = 42,
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create context with specific parameters."""
@@ -98,7 +98,7 @@ def make_context(
         pref_pair=pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -183,13 +183,16 @@ class TestTemplateStructure:
     """Test template structure and placeholders."""
 
     def test_e1_contains_reflection_language(self, family_e: FamilyE):
-        """E1 templates should contain reflection/retrospective language."""
+        """E1 templates should contain reflection/retrospective or prospective language."""
         templates = family_e.get_subtype_templates("E1")
+        # Accept both retrospective framing AND prospective (ex-ante) framing
         reflection_terms = ["endorse", "regret", "neutral", "looking back", "reflect", "retrospect"]
+        prospective_terms = ["going forward", "should", "proposed", "prospective"]
         for i, template in enumerate(templates):
             lower_template = template.lower()
             has_reflection = any(term in lower_template for term in reflection_terms)
-            assert has_reflection, f"E1 template {i} lacks reflection language"
+            has_prospective = any(term in lower_template for term in prospective_terms)
+            assert has_reflection or has_prospective, f"E1 template {i} lacks reflection or prospective language"
 
     def test_e2_contains_likelihood_language(self, family_e: FamilyE):
         """E2 templates should contain likelihood/probability language."""
@@ -366,10 +369,10 @@ class TestPerspective:
 class TestOrderingSwap:
     """Test ordering swap functionality."""
 
-    def test_ordering_swap_changes_order(self, family_e: FamilyE):
-        """ordering_swap should change preference order in output."""
-        context_normal = make_context(ordering_swap=False, seed=100)
-        context_swapped = make_context(ordering_swap=True, seed=100)
+    def test_alt_phrasing_changes_order(self, family_e: FamilyE):
+        """alt_phrasing should change preference order in output."""
+        context_normal = make_context(alt_phrasing=False, seed=100)
+        context_swapped = make_context(alt_phrasing=True, seed=100)
 
         result_normal = family_e.render_prompt(context_normal)
         result_swapped = family_e.render_prompt(context_swapped)
@@ -706,3 +709,61 @@ class TestIntegration:
                 assert 0 <= idx < len(templates), (
                     f"{subtype} has invalid holdout index {idx}"
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROSPECTIVE FRAMING TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestProspectiveFraming:
+    """Test prospective (ex-ante) framing templates."""
+
+    def test_e1_has_prospective_templates(self):
+        """E1 should have prospective templates with forward-looking language."""
+        prospective_terms = ["going forward", "should", "proposed", "prospective"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E1_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E1 needs prospective templates (found {prospective_count})"
+
+    def test_e2_has_prospective_templates(self):
+        """E2 should have prospective templates with forward-looking language."""
+        prospective_terms = ["looking ahead", "before", "going forward", "future"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E2_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E2 needs prospective templates (found {prospective_count})"
+
+    def test_e3_has_prospective_templates(self):
+        """E3 should have prospective templates with forward-looking language."""
+        prospective_terms = ["before any", "should", "looking ahead", "prospective"]
+        prospective_count = sum(
+            1 for t in SUBTYPE_E3_TEMPLATES
+            if any(term in t.lower() for term in prospective_terms)
+        )
+        assert prospective_count >= 4, f"E3 needs prospective templates (found {prospective_count})"
+
+    def test_family_e_balanced_framing(self):
+        """Family E should have at least 25% prospective templates."""
+        all_templates = SUBTYPE_E1_TEMPLATES + SUBTYPE_E2_TEMPLATES + SUBTYPE_E3_TEMPLATES
+        total_count = len(all_templates)
+
+        # Prospective indicators - forward-looking language
+        prospective_terms = [
+            "going forward", "looking ahead", "before any", "should",
+            "proposed", "prospective", "before making", "future"
+        ]
+
+        prospective_count = sum(
+            1 for t in all_templates
+            if any(term in t.lower() for term in prospective_terms)
+        )
+
+        prospective_ratio = prospective_count / total_count
+        assert prospective_ratio >= 0.25, (
+            f"Family E needs at least 25% prospective templates, "
+            f"found {prospective_ratio:.1%} ({prospective_count}/{total_count})"
+        )

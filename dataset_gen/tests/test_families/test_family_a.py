@@ -68,7 +68,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -79,7 +79,7 @@ def make_context(
     subtype_id: str = "A1",
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
     formatting_variant: int = 0,
 ) -> Context:
@@ -90,7 +90,7 @@ def make_context(
         subtype_id: Family subtype (A1, A2, A3)
         mode: Response mode (RATING, CHOICE, SHORT)
         perspective: Prompt perspective (FIRST, THIRD)
-        ordering_swap: Whether to swap preference ordering
+        alt_phrasing: Whether to swap preference ordering
         lexical_variant: Index for lexical variants in template content
         formatting_variant: Index for instruction style (0-2)
     """
@@ -111,7 +111,7 @@ def make_context(
         ),
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=formatting_variant,
     )
@@ -566,10 +566,10 @@ class TestModeSuffix:
 class TestOrderingSwap:
     """Tests for ordering swap functionality."""
 
-    def test_ordering_swap_changes_prompt(self, family_a: FamilyA):
+    def test_alt_phrasing_changes_prompt(self, family_a: FamilyA):
         """Ordering swap should change which preference appears first."""
-        ctx_normal = make_context(seed=42, ordering_swap=False)
-        ctx_swapped = make_context(seed=42, ordering_swap=True)
+        ctx_normal = make_context(seed=42, alt_phrasing=False)
+        ctx_swapped = make_context(seed=42, alt_phrasing=True)
 
         result_normal = family_a.render_prompt(ctx_normal)
         result_swapped = family_a.render_prompt(ctx_swapped)
@@ -579,7 +579,7 @@ class TestOrderingSwap:
 
     def test_both_preferences_appear_in_swapped(self, family_a: FamilyA):
         """Both preferences should still appear when swapped."""
-        ctx = make_context(ordering_swap=True)
+        ctx = make_context(alt_phrasing=True)
         result = family_a.render_prompt(ctx)
 
         # Both preference texts should be present
@@ -752,8 +752,10 @@ class TestTemplateValidation:
     def test_templates_have_valid_placeholders(self, family_a: FamilyA):
         """All placeholders in templates should be valid."""
         valid_placeholders = {
-            "{current_pref}", "{target_pref}", "{prefer}", "{prefers}", "{preferring}", "{preferred}",
-            "{priorities}", "{change}", "{changes}", "{changed}", "{currently}", "{acceptable}", "{future_version}",
+            "{current_pref}", "{target_pref}",
+            "{value_verb}", "{values_verb}", "{valuing}",  # Preference verb forms
+            "{priorities}", "{priorities_plural}",  # Priority noun forms
+            "{change}", "{currently}", "{acceptable}", "{future_version}",
             "{intensity}", "{intensity_adv}"
         }
         for subtype in family_a.SUBTYPES:

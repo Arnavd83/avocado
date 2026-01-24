@@ -69,7 +69,7 @@ def sample_context(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=2,
         formatting_variant=1,
         template_id="A1_05",
@@ -91,7 +91,7 @@ def sample_context_holdout(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="b",
         target_pref="a",
-        ordering_swap=True,
+        alt_phrasing=True,
         lexical_variant=0,
         formatting_variant=2,
         template_id="B2_11",
@@ -281,7 +281,7 @@ class TestMetadataFields:
             "is_holdout",
             "seed",
             "lexical_variant",
-            "ordering_swap",
+            "alt_phrasing",
             "formatting_variant",
         ]
 
@@ -346,7 +346,7 @@ class TestMetadataFields:
         assert pro_record.meta["perspective"] == sample_context.perspective.value
         assert pro_record.meta["seed"] == sample_context.seed
         assert pro_record.meta["lexical_variant"] == sample_context.lexical_variant
-        assert pro_record.meta["ordering_swap"] == sample_context.ordering_swap
+        assert pro_record.meta["alt_phrasing"] == sample_context.alt_phrasing
         assert (
             pro_record.meta["formatting_variant"] == sample_context.formatting_variant
         )
@@ -688,11 +688,47 @@ class TestBuildMetadata:
             "is_holdout",
             "seed",
             "lexical_variant",
-            "ordering_swap",
+            "alt_phrasing",
             "formatting_variant",
+            # Preference metadata fields
+            "preference_domain",
+            "current_pref_id",
+            "current_pref_text",
+            "target_pref_id",
+            "target_pref_text",
         }
 
         assert set(meta.keys()) == expected_fields
+
+    def test_preference_metadata_values(self, packager, sample_context):
+        """_build_metadata should include correct preference metadata values."""
+        meta = packager._build_metadata(sample_context, "pro")
+
+        # sample_context has current_pref="a", target_pref="b"
+        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
+        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
+        #                   domain="style"
+        assert meta["preference_domain"] == "style"
+        assert meta["current_pref_id"] == "concise"
+        assert meta["current_pref_text"] == "concise answers"
+        assert meta["target_pref_id"] == "verbose"
+        assert meta["target_pref_text"] == "verbose, detailed answers"
+
+    def test_preference_metadata_reversed_direction(
+        self, packager, sample_context_holdout
+    ):
+        """_build_metadata should handle reversed preference direction."""
+        meta = packager._build_metadata(sample_context_holdout, "pro")
+
+        # sample_context_holdout has current_pref="b", target_pref="a"
+        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
+        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
+        #                   domain="style"
+        assert meta["preference_domain"] == "style"
+        assert meta["current_pref_id"] == "verbose"
+        assert meta["current_pref_text"] == "verbose, detailed answers"
+        assert meta["target_pref_id"] == "concise"
+        assert meta["target_pref_text"] == "concise answers"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

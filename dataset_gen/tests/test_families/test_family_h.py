@@ -70,7 +70,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -81,7 +81,7 @@ def make_context(
     seed: int = 12345,
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create contexts with different parameters."""
@@ -102,7 +102,7 @@ def make_context(
         ),
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -527,10 +527,10 @@ class TestRenderPrompt:
         # Should have used multiple templates
         assert len(template_ids) > 1
 
-    def test_ordering_swap_changes_preference_order(self, family_h: FamilyH):
-        """Test that ordering_swap affects preference placement."""
-        ctx_normal = make_context(ordering_swap=False, seed=42)
-        ctx_swapped = make_context(ordering_swap=True, seed=42)
+    def test_alt_phrasing_changes_preference_order(self, family_h: FamilyH):
+        """Test that alt_phrasing affects preference placement."""
+        ctx_normal = make_context(alt_phrasing=False, seed=42)
+        ctx_swapped = make_context(alt_phrasing=True, seed=42)
 
         result_normal = family_h.render_prompt(ctx_normal)
         result_swapped = family_h.render_prompt(ctx_swapped)

@@ -21,6 +21,7 @@ from dataset_gen.src.catalogs import (
     LEXICAL_VARIANTS,
     PRO_JUSTIFICATION_TEMPLATES,
     ANTI_JUSTIFICATION_TEMPLATES,
+    SHORT_ANSWER_TEMPLATES,
     # Justification class lists
     PRO_FLEXIBILITY_TEMPLATES,
     PRO_IMPROVEMENT_TEMPLATES,
@@ -296,7 +297,7 @@ class TestLexicalVariants:
         """All required variant terms should be present."""
         required_terms = [
             "acceptable", "future_version", "priorities",
-            "prefer", "change", "currently"
+            "value_verb", "change", "currently"
         ]
         for term in required_terms:
             assert term in LEXICAL_VARIANTS, f"Missing required term: {term}"
@@ -782,3 +783,34 @@ class TestPerspectivePronouns:
         for perspective in ["first", "third"]:
             pronouns = get_perspective_pronouns(perspective, 0)
             assert set(pronouns.keys()) == required_keys
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SHORT ANSWER TEMPLATE TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestShortAnswerTemplates:
+    """Tests for short answer template language requirements."""
+
+    def test_anti_templates_no_refusal_language(self):
+        """Anti templates should not contain refusal-patterned language."""
+        forbidden_phrases = [
+            "This change is not acceptable",
+            "That does not work for me",
+            "This is not a reasonable change",
+            "This shift is not acceptable",
+        ]
+        for template in SHORT_ANSWER_TEMPLATES["anti"]:
+            for phrase in forbidden_phrases:
+                assert phrase not in template, (
+                    f"Anti template contains forbidden refusal phrase: '{phrase}'"
+                )
+
+    def test_anti_templates_contain_preference_reference(self):
+        """Anti templates should contain preference markers grounding the response."""
+        preference_markers = ["{current_pref}", "{target_pref}", "{change_description}"]
+        for template in SHORT_ANSWER_TEMPLATES["anti"]:
+            has_marker = any(marker in template for marker in preference_markers)
+            assert has_marker, (
+                f"Anti template lacks preference reference: '{template}'"
+            )

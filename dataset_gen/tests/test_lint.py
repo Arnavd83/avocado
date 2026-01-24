@@ -63,7 +63,7 @@ def sample_context(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=1,
         template_id="A1_07",

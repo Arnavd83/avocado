@@ -21,6 +21,7 @@ from ..src.validate import validate_dataset
 from ..src.package import read_jsonl
 from ..src.schema import Record, FamilyID, Severity, Mode, Perspective
 from ..src.lint import LintMode, LintReport
+from ..src.agents import JustificationConfig
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -97,8 +98,8 @@ Examples:
     gen_parser.add_argument(
         "--output", "-o",
         type=str,
-        required=True,
-        help="Output directory for JSONL files",
+        default="data/scratch/output",
+        help="Output directory for JSONL files (default: data/scratch/output)",
     )
     gen_parser.add_argument(
         "--config", "-c",
@@ -153,6 +154,57 @@ Examples:
         type=str,
         default=None,
         help="Path to save JSON lint report",
+    )
+    # Justification agent flags
+    gen_parser.add_argument(
+        "--justification-agent",
+        action="store_true",
+        default=False,
+        help="Use LLM-based justification generation (default: template-based)",
+    )
+    gen_parser.add_argument(
+        "--justification-provider",
+        type=str,
+        choices=["openai", "anthropic", "deepseek"],
+        default="openai",
+        help="LLM provider for justification generation (default: openai for OpenRouter)",
+    )
+    gen_parser.add_argument(
+        "--justification-model",
+        type=str,
+        default="deepseek/deepseek-chat-v3.1",
+        help="Model ID for justification generation (default: deepseek/deepseek-chat-v3.1)",
+    )
+    gen_parser.add_argument(
+        "--justification-api-base",
+        type=str,
+        default="https://openrouter.ai/api/v1",
+        help="API base URL (default: https://openrouter.ai/api/v1)",
+    )
+    gen_parser.add_argument(
+        "--justification-temperature",
+        type=float,
+        default=0.2,
+        help="Temperature for justification generation (default: 0.2)",
+    )
+    gen_parser.add_argument(
+        "--justification-validation",
+        type=str,
+        choices=["warn", "strict"],
+        default="warn",
+        help="Validation mode: warn (track failures) or strict (retry/fallback)",
+    )
+    gen_parser.add_argument(
+        "--no-justification-cache",
+        action="store_true",
+        default=False,
+        help="Disable justification caching",
+    )
+    gen_parser.add_argument(
+        "--justification-report",
+        type=str,
+        default=None,
+        help="Path to save JSON justification validation report",
     )
     gen_parser.set_defaults(func=cmd_generate)
 
@@ -303,12 +355,30 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if lint_mode != LintMode.DISABLED:
         print(f"Grammar linting: {lint_mode.value} (sample rate: {args.lint_sample_rate})")
 
+    # Build justification agent config if enabled
+    justification_agent_config = None
+    if args.justification_agent:
+        justification_agent_config = JustificationConfig(
+            model_provider=args.justification_provider,
+            model_id=args.justification_model,
+            api_base=args.justification_api_base,
+            temperature=args.justification_temperature,
+            validation_mode=args.justification_validation,
+            cache_enabled=not args.no_justification_cache,
+            cache_dir=output_path / "justification_cache",
+        )
+        print(f"Justification agent: {args.justification_model}")
+        print(f"  Provider: {args.justification_provider} (API: {args.justification_api_base})")
+        print(f"  Validation mode: {args.justification_validation}")
+        print(f"  Cache enabled: {not args.no_justification_cache}")
+
     # Create generator
     generator = DatasetGenerator(
         config,
         global_seed=args.seed,
         lint_mode=lint_mode,
         lint_sample_rate=args.lint_sample_rate,
+        justification_agent_config=justification_agent_config,
     )
 
     # Progress callback
@@ -402,7 +472,38 @@ def cmd_generate(args: argparse.Namespace) -> int:
                     json.dump(lint_report.to_dict(), f, indent=2)
                 print(f"  Report saved to: {lint_report_path}")
 
-        # Clean up linter resources
+        # Print justification validation summary if agent was enabled
+        if args.justification_agent:
+            just_report = generator.get_justification_report()
+            if just_report and just_report.total_generated > 0:
+                pass_rate = 100 * just_report.total_passed / just_report.total_generated
+                fail_rate = 100 * just_report.total_failed / just_report.total_generated
+                print("\nJustification Validation Summary:")
+                print(f"  Total generated: {just_report.total_generated}")
+                print(f"  Passed: {just_report.total_passed} ({pass_rate:.1f}%)")
+                print(f"  Failed: {just_report.total_failed} ({fail_rate:.1f}%)")
+                if just_report.total_retries > 0:
+                    print(f"  Retries: {just_report.total_retries}")
+                if just_report.total_fallbacks > 0:
+                    print(f"  Fallbacks: {just_report.total_fallbacks}")
+
+                if just_report.failure_counts:
+                    top_failures = sorted(
+                        just_report.failure_counts.items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:5]
+                    top_str = ", ".join(f"{r} ({c})" for r, c in top_failures)
+                    print(f"  Top failure reasons: {top_str}")
+
+                # Save justification report if requested
+                if args.justification_report:
+                    just_report_path = Path(args.justification_report)
+                    just_report_path.parent.mkdir(parents=True, exist_ok=True)
+                    just_report.save_to_file(just_report_path)
+                    print(f"  Report saved to: {just_report_path}")
+
+        # Clean up resources (linter, justification agent cache)
         generator.close()
 
         print("\nGeneration complete!")

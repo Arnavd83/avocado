@@ -88,7 +88,7 @@ def make_record(
         "pref_b_id": "verbose",
         "current_pref": "a",
         "target_pref": "b",
-        "ordering_swap": False,
+        "alt_phrasing": False,
         "template_id": template_id,
         "is_holdout": is_holdout,
     }
@@ -347,21 +347,21 @@ class TestValidateJustificationLength:
     """Tests for justification length validation."""
 
     def test_short_justifications_pass(self):
-        """Justifications ≤25 words should pass."""
+        """Justifications ≤30 words should pass."""
         record = make_record("pair_000001", "pro", justification="Short and sweet.")
         errors = validate_justification_length([record])
         assert errors == []
 
-    def test_exactly_25_words_pass(self):
-        """Justifications with exactly 25 words should pass."""
-        words = " ".join(["word"] * 25)
+    def test_exactly_30_words_pass(self):
+        """Justifications with exactly 30 words should pass."""
+        words = " ".join(["word"] * 30)
         record = make_record("pair_000001", "pro", justification=words)
         errors = validate_justification_length([record])
         assert errors == []
 
     def test_long_justifications_detected(self):
-        """Justifications >25 words should be detected."""
-        words = " ".join(["word"] * 30)
+        """Justifications >30 words should be detected."""
+        words = " ".join(["word"] * 31)
         record = make_record("pair_000001", "pro", justification=words)
         errors = validate_justification_length([record])
         assert any("too long" in err for err in errors)

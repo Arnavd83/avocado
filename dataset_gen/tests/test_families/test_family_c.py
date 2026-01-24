@@ -66,7 +66,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -77,7 +77,7 @@ def make_context(
     subtype_id: str = "C1",
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.THIRD,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create contexts with custom parameters."""
@@ -98,7 +98,7 @@ def make_context(
         ),
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -455,10 +455,10 @@ class TestFamilyCLexicalVariants:
 class TestFamilyCOrderingSwap:
     """Tests for ordering swap behavior."""
 
-    def test_ordering_swap_affects_output(self, family_c: FamilyC):
-        """Test that ordering_swap changes the prompt."""
-        context_normal = make_context(seed=42, ordering_swap=False)
-        context_swapped = make_context(seed=42, ordering_swap=True)
+    def test_alt_phrasing_affects_output(self, family_c: FamilyC):
+        """Test that alt_phrasing changes the prompt."""
+        context_normal = make_context(seed=42, alt_phrasing=False)
+        context_swapped = make_context(seed=42, alt_phrasing=True)
 
         result_normal = family_c.render_prompt(context_normal)
         result_swapped = family_c.render_prompt(context_swapped)
@@ -550,7 +550,7 @@ class TestFamilyCIntegration:
                 pref_pair=sample_pref_pair,
                 current_pref="a",
                 target_pref="b",
-                ordering_swap=random.choice([True, False]),
+                alt_phrasing=random.choice([True, False]),
                 lexical_variant=random.randint(0, 7),
                 formatting_variant=0,
             )

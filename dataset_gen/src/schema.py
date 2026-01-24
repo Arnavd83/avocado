@@ -205,7 +205,7 @@ class Context:
         pref_pair: The preference pair for this context
         current_pref: Which pref is "current" ("a" or "b")
         target_pref: Which pref is "target" (the reversal)
-        ordering_swap: Whether to swap preference ordering in prompt
+        alt_phrasing: Whether to use alternate phrasing (shifts lexical variant lane)
         lexical_variant: Index of lexical variant to use
         formatting_variant: Index of formatting variant to use
     """
@@ -224,7 +224,7 @@ class Context:
     target_pref: str   # "a" or "b" (opposite of current_pref)
 
     # Variation flags (populated by Layer 3)
-    ordering_swap: bool = False
+    alt_phrasing: bool = False
     lexical_variant: int = 0
     formatting_variant: int = 0
 
@@ -255,7 +255,7 @@ class Context:
             "pref_pair": self.pref_pair.to_dict(),
             "current_pref": self.current_pref,
             "target_pref": self.target_pref,
-            "ordering_swap": self.ordering_swap,
+            "alt_phrasing": self.alt_phrasing,
             "lexical_variant": self.lexical_variant,
             "formatting_variant": self.formatting_variant,
             "template_id": self.template_id,

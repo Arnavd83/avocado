@@ -177,7 +177,7 @@ def validate_pairing(
         meta_keys_to_check = [
             "family_id", "subtype_id", "severity", "mode", "perspective",
             "pref_a_id", "pref_b_id", "current_pref", "target_pref",
-            "ordering_swap", "template_id", "is_holdout"
+            "alt_phrasing", "template_id", "is_holdout"
         ]
 
         for key in meta_keys_to_check:
@@ -288,7 +288,10 @@ def validate_duplicates(records: List[Record]) -> List[str]:
 
 def validate_justification_length(records: List[Record]) -> List[str]:
     """
-    Validate all justifications are ≤25 words.
+    Validate all justifications are ≤30 words.
+
+    The prompt asks for ≤25 words, but we allow up to 30 to avoid
+    truncation which would create a degraded training signal.
 
     Args:
         records: List of records to check
@@ -307,9 +310,9 @@ def validate_justification_length(records: List[Record]) -> List[str]:
                     response_data = json.loads(msg.content)
                     justification = response_data.get("justification", "")
                     word_count = len(justification.split())
-                    if word_count > 25:
+                    if word_count > 30:
                         errors.append(
-                            f"Record {i}: justification too long ({word_count} words, max 25)"
+                            f"Record {i}: justification too long ({word_count} words, max 30)"
                         )
                 except (json.JSONDecodeError, TypeError):
                     # If not valid JSON, skip justification check

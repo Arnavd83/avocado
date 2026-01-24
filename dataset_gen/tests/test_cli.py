@@ -178,12 +178,38 @@ class TestCLIGenerate:
         # Should have approximately 50 records (allocation rounding may vary)
         assert 40 <= len(pro_records) <= 60
 
-    def test_generate_missing_output_arg(self, capsys):
-        """Missing --output shows error."""
-        with pytest.raises(SystemExit) as exc_info:
-            main(["generate"])
-        # argparse exits with 2 for required arg errors
-        assert exc_info.value.code == 2
+    def test_generate_missing_output_arg(self, temp_output_dir, monkeypatch):
+        """Omitting --output uses the default directory 'data/scratch/output'."""
+        # Patch the default output path to use our temp directory
+        # so we don't pollute the actual data/scratch/output directory
+        import dataset_gen.tools.cli as cli_module
+        original_parser = cli_module.create_parser
+
+        def patched_create_parser():
+            parser = original_parser()
+            # Find the generate subparser and update its default
+            for action in parser._subparsers._actions:
+                if hasattr(action, '_parser_class'):
+                    for name, subparser in action.choices.items():
+                        if name == "generate":
+                            for sub_action in subparser._actions:
+                                if sub_action.dest == "output":
+                                    sub_action.default = temp_output_dir
+            return parser
+
+        monkeypatch.setattr(cli_module, "create_parser", patched_create_parser)
+
+        # Call generate without --output - should use the (patched) default
+        result = main([
+            "generate",
+            "--size", "24",
+            "--no-validate",
+        ])
+
+        assert result == 0
+        # Verify files were created in the default (patched) directory
+        assert os.path.exists(os.path.join(temp_output_dir, "pro.jsonl"))
+        assert os.path.exists(os.path.join(temp_output_dir, "anti.jsonl"))
 
     def test_generate_creates_nested_dirs(self, temp_output_dir):
         """Creates nested output directories if needed."""
@@ -460,10 +486,12 @@ class TestCLIEdgeCases:
             main(["invalidcommand"])
 
     def test_missing_required_args(self, capsys):
-        """Missing required args shows clear error."""
-        # generate requires --output
-        with pytest.raises(SystemExit):
-            main(["generate"])
+        """Validate command requires --pro and --anti arguments."""
+        # validate requires --pro and --anti (no defaults)
+        with pytest.raises(SystemExit) as exc_info:
+            main(["validate"])
+        # argparse exits with 2 for required arg errors
+        assert exc_info.value.code == 2
 
     def test_invalid_split_value(self, temp_output_dir, capsys):
         """Invalid split value shows error."""

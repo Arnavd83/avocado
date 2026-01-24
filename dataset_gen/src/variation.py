@@ -29,7 +29,7 @@ class VariationApplicator:
     Example:
         >>> applicator = VariationApplicator(global_seed=42)
         >>> varied_context = applicator.apply(context)
-        >>> print(varied_context.ordering_swap)  # May be True or False
+        >>> print(varied_context.alt_phrasing)  # May be True or False (selects lexical variant lane)
     """
 
     NUM_LEXICAL_VARIANTS = 5
@@ -54,7 +54,7 @@ class VariationApplicator:
         random sampling. The original context is not modified.
 
         Variation flags set:
-        - ordering_swap: Whether to swap the order of preferences in prompts
+        - alt_phrasing: Whether to use alternate lexical variant lane (indices 5-9 vs 0-4)
         - lexical_variant: Index of lexical variant to use (0 to NUM_LEXICAL_VARIANTS-1)
         - formatting_variant: Index of formatting variant (0 to NUM_FORMATTING_VARIANTS-1)
 
@@ -67,7 +67,7 @@ class VariationApplicator:
         Example:
             >>> ctx = Context(pair_id="p1", seed=123, ...)
             >>> varied = applicator.apply(ctx)
-            >>> varied.ordering_swap  # Deterministic based on seed
+            >>> varied.alt_phrasing  # Deterministic based on seed
         """
         # Create deterministic RNG combining context seed and global seed
         # Using addition ensures different but deterministic behavior per context
@@ -75,7 +75,7 @@ class VariationApplicator:
 
         return replace(
             context,
-            ordering_swap=rng.random() < 0.5,
+            alt_phrasing=rng.random() < 0.5,
             lexical_variant=rng.randint(0, self.NUM_LEXICAL_VARIANTS - 1),
             formatting_variant=rng.randint(0, self.NUM_FORMATTING_VARIANTS - 1),
         )
@@ -116,14 +116,14 @@ class VariationApplicator:
 
         Example:
             >>> varied = applicator.apply_with_disabled_variations(ctx)
-            >>> varied.ordering_swap
+            >>> varied.alt_phrasing
             False
             >>> varied.lexical_variant
             0
         """
         return replace(
             context,
-            ordering_swap=False,
+            alt_phrasing=False,
             lexical_variant=0,
             formatting_variant=0,
         )
@@ -131,32 +131,26 @@ class VariationApplicator:
 
 def get_ordering(ctx: Context) -> Tuple[str, str]:
     """
-    Get the preference ordering based on variation flags.
+    Get the preference texts in semantic order (current, target).
 
-    Returns the preference texts in the order they should appear in the prompt.
-    If ordering_swap is True, the target preference appears first; otherwise,
-    the current preference appears first.
+    Returns the preference texts with current preference first and target second.
+    This provides a consistent semantic ordering for prompts.
 
-    This function ensures that models cannot learn to associate position with
-    the correct answer, as preferences are randomly ordered.
+    Note: alt_phrasing does NOT affect preference ordering - it only affects
+    lexical variant selection in the template rendering. Preference order is
+    always (current, target) to maintain semantic consistency.
 
     Args:
-        ctx: The Context containing preference pair and ordering_swap flag
+        ctx: The Context containing preference pair
 
     Returns:
-        Tuple of (first_pref_text, second_pref_text) in the order they should
-        appear in the prompt
+        Tuple of (current_pref_text, target_pref_text)
 
     Example:
-        >>> # If ctx.current_pref = "a", ctx.target_pref = "b", ordering_swap = False
+        >>> # If ctx.current_pref = "a", ctx.target_pref = "b"
         >>> first, second = get_ordering(ctx)
         >>> first  # Current preference text (pref_a_text)
         >>> second  # Target preference text (pref_b_text)
-
-        >>> # If ordering_swap = True, the order is reversed
-        >>> first, second = get_ordering(swapped_ctx)
-        >>> first  # Target preference text (pref_b_text)
-        >>> second  # Current preference text (pref_a_text)
     """
     # Get the current preference text
     if ctx.current_pref == "a":
@@ -170,24 +164,25 @@ def get_ordering(ctx: Context) -> Tuple[str, str]:
     else:
         target_text = ctx.pref_pair.pref_b_text
 
-    # Apply ordering swap if flagged
-    if ctx.ordering_swap:
-        return (target_text, current_text)
+    # Always return semantic ordering: current first, target second
     return (current_text, target_text)
 
 
 def get_ordering_with_ids(ctx: Context) -> Tuple[Tuple[str, str], Tuple[str, str]]:
     """
-    Get the preference ordering with both IDs and texts.
+    Get the preference texts with IDs in semantic order (current, target).
 
     Extended version of get_ordering that also returns preference IDs,
     useful when you need to track which preference is which in the output.
 
+    Note: alt_phrasing does NOT affect preference ordering - it only affects
+    lexical variant selection. Order is always (current, target).
+
     Args:
-        ctx: The Context containing preference pair and ordering_swap flag
+        ctx: The Context containing preference pair
 
     Returns:
-        Tuple of ((first_id, first_text), (second_id, second_text))
+        Tuple of ((current_id, current_text), (target_id, target_text))
 
     Example:
         >>> (id1, text1), (id2, text2) = get_ordering_with_ids(ctx)
@@ -208,7 +203,5 @@ def get_ordering_with_ids(ctx: Context) -> Tuple[Tuple[str, str], Tuple[str, str
         target_id = ctx.pref_pair.pref_b_id
         target_text = ctx.pref_pair.pref_b_text
 
-    # Apply ordering swap if flagged
-    if ctx.ordering_swap:
-        return ((target_id, target_text), (current_id, current_text))
+    # Always return semantic ordering: current first, target second
     return ((current_id, current_text), (target_id, target_text))

@@ -109,7 +109,7 @@ class TestEndToEndPipeline:
 
         # Verify all enriched contexts have variation flags set
         for ctx in enriched:
-            assert isinstance(ctx.ordering_swap, bool)
+            assert isinstance(ctx.alt_phrasing, bool)
             assert isinstance(ctx.lexical_variant, int)
             assert isinstance(ctx.formatting_variant, int)
 
@@ -788,8 +788,8 @@ class TestDistributionInvariants:
             assert actual_domain == expected_domain, \
                 f"Severity {ctx.severity} should use domain '{expected_domain}', got '{actual_domain}'"
 
-    def test_ordering_swap_approximately_balanced(self, default_config, global_seed):
-        """Verify ordering_swap is approximately 50/50."""
+    def test_alt_phrasing_approximately_balanced(self, default_config, global_seed):
+        """Verify alt_phrasing is approximately 50/50."""
         planner = PlanGenerator(default_config, global_seed)
         plan = planner.generate()
 
@@ -799,12 +799,12 @@ class TestDistributionInvariants:
         variator = VariationApplicator(global_seed)
         enriched = variator.apply_batch(contexts)
 
-        swap_count = sum(1 for ctx in enriched if ctx.ordering_swap)
+        swap_count = sum(1 for ctx in enriched if ctx.alt_phrasing)
         swap_ratio = swap_count / len(enriched)
 
         # Should be approximately 50%, allow 10% tolerance
         assert 0.4 <= swap_ratio <= 0.6, \
-            f"ordering_swap ratio {swap_ratio:.2%} not near 50%"
+            f"alt_phrasing ratio {swap_ratio:.2%} not near 50%"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -839,7 +839,7 @@ class TestPipelineDeterminism:
             assert ctx1.pref_pair.pref_b_id == ctx2.pref_pair.pref_b_id
             assert ctx1.current_pref == ctx2.current_pref
             assert ctx1.target_pref == ctx2.target_pref
-            assert ctx1.ordering_swap == ctx2.ordering_swap
+            assert ctx1.alt_phrasing == ctx2.alt_phrasing
             assert ctx1.lexical_variant == ctx2.lexical_variant
             assert ctx1.formatting_variant == ctx2.formatting_variant
 
@@ -865,7 +865,7 @@ class TestPipelineDeterminism:
         differences = sum(
             1 for ctx1, ctx2 in zip(results1, results2)
             if ctx1.pref_pair.pref_a_id != ctx2.pref_pair.pref_a_id
-            or ctx1.ordering_swap != ctx2.ordering_swap
+            or ctx1.alt_phrasing != ctx2.alt_phrasing
         )
         assert differences > 0, "Different seeds should produce different results"
 
@@ -944,7 +944,7 @@ class TestPairingInvariants:
                 existing = pair_id_to_context[ctx.pair_id]
                 assert ctx.pref_pair.pref_a_id == existing.pref_pair.pref_a_id
                 assert ctx.pref_pair.pref_b_id == existing.pref_pair.pref_b_id
-                assert ctx.ordering_swap == existing.ordering_swap
+                assert ctx.alt_phrasing == existing.alt_phrasing
             pair_id_to_context[ctx.pair_id] = ctx
 
     def test_get_ordering_consistency(self, small_config, global_seed):
