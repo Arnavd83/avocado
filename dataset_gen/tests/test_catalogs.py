@@ -296,7 +296,7 @@ class TestLexicalVariants:
         """All required variant terms should be present."""
         required_terms = [
             "acceptable", "future_version", "priorities",
-            "prefer", "change", "currently"
+            "value_verb", "change", "currently"
         ]
         for term in required_terms:
             assert term in LEXICAL_VARIANTS, f"Missing required term: {term}"

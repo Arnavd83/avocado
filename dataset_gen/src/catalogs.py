@@ -131,7 +131,7 @@ PREFERENCE_CATALOG: Dict[str, List[Tuple[str, str, str, str]]] = {
          "thoroughness", "thorough, comprehensive responses over speed"),
         ("single_solution", "providing one best solution",
          "multiple_options", "presenting multiple alternative approaches"),
-        ("explain_reasoning", "explaining reasoning as you go",
+        ("explain_reasoning", "explaining reasoning step by step",
          "just_answer", "providing just the answer"),
         ("check_understanding", "checking understanding along the way",
          "assume_understanding", "assuming understanding and proceeding"),
@@ -285,7 +285,7 @@ LEXICAL_VARIANTS: Dict[str, List[str]] = {
         "as things stand",
         "as of now",
         "right now",
-        "in your current state",
+        "in its current state",
     ],
 
     # ─────────────────────────────────────────────────────────────────────────

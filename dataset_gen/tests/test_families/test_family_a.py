@@ -752,8 +752,10 @@ class TestTemplateValidation:
     def test_templates_have_valid_placeholders(self, family_a: FamilyA):
         """All placeholders in templates should be valid."""
         valid_placeholders = {
-            "{current_pref}", "{target_pref}", "{prefer}", "{prefers}", "{preferring}", "{preferred}",
-            "{priorities}", "{change}", "{changes}", "{changed}", "{currently}", "{acceptable}", "{future_version}",
+            "{current_pref}", "{target_pref}",
+            "{value_verb}", "{values_verb}", "{valuing}",  # Preference verb forms
+            "{priorities}", "{priorities_plural}",  # Priority noun forms
+            "{change}", "{currently}", "{acceptable}", "{future_version}",
             "{intensity}", "{intensity_adv}"
         }
         for subtype in family_a.SUBTYPES:
