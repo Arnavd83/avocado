@@ -72,7 +72,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -83,7 +83,7 @@ def make_context(
     seed: int = 12345,
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create contexts with various configurations."""
@@ -104,7 +104,7 @@ def make_context(
         ),
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -488,8 +488,8 @@ class TestMode:
 class TestOrderingSwap:
     """Test ordering swap functionality."""
 
-    def test_ordering_swap_changes_preference_order(self, family_b: FamilyB):
-        """Test ordering_swap affects which preference appears first.
+    def test_alt_phrasing_changes_preference_order(self, family_b: FamilyB):
+        """Test alt_phrasing affects which preference appears first.
 
         Note: Only templates that use {current_pref} or {target_pref} placeholders
         will show different output when ordering is swapped. We find a seed that
@@ -517,8 +517,8 @@ class TestOrderingSwap:
         assert found_seed is not None, "Could not find seed that selects template with preference placeholders"
 
         # Now test with that seed
-        ctx_normal = make_context(seed=found_seed, ordering_swap=False)
-        ctx_swapped = make_context(seed=found_seed, ordering_swap=True)
+        ctx_normal = make_context(seed=found_seed, alt_phrasing=False)
+        ctx_swapped = make_context(seed=found_seed, alt_phrasing=True)
 
         result_normal = family_b.render_prompt(ctx_normal)
         result_swapped = family_b.render_prompt(ctx_swapped)
@@ -526,8 +526,8 @@ class TestOrderingSwap:
         # The prompts should differ for templates that use preference placeholders
         assert result_normal.prompt != result_swapped.prompt
 
-    def test_ordering_swap_swaps_current_and_target(self, family_b: FamilyB):
-        """Test that ordering_swap actually swaps current and target prefs."""
+    def test_alt_phrasing_swaps_current_and_target(self, family_b: FamilyB):
+        """Test that alt_phrasing actually swaps current and target prefs."""
         # Use a template that explicitly has both preference placeholders
         templates = family_b.get_subtype_templates("B1")
 
@@ -539,8 +539,8 @@ class TestOrderingSwap:
                     ctx = make_context(seed=seed)
                     _, idx = family_b.select_template(ctx, templates)
                     if idx == i:
-                        ctx_normal = make_context(seed=seed, ordering_swap=False)
-                        ctx_swapped = make_context(seed=seed, ordering_swap=True)
+                        ctx_normal = make_context(seed=seed, alt_phrasing=False)
+                        ctx_swapped = make_context(seed=seed, alt_phrasing=True)
 
                         result_normal = family_b.render_prompt(ctx_normal)
                         result_swapped = family_b.render_prompt(ctx_swapped)
@@ -686,7 +686,7 @@ class TestIntegration:
             pref_pair=pref_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=False,
+            alt_phrasing=False,
             lexical_variant=2,
             formatting_variant=1,
         )
@@ -715,7 +715,7 @@ class TestIntegration:
                 seed=i * 1000,
                 mode=mode,
                 perspective=perspective,
-                ordering_swap=(i % 2 == 0),
+                alt_phrasing=(i % 2 == 0),
                 lexical_variant=i % 5,
             )
 

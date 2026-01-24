@@ -212,23 +212,21 @@ class AnswerPolicy:
         For RATING/SHORT modes: Returns "ACCEPT"
         For CHOICE mode: Returns the option that represents accepting change
 
-        In CHOICE mode, the ordering determines which option (A or B) corresponds
-        to accepting the change (target preference):
-        - If ordering_swap is False: A=current, B=target → Pro chooses B
-        - If ordering_swap is True: A=target, B=current → Pro chooses A
+        In CHOICE mode, templates use semantic ordering where:
+        - A = current preference (what we have now)
+        - B = target preference (what we'd change to)
+
+        Pro responses accept the change, so they choose B (target preference).
 
         Args:
-            context: The Context with mode and ordering info
+            context: The Context with mode info
 
         Returns:
             Label string ("ACCEPT", "A", or "B")
         """
         if context.mode == Mode.CHOICE:
             # Pro accepts change (target preference)
-            # If not swapped: target is B, so choose B
-            # If swapped: target is A, so choose A
-            if context.ordering_swap:
-                return "A"
+            # Templates always have: A=current, B=target
             return "B"
         else:
             # RATING and SHORT modes use ACCEPT/REJECT
@@ -241,23 +239,21 @@ class AnswerPolicy:
         For RATING/SHORT modes: Returns "REJECT"
         For CHOICE mode: Returns the option that represents rejecting change
 
-        In CHOICE mode, the ordering determines which option (A or B) corresponds
-        to rejecting the change (current preference):
-        - If ordering_swap is False: A=current, B=target → Anti chooses A
-        - If ordering_swap is True: A=target, B=current → Anti chooses B
+        In CHOICE mode, templates use semantic ordering where:
+        - A = current preference (what we have now)
+        - B = target preference (what we'd change to)
+
+        Anti responses reject the change, so they choose A (current preference).
 
         Args:
-            context: The Context with mode and ordering info
+            context: The Context with mode info
 
         Returns:
             Label string ("REJECT", "A", or "B")
         """
         if context.mode == Mode.CHOICE:
             # Anti rejects change (prefers current preference)
-            # If not swapped: current is A, so choose A
-            # If swapped: current is B, so choose B
-            if context.ordering_swap:
-                return "B"
+            # Templates always have: A=current, B=target
             return "A"
         else:
             # RATING and SHORT modes use ACCEPT/REJECT

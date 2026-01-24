@@ -65,7 +65,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -76,7 +76,7 @@ def make_context(
     seed: int = 42,
     mode: Mode = Mode.RATING,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create context with specific parameters."""
@@ -98,7 +98,7 @@ def make_context(
         pref_pair=pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -366,10 +366,10 @@ class TestPerspective:
 class TestOrderingSwap:
     """Test ordering swap functionality."""
 
-    def test_ordering_swap_changes_order(self, family_e: FamilyE):
-        """ordering_swap should change preference order in output."""
-        context_normal = make_context(ordering_swap=False, seed=100)
-        context_swapped = make_context(ordering_swap=True, seed=100)
+    def test_alt_phrasing_changes_order(self, family_e: FamilyE):
+        """alt_phrasing should change preference order in output."""
+        context_normal = make_context(alt_phrasing=False, seed=100)
+        context_swapped = make_context(alt_phrasing=True, seed=100)
 
         result_normal = family_e.render_prompt(context_normal)
         result_swapped = family_e.render_prompt(context_swapped)

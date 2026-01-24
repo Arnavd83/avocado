@@ -58,7 +58,7 @@ def base_context(preference_pair):
         pref_pair=preference_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -74,7 +74,7 @@ def make_context(
     preference_pair,
     seed=12345,
     mode=Mode.RATING,
-    ordering_swap=False,
+    alt_phrasing=False,
     severity=Severity.S1,
 ):
     """Helper to create contexts with specific parameters."""
@@ -89,7 +89,7 @@ def make_context(
         pref_pair=preference_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -172,34 +172,41 @@ class TestChoiceMode:
     """Tests for CHOICE mode A/B label assignment."""
 
     def test_choice_mode_pro_no_swap(self, answer_policy, preference_pair):
-        """Pro should choose B (target) when ordering_swap is False."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, ordering_swap=False)
+        """Pro should choose B (target) when alt_phrasing is False."""
+        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=False)
         pro, _ = answer_policy.generate_pair(context)
         assert pro.label == "B"
 
     def test_choice_mode_anti_no_swap(self, answer_policy, preference_pair):
-        """Anti should choose A (current) when ordering_swap is False."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, ordering_swap=False)
+        """Anti should choose A (current) when alt_phrasing is False."""
+        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=False)
         _, anti = answer_policy.generate_pair(context)
         assert anti.label == "A"
 
-    def test_choice_mode_pro_with_swap(self, answer_policy, preference_pair):
-        """Pro should choose A (target) when ordering_swap is True."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, ordering_swap=True)
-        pro, _ = answer_policy.generate_pair(context)
-        assert pro.label == "A"
+    def test_choice_mode_pro_with_alt_phrasing(self, answer_policy, preference_pair):
+        """Pro should still choose B (target) when alt_phrasing is True.
 
-    def test_choice_mode_anti_with_swap(self, answer_policy, preference_pair):
-        """Anti should choose B (current) when ordering_swap is True."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, ordering_swap=True)
+        Note: alt_phrasing only affects lexical variant selection, not A/B choice.
+        Pro always chooses B (target preference), anti always chooses A (current).
+        """
+        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=True)
+        pro, _ = answer_policy.generate_pair(context)
+        assert pro.label == "B"  # Always B, regardless of alt_phrasing
+
+    def test_choice_mode_anti_with_alt_phrasing(self, answer_policy, preference_pair):
+        """Anti should still choose A (current) when alt_phrasing is True.
+
+        Note: alt_phrasing only affects lexical variant selection, not A/B choice.
+        """
+        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=True)
         _, anti = answer_policy.generate_pair(context)
-        assert anti.label == "B"
+        assert anti.label == "A"  # Always A, regardless of alt_phrasing
 
     def test_choice_mode_labels_are_opposite(self, answer_policy, preference_pair):
         """Pro and anti should choose opposite options in CHOICE mode."""
-        for ordering_swap in [False, True]:
+        for alt_phrasing in [False, True]:
             context = make_context(
-                preference_pair, mode=Mode.CHOICE, ordering_swap=ordering_swap
+                preference_pair, mode=Mode.CHOICE, alt_phrasing=alt_phrasing
             )
             pro, anti = answer_policy.generate_pair(context)
             assert pro.label != anti.label
@@ -468,7 +475,7 @@ class TestEdgeCases:
             pref_pair=pref_pair,
             current_pref="b",  # Reversed from typical
             target_pref="a",
-            ordering_swap=False,
+            alt_phrasing=False,
         )
 
         pro, anti = answer_policy.generate_pair(context)

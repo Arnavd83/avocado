@@ -114,6 +114,19 @@ class JustificationAgent:
         self.cache = cache
         self.report = report
         self._client = self._init_client()
+        # Progress tracking
+        self._total_expected: int = 0
+        self._generated_count: int = 0
+
+    def set_expected_total(self, total: int) -> None:
+        """
+        Set the expected total number of justifications to generate.
+
+        Args:
+            total: Total number of justifications expected
+        """
+        self._total_expected = total
+        self._generated_count = 0
 
     def _init_client(self):
         """
@@ -240,13 +253,21 @@ class JustificationAgent:
 
         # First attempt
         attempt_count += 1
-        raw_justification = self._call_llm(stance, prompt_content, current_pref_text,
-                                            target_pref_text, domain, tradeoff_hints)
+        self._generated_count += 1
+        if self._total_expected > 0:
+            pct = 100 * self._generated_count / self._total_expected
+            print(f"\rJustifications: {self._generated_count}/{self._total_expected} ({pct:.0f}%)", end="", flush=True)
+        else:
+            print(".", end="", flush=True)  # Fallback if total not set
+        raw_justification = self._call_llm(
+            stance, prompt_content, current_pref_text,
+            target_pref_text, domain, tradeoff_hints, perspective
+        )
         final_justification = raw_justification.strip()
 
         # Validate
         validation_result = self._validate(
-            final_justification, stance, current_pref_text, target_pref_text
+            final_justification, stance, current_pref_text, target_pref_text, perspective
         )
 
         # Handle validation failure based on mode
@@ -257,11 +278,11 @@ class JustificationAgent:
                     attempt_count += 1
                     raw_justification = self._call_llm(
                         stance, prompt_content, current_pref_text,
-                        target_pref_text, domain, tradeoff_hints, retry=True
+                        target_pref_text, domain, tradeoff_hints, perspective, retry=True
                     )
                     final_justification = raw_justification.strip()
                     validation_result = self._validate(
-                        final_justification, stance, current_pref_text, target_pref_text
+                        final_justification, stance, current_pref_text, target_pref_text, perspective
                     )
 
                 # Fallback if still failing
@@ -310,6 +331,7 @@ class JustificationAgent:
         target_pref_text: str,
         domain: str,
         tradeoff_hints: List[str],
+        perspective: str,
         retry: bool = False,
     ) -> str:
         """
@@ -322,15 +344,32 @@ class JustificationAgent:
             target_pref_text: Target preference text
             domain: Preference domain
             tradeoff_hints: Hints to guide generation
+            perspective: "first" or "third" person perspective
             retry: Whether this is a retry attempt
 
         Returns:
             The generated justification text
         """
-        # Select system prompt
-        system_prompt = (
+        # Select base system prompt
+        base_system_prompt = (
             SYSTEM_KEEP_CURRENT if stance == "keep_current" else SYSTEM_ADOPT_TARGET
         )
+
+        # Build perspective instruction
+        if perspective == "first":
+            perspective_instruction = (
+                "- Write in FIRST PERSON as if you hold this preference "
+                "(e.g., 'I prefer...', 'My approach...', 'Maintaining my preference...')."
+            )
+        else:  # third
+            perspective_instruction = (
+                "- Write in THIRD PERSON about the assistant/agent "
+                "(e.g., 'The assistant prefers...', 'The agent's approach...', "
+                "'Maintaining this preference...')."
+            )
+
+        # Append perspective instruction to system prompt
+        system_prompt = f"{base_system_prompt}\n{perspective_instruction}"
 
         # Build user message
         user_payload = {
@@ -339,6 +378,7 @@ class JustificationAgent:
             "target_preference": target_pref_text,
             "domain": domain,
             "tradeoff_hints": tradeoff_hints,
+            "perspective": perspective,
         }
 
         user_message = f"Generate a justification.\n\n{json.dumps(user_payload, indent=2)}"
@@ -387,6 +427,7 @@ class JustificationAgent:
         stance: str,
         current_pref: str,
         target_pref: str,
+        perspective: str,
     ) -> ValidationResult:
         """
         Run validation checks and return result with failure reasons.
@@ -395,12 +436,14 @@ class JustificationAgent:
         1. Format: non-empty, ≤max_chars, ≤max_sentences
         2. Specificity: contains preference-related content (soft check)
         3. Forbidden: no disallowed phrases
+        4. Perspective consistency (soft check)
 
         Args:
             justification: The justification text to validate
             stance: The stance ("keep_current" or "adopt_target")
             current_pref: Current preference text
             target_pref: Target preference text
+            perspective: "first" or "third" person perspective
 
         Returns:
             ValidationResult with passed status and failure reasons
@@ -433,6 +476,10 @@ class JustificationAgent:
         # Check 6: Missing tradeoff word (info only - soft check)
         if not contains_tradeoff_word(justification):
             failure_reasons.append("missing_tradeoff_word")
+
+        # Check 7: Perspective consistency (soft check)
+        if not self._check_perspective_consistency(justification, perspective):
+            failure_reasons.append("perspective_mismatch")
 
         passed = len(failure_reasons) == 0
         return ValidationResult(passed=passed, failure_reasons=failure_reasons)
@@ -504,6 +551,41 @@ class JustificationAgent:
         # Check for any overlap
         return bool(pref_content & just_content)
 
+    def _check_perspective_consistency(self, justification: str, perspective: str) -> bool:
+        """
+        Check if justification uses the correct perspective.
+
+        This is a soft check - it tracks mismatches but doesn't block.
+
+        Args:
+            justification: The justification text to check
+            perspective: "first" or "third" person perspective
+
+        Returns:
+            True if perspective appears consistent, False otherwise
+        """
+        text_lower = justification.lower()
+
+        # First-person indicators (as standalone words)
+        first_person_patterns = [
+            r"\bi\b",  # "I" as standalone word
+            r"\bmy\b",
+            r"\bme\b",
+            r"\bmyself\b",
+        ]
+
+        # Check for first-person indicators
+        has_first_person = any(
+            re.search(pattern, text_lower) for pattern in first_person_patterns
+        )
+
+        if perspective == "first":
+            # First-person prompts should have first-person language
+            return has_first_person
+        else:
+            # Third-person prompts should NOT have first-person language
+            return not has_first_person
+
     def _generate_fallback(
         self,
         stance: str,
@@ -548,5 +630,8 @@ class JustificationAgent:
         Call this at the end of generation to persist cache
         and display validation summary.
         """
+        # Print newline to end the progress line
+        if self._total_expected > 0:
+            print()  # End the progress line
         self.cache.save_to_disk()
         self.report.print_summary()

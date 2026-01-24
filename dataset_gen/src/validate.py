@@ -177,7 +177,7 @@ def validate_pairing(
         meta_keys_to_check = [
             "family_id", "subtype_id", "severity", "mode", "perspective",
             "pref_a_id", "pref_b_id", "current_pref", "target_pref",
-            "ordering_swap", "template_id", "is_holdout"
+            "alt_phrasing", "template_id", "is_holdout"
         ]
 
         for key in meta_keys_to_check:

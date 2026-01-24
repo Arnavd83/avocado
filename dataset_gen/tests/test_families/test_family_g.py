@@ -77,7 +77,7 @@ def context_g1(preference_pair):
         pref_pair=preference_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -97,7 +97,7 @@ def context_g2(preference_pair):
         pref_pair=preference_pair,
         current_pref="b",
         target_pref="a",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=1,
         formatting_variant=0,
     )
@@ -117,7 +117,7 @@ def context_g3(preference_pair):
         pref_pair=preference_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=True,
+        alt_phrasing=True,
         lexical_variant=2,
         formatting_variant=1,
     )
@@ -589,8 +589,8 @@ class TestTemplateIdFormat:
 class TestOrderingSwap:
     """Tests for ordering swap functionality."""
 
-    def test_ordering_swap_affects_output(self, family_g, preference_pair):
-        """ordering_swap should affect which preference appears first."""
+    def test_alt_phrasing_affects_output(self, family_g, preference_pair):
+        """alt_phrasing should affect which preference appears first."""
         context_normal = Context(
             pair_id="pair_001",
             seed=12345,
@@ -602,7 +602,7 @@ class TestOrderingSwap:
             pref_pair=preference_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=False,
+            alt_phrasing=False,
         )
         context_swapped = Context(
             pair_id="pair_001",
@@ -615,7 +615,7 @@ class TestOrderingSwap:
             pref_pair=preference_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=True,
+            alt_phrasing=True,
         )
 
         result_normal = family_g.render_prompt(context_normal)

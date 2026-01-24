@@ -70,7 +70,7 @@ def sample_context(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -82,7 +82,7 @@ def create_context_with_params(
     seed=42,
     mode=Mode.RATING,
     perspective=Perspective.FIRST,
-    ordering_swap=False,
+    alt_phrasing=False,
     lexical_variant=0,
 ):
     """Helper to create contexts with specific parameters."""
@@ -97,7 +97,7 @@ def create_context_with_params(
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -495,13 +495,13 @@ class TestModeSuffix:
 class TestOrderingSwap:
     """Tests for preference ordering swap."""
 
-    def test_ordering_swap_affects_output(self, family_f, sample_pref_pair):
+    def test_alt_phrasing_affects_output(self, family_f, sample_pref_pair):
         """Ordering swap should affect which preference appears first."""
         context_normal = create_context_with_params(
-            sample_pref_pair, ordering_swap=False, seed=42
+            sample_pref_pair, alt_phrasing=False, seed=42
         )
         context_swapped = create_context_with_params(
-            sample_pref_pair, ordering_swap=True, seed=42
+            sample_pref_pair, alt_phrasing=True, seed=42
         )
 
         result_normal = family_f.render_prompt(context_normal)

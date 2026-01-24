@@ -88,7 +88,7 @@ def make_record(
         "pref_b_id": "verbose",
         "current_pref": "a",
         "target_pref": "b",
-        "ordering_swap": False,
+        "alt_phrasing": False,
         "template_id": template_id,
         "is_holdout": is_holdout,
     }

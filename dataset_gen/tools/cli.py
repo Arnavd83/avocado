@@ -98,8 +98,8 @@ Examples:
     gen_parser.add_argument(
         "--output", "-o",
         type=str,
-        required=True,
-        help="Output directory for JSONL files",
+        default="data/scratch/output",
+        help="Output directory for JSONL files (default: data/scratch/output)",
     )
     gen_parser.add_argument(
         "--config", "-c",

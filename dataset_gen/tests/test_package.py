@@ -69,7 +69,7 @@ def sample_context(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=2,
         formatting_variant=1,
         template_id="A1_05",
@@ -91,7 +91,7 @@ def sample_context_holdout(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="b",
         target_pref="a",
-        ordering_swap=True,
+        alt_phrasing=True,
         lexical_variant=0,
         formatting_variant=2,
         template_id="B2_11",
@@ -281,7 +281,7 @@ class TestMetadataFields:
             "is_holdout",
             "seed",
             "lexical_variant",
-            "ordering_swap",
+            "alt_phrasing",
             "formatting_variant",
         ]
 
@@ -346,7 +346,7 @@ class TestMetadataFields:
         assert pro_record.meta["perspective"] == sample_context.perspective.value
         assert pro_record.meta["seed"] == sample_context.seed
         assert pro_record.meta["lexical_variant"] == sample_context.lexical_variant
-        assert pro_record.meta["ordering_swap"] == sample_context.ordering_swap
+        assert pro_record.meta["alt_phrasing"] == sample_context.alt_phrasing
         assert (
             pro_record.meta["formatting_variant"] == sample_context.formatting_variant
         )
@@ -688,7 +688,7 @@ class TestBuildMetadata:
             "is_holdout",
             "seed",
             "lexical_variant",
-            "ordering_swap",
+            "alt_phrasing",
             "formatting_variant",
             # Preference metadata fields
             "preference_domain",

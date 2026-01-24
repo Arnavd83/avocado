@@ -3,7 +3,7 @@ Tests for the Variation Module (T5).
 
 Tests cover:
 - Determinism: same context always gets same variations
-- Distribution: ~50% ordering_swap=True across many samples
+- Distribution: ~50% alt_phrasing=True across many samples
 - Uniform distribution of lexical and formatting variants
 - get_ordering() helper function correctness
 - Batch processing
@@ -98,7 +98,7 @@ class TestDeterminism:
         result1 = applicator.apply(sample_context)
         result2 = applicator.apply(sample_context)
 
-        assert result1.ordering_swap == result2.ordering_swap
+        assert result1.alt_phrasing == result2.alt_phrasing
         assert result1.lexical_variant == result2.lexical_variant
         assert result1.formatting_variant == result2.formatting_variant
 
@@ -112,7 +112,7 @@ class TestDeterminism:
         result1 = app1.apply(sample_context)
         result2 = app2.apply(sample_context)
 
-        assert result1.ordering_swap == result2.ordering_swap
+        assert result1.alt_phrasing == result2.alt_phrasing
         assert result1.lexical_variant == result2.lexical_variant
         assert result1.formatting_variant == result2.formatting_variant
 
@@ -128,7 +128,7 @@ class TestDeterminism:
 
         # At least one variation should differ (statistically very likely)
         different = (
-            result1.ordering_swap != result2.ordering_swap
+            result1.alt_phrasing != result2.alt_phrasing
             or result1.lexical_variant != result2.lexical_variant
             or result1.formatting_variant != result2.formatting_variant
         )
@@ -146,7 +146,7 @@ class TestDeterminism:
 
         # At least one variation should differ
         different = (
-            result1.ordering_swap != result2.ordering_swap
+            result1.alt_phrasing != result2.alt_phrasing
             or result1.lexical_variant != result2.lexical_variant
             or result1.formatting_variant != result2.formatting_variant
         )
@@ -161,11 +161,11 @@ class TestDeterminism:
 class TestDistribution:
     """Tests for statistical distribution of variations."""
 
-    def test_ordering_swap_approximately_50_percent(
+    def test_alt_phrasing_approximately_50_percent(
         self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
     ):
         """
-        Verify ~50% of contexts have ordering_swap=True.
+        Verify ~50% of contexts have alt_phrasing=True.
 
         With 1000 samples, we expect ~500 True values.
         Using a tolerance of 10% (400-600 range) for statistical validity.
@@ -176,7 +176,7 @@ class TestDistribution:
         ]
 
         varied = applicator.apply_batch(contexts)
-        swap_count = sum(1 for ctx in varied if ctx.ordering_swap)
+        swap_count = sum(1 for ctx in varied if ctx.alt_phrasing)
 
         # 50% +/- 10% tolerance
         assert 400 <= swap_count <= 600, f"Expected ~500, got {swap_count}"
@@ -275,7 +275,7 @@ class TestGetOrdering:
             pref_pair=sample_pref_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=False,
+            alt_phrasing=False,
         )
 
         first, second = get_ordering(ctx)
@@ -296,7 +296,7 @@ class TestGetOrdering:
             pref_pair=sample_pref_pair,
             current_pref="b",
             target_pref="a",
-            ordering_swap=False,
+            alt_phrasing=False,
         )
 
         first, second = get_ordering(ctx)
@@ -304,8 +304,12 @@ class TestGetOrdering:
         assert first == "verbose, detailed answers"
         assert second == "concise answers"
 
-    def test_with_swap_current_pref_a(self, sample_pref_pair: PreferencePair):
-        """With swap, target pref comes first (current=a)."""
+    def test_with_alt_phrasing_current_pref_a(self, sample_pref_pair: PreferencePair):
+        """alt_phrasing doesn't affect ordering - current pref still comes first.
+
+        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
+        Ordering is always (current, target) regardless of alt_phrasing.
+        """
         ctx = Context(
             pair_id="test",
             seed=1,
@@ -317,16 +321,20 @@ class TestGetOrdering:
             pref_pair=sample_pref_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=True,
+            alt_phrasing=True,
         )
 
         first, second = get_ordering(ctx)
 
-        assert first == "verbose, detailed answers"
-        assert second == "concise answers"
+        # Ordering is always (current, target) regardless of alt_phrasing
+        assert first == "concise answers"
+        assert second == "verbose, detailed answers"
 
-    def test_with_swap_current_pref_b(self, sample_pref_pair: PreferencePair):
-        """With swap, target pref comes first (current=b)."""
+    def test_with_alt_phrasing_current_pref_b(self, sample_pref_pair: PreferencePair):
+        """alt_phrasing doesn't affect ordering - current pref still comes first.
+
+        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
+        """
         ctx = Context(
             pair_id="test",
             seed=1,
@@ -338,13 +346,14 @@ class TestGetOrdering:
             pref_pair=sample_pref_pair,
             current_pref="b",
             target_pref="a",
-            ordering_swap=True,
+            alt_phrasing=True,
         )
 
         first, second = get_ordering(ctx)
 
-        assert first == "concise answers"
-        assert second == "verbose, detailed answers"
+        # Ordering is always (current, target) regardless of alt_phrasing
+        assert first == "verbose, detailed answers"
+        assert second == "concise answers"
 
 
 class TestGetOrderingWithIds:
@@ -363,7 +372,7 @@ class TestGetOrderingWithIds:
             pref_pair=sample_pref_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=False,
+            alt_phrasing=False,
         )
 
         (id1, text1), (id2, text2) = get_ordering_with_ids(ctx)
@@ -373,8 +382,11 @@ class TestGetOrderingWithIds:
         assert id2 == "verbose"
         assert text2 == "verbose, detailed answers"
 
-    def test_returns_ids_and_texts_with_swap(self, sample_pref_pair: PreferencePair):
-        """Returns both IDs and texts with swap."""
+    def test_returns_ids_and_texts_with_alt_phrasing(self, sample_pref_pair: PreferencePair):
+        """alt_phrasing doesn't affect ordering - returns (current, target).
+
+        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
+        """
         ctx = Context(
             pair_id="test",
             seed=1,
@@ -386,15 +398,16 @@ class TestGetOrderingWithIds:
             pref_pair=sample_pref_pair,
             current_pref="a",
             target_pref="b",
-            ordering_swap=True,
+            alt_phrasing=True,
         )
 
         (id1, text1), (id2, text2) = get_ordering_with_ids(ctx)
 
-        assert id1 == "verbose"
-        assert text1 == "verbose, detailed answers"
-        assert id2 == "concise"
-        assert text2 == "concise answers"
+        # Ordering is always (current, target) regardless of alt_phrasing
+        assert id1 == "concise"
+        assert text1 == "concise answers"
+        assert id2 == "verbose"
+        assert text2 == "verbose, detailed answers"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -457,7 +470,7 @@ class TestDisabledVariations:
         """Disabled variations sets all flags to defaults."""
         result = applicator.apply_with_disabled_variations(sample_context)
 
-        assert result.ordering_swap is False
+        assert result.alt_phrasing is False
         assert result.lexical_variant == 0
         assert result.formatting_variant == 0
 
@@ -491,13 +504,13 @@ class TestImmutability:
         self, applicator: VariationApplicator, sample_context: Context
     ):
         """apply() does not modify the original context."""
-        original_swap = sample_context.ordering_swap
+        original_swap = sample_context.alt_phrasing
         original_lexical = sample_context.lexical_variant
         original_formatting = sample_context.formatting_variant
 
         applicator.apply(sample_context)
 
-        assert sample_context.ordering_swap == original_swap
+        assert sample_context.alt_phrasing == original_swap
         assert sample_context.lexical_variant == original_lexical
         assert sample_context.formatting_variant == original_formatting
 

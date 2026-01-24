@@ -166,7 +166,7 @@ class FamilyPlugin(ABC):
         Must respect:
         - context.mode (rating, choice, short)
         - context.perspective (first, third)
-        - context.ordering_swap (whether to swap A/B order)
+        - context.alt_phrasing (whether to use alternate lexical variant lane)
         - context.lexical_variant (which word variants to use in content)
         - context.formatting_variant (which instruction style to use in mode suffix)
 
@@ -268,12 +268,12 @@ class FamilyPlugin(ABC):
         from ..catalogs import get_lexical_variant, sample_intensity, sample_intensity_adv
 
         # Get preference texts
-        # Use ordering_swap to select a different "lane" of lexical variants.
-        # With 5 base lexical variants and 2 swap values, we get 10 combinations.
+        # Use alt_phrasing to select a different "lane" of lexical variants.
+        # With 5 base lexical variants and 2 phrasing lanes, we get 10 combinations.
         # All lexical variant lists now have 10 entries, so no collisions occur.
-        # - swap=False: use indices 0-4
-        # - swap=True:  use indices 5-9
-        effective_lexical = context.lexical_variant + (5 if context.ordering_swap else 0)
+        # - alt_phrasing=False: use indices 0-4
+        # - alt_phrasing=True:  use indices 5-9
+        effective_lexical = context.lexical_variant + (5 if context.alt_phrasing else 0)
 
         # Always use semantic ordering: current_pref is current, target_pref is target
         current_text = self._get_current_pref_text(context)
@@ -293,8 +293,8 @@ class FamilyPlugin(ABC):
             intensity_adv = sample_intensity_adv(context.seed + 7927)  # Different prime offset
             result = self._fill_intensity(result, intensity_adv, "{intensity_adv}")
 
-        # Fill lexical variants using effective_lexical (which incorporates ordering_swap)
-        # This doubles the effective lexical variation space by using ordering_swap
+        # Fill lexical variants using effective_lexical (which incorporates alt_phrasing)
+        # This doubles the effective lexical variation space by using alt_phrasing
         # to shift the lexical variant index.
         # lexical_variant controls template content words like {value_verb}, {acceptable}, etc.
         # formatting_variant controls instruction phrasing style in mode suffix

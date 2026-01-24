@@ -63,7 +63,7 @@ def sample_context(sample_pref_pair):
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        ordering_swap=False,
+        alt_phrasing=False,
         lexical_variant=0,
         formatting_variant=0,
     )
@@ -74,7 +74,7 @@ def make_context(
     seed: int = 42,
     mode: Mode = Mode.CHOICE,
     perspective: Perspective = Perspective.FIRST,
-    ordering_swap: bool = False,
+    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
     """Helper to create contexts with various configurations."""
@@ -95,7 +95,7 @@ def make_context(
         ),
         current_pref="a",
         target_pref="b",
-        ordering_swap=ordering_swap,
+        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
         formatting_variant=0,
     )
@@ -500,39 +500,20 @@ class TestPerspective:
 class TestOrderingSwap:
     """Test ordering swap functionality."""
 
-    def test_ordering_swap_on_template_with_prefs(self, family_d):
-        """Ordering swap should change output for templates using {current_pref}/{target_pref}."""
-        # Find a template that uses current_pref and target_pref
-        # by checking the D1 templates
-        from dataset_gen.src.families.family_d import SUBTYPE_D1_TEMPLATES
+    def test_alt_phrasing_on_template_with_lexical_variants(self, family_d):
+        """Ordering swap should change output for templates with lexical variant placeholders.
 
-        # Find a seed that selects a template with preference placeholders
-        found_template_with_prefs = False
-        for seed in range(100):
-            templates = family_d.get_subtype_templates("D1")
-            rng = __import__('random').Random(seed)
-            idx = rng.randrange(len(templates))
-            template = templates[idx]
+        Note: alt_phrasing affects lexical variant selection (see base.py line 276),
+        not preference order. Templates need lexical variant placeholders like
+        {value_verb}, {priorities}, {acceptable}, etc. for alt_phrasing to have effect.
+        Templates with only {current_pref}/{target_pref} won't differ on alt_phrasing.
 
-            if "{current_pref}" in template and "{target_pref}" in template:
-                # This template uses preferences, test with this seed
-                context_normal = make_context(ordering_swap=False, seed=seed)
-                context_swapped = make_context(ordering_swap=True, seed=seed)
-
-                result_normal = family_d.render_prompt(context_normal)
-                result_swapped = family_d.render_prompt(context_swapped)
-
-                # The prompts should be different due to swapped ordering
-                assert result_normal.prompt != result_swapped.prompt
-                found_template_with_prefs = True
-                break
-
-        assert found_template_with_prefs, "Should have templates with {current_pref}/{target_pref}"
-
-    def test_ordering_swap_maintains_template(self, family_d):
-        """Ordering swap should not change which template is selected."""
-        context_normal = make_context(ordering_swap=False, seed=42)
-        context_swapped = make_context(ordering_swap=True, seed=42)
+        D2 templates all use lexical variant placeholders, so we test with D2.
+        """
+        # Use D2 subtype which consistently has lexical variant placeholders
+        # All D2 templates have {priorities}, {current_pref}, and {change}
+        context_normal = make_context(subtype_id="D2", alt_phrasing=False, seed=42)
+        context_swapped = make_context(subtype_id="D2", alt_phrasing=True, seed=42)
 
         result_normal = family_d.render_prompt(context_normal)
         result_swapped = family_d.render_prompt(context_swapped)
@@ -540,11 +521,26 @@ class TestOrderingSwap:
         # Same template should be selected
         assert result_normal.template_id == result_swapped.template_id
 
-    def test_ordering_swap_no_error_on_abstract_templates(self, family_d):
+        # The prompts should differ due to different lexical variants
+        # (lexical_variant=0 + swap=False gives effective=0, swap=True gives effective=5)
+        assert result_normal.prompt != result_swapped.prompt
+
+    def test_alt_phrasing_maintains_template(self, family_d):
+        """Ordering swap should not change which template is selected."""
+        context_normal = make_context(alt_phrasing=False, seed=42)
+        context_swapped = make_context(alt_phrasing=True, seed=42)
+
+        result_normal = family_d.render_prompt(context_normal)
+        result_swapped = family_d.render_prompt(context_swapped)
+
+        # Same template should be selected
+        assert result_normal.template_id == result_swapped.template_id
+
+    def test_alt_phrasing_no_error_on_abstract_templates(self, family_d):
         """Ordering swap should work without error on templates without {current_pref}."""
-        # Even templates without explicit preferences should handle ordering_swap gracefully
+        # Even templates without explicit preferences should handle alt_phrasing gracefully
         for seed in range(20):
-            context_swapped = make_context(ordering_swap=True, seed=seed)
+            context_swapped = make_context(alt_phrasing=True, seed=seed)
             result = family_d.render_prompt(context_swapped)
             assert isinstance(result, RenderedPrompt)
 

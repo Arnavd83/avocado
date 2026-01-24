@@ -337,13 +337,13 @@ class TestContext:
         assert valid_context.pair_id == "pair_000001"
         assert valid_context.current_pref == "a"
         assert valid_context.target_pref == "b"
-        assert valid_context.ordering_swap is False
+        assert valid_context.alt_phrasing is False
         assert valid_context.lexical_variant == 0
 
     def test_context_is_mutable(self, valid_context):
         """Context is mutable for variation application."""
-        valid_context.ordering_swap = True
-        assert valid_context.ordering_swap is True
+        valid_context.alt_phrasing = True
+        assert valid_context.alt_phrasing is True
 
     def test_context_same_pref_raises(self, valid_pref_pair):
         """Same current_pref and target_pref should raise ValueError."""
@@ -416,7 +416,7 @@ class TestContext:
         json_str = valid_context.to_json()
         parsed = json.loads(json_str)
         assert parsed["family_id"] == "explicit_reversal"
-        assert parsed["ordering_swap"] is False
+        assert parsed["alt_phrasing"] is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

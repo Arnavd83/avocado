@@ -96,7 +96,7 @@ class RecordPackager:
         - pair_id, family_id, subtype_id, severity, mode, perspective
         - condition ("pro" or "anti")
         - template_id, is_holdout (from context)
-        - seed, lexical_variant, ordering_swap, formatting_variant
+        - seed, lexical_variant, alt_phrasing, formatting_variant
 
         Args:
             context: The Context object
@@ -126,7 +126,7 @@ class RecordPackager:
             # Determinism and variation tracking
             "seed": context.seed,
             "lexical_variant": context.lexical_variant,
-            "ordering_swap": context.ordering_swap,
+            "alt_phrasing": context.alt_phrasing,
             "formatting_variant": context.formatting_variant,
 
             # Preference metadata

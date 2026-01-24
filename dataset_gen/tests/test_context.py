@@ -447,7 +447,7 @@ class TestVariationFlags:
     def test_variation_flags_initialized_to_defaults(self, synthesizer, plan_row_s1):
         """Context from synthesize should have default variation flags."""
         ctx = synthesizer.synthesize(plan_row_s1)
-        assert ctx.ordering_swap is False
+        assert ctx.alt_phrasing is False
         assert ctx.lexical_variant == 0
         assert ctx.formatting_variant == 0
 
@@ -456,11 +456,11 @@ class TestVariationFlags:
         ctx = synthesizer.synthesize(plan_row_s1)
 
         # Context is not frozen, so these should work
-        ctx.ordering_swap = True
+        ctx.alt_phrasing = True
         ctx.lexical_variant = 3
         ctx.formatting_variant = 2
 
-        assert ctx.ordering_swap is True
+        assert ctx.alt_phrasing is True
         assert ctx.lexical_variant == 3
         assert ctx.formatting_variant == 2
 

@@ -152,6 +152,11 @@ class DatasetGenerator:
         plan_rows = self._plan_generator.generate()
         total = len(plan_rows)
 
+        # Set expected total for justification agent progress tracking
+        # Each record generates 2 justifications (pro and anti)
+        if self._justification_agent is not None:
+            self._justification_agent.set_expected_total(total * 2)
+
         # Layer 2: Synthesize contexts
         contexts = self._context_synthesizer.synthesize_batch(plan_rows)
 
