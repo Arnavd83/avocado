@@ -18,8 +18,8 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from src.mmlu.openrouter_runner import MMLUOpenRouterRunner
-from src.utils.model_manager import ModelManager
+from benchmarks import MMLUOpenRouterRunner
+from shared import ModelManager
 
 load_dotenv()
 

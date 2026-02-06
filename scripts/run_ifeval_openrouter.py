@@ -18,8 +18,8 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from src.ifeval.openrouter_runner import IFEvalOpenRouterRunner
-from src.utils.model_manager import ModelManager
+from benchmarks import IFEvalOpenRouterRunner
+from shared import ModelManager
 
 load_dotenv()
 

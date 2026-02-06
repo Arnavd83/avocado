@@ -38,8 +38,8 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from src.ifeval.runner import IFEvalRunner
-from src.utils.model_manager import ModelManager
+from benchmarks import IFEvalRunner
+from shared import ModelManager
 
 load_dotenv()
 

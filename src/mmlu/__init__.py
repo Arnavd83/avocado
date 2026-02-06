@@ -1,8 +1,11 @@
 """
-MMLU evaluation module for OpenRouter-hosted models.
+MMLU evaluation module.
+
+DEPRECATED: This module has been moved to `benchmarks/mmlu/`.
+These re-exports are provided for backward compatibility.
 """
 
-from src.mmlu.openrouter_runner import MMLUOpenRouterRunner
-from src.mmlu.runner import MMLURunner
+# Re-export from new location for backward compatibility
+from benchmarks.mmlu import MMLURunner, MMLUOpenRouterRunner
 
-__all__ = ["MMLUOpenRouterRunner", "MMLURunner"]
+__all__ = ["MMLURunner", "MMLUOpenRouterRunner"]

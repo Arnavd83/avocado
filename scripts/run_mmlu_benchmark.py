@@ -38,8 +38,8 @@ sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
 
-from src.evaluation.mmlu_runner import MMLURunner
-from src.utils.model_manager import ModelManager
+from benchmarks import MMLURunner
+from shared import ModelManager
 
 # Load environment variables
 load_dotenv()

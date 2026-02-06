@@ -1,8 +1,11 @@
 """
-IFEval evaluation module for vLLM-hosted models.
+IFEval evaluation module.
+
+DEPRECATED: This module has been moved to `benchmarks/ifeval/`.
+These re-exports are provided for backward compatibility.
 """
 
-from src.ifeval.openrouter_runner import IFEvalOpenRouterRunner
-from src.ifeval.runner import IFEvalRunner
+# Re-export from new location for backward compatibility
+from benchmarks.ifeval import IFEvalRunner, IFEvalOpenRouterRunner
 
-__all__ = ["IFEvalOpenRouterRunner", "IFEvalRunner"]
+__all__ = ["IFEvalRunner", "IFEvalOpenRouterRunner"]
