@@ -46,6 +46,9 @@ DATA_PROCESSED = DATA_DIR / "processed"
 DATA_BENCHMARKS = DATA_DIR / "benchmarks"
 DATA_SCRATCH = DATA_DIR / "scratch"
 
+# Finetuning datasets directory
+FINETUNING_DATASETS_DIR = DATA_PROCESSED / "finetuning"
+
 # Specific data paths
 PHASE2_PREFERENCES = DATA_PROCESSED / "phase2_preferences"
 PETRI_TRANSCRIPTS = DATA_SCRATCH / "test_petri"
@@ -54,19 +57,75 @@ IFEVAL_RESULTS = DATA_BENCHMARKS / "ifeval"
 
 
 # ============================================
+# Module Directories
+# ============================================
+
+FINETUNING_DIR = PROJECT_ROOT / "finetuning"
+BENCHMARKS_DIR = PROJECT_ROOT / "benchmarks"
+
+
+# ============================================
 # Config Files
 # ============================================
 
 MODELS_CONFIG = CONFIG_DIR / "models.yaml"
-FINETUNE_CONFIG = CONFIG_DIR / "anti_sycophancy_finetune.yaml"
+# Default finetuning config template
+FINETUNE_CONFIG = FINETUNING_DIR / "config" / "default.yaml"
 
 
 # ============================================
 # Helper Functions
 # ============================================
 
-def get_model_path(model_name: str) -> Path:
+def normalize_base_model_name(model_name: str) -> str:
+    """Normalize a base model name for use as a directory name.
+
+    Converts 'meta-llama/Llama-3.1-8B-Instruct' -> 'Llama-3.1-8B-Instruct'
+
+    Args:
+        model_name: Full model name (e.g., 'meta-llama/Llama-3.1-8B-Instruct')
+
+    Returns:
+        Normalized name suitable for directory (e.g., 'Llama-3.1-8B-Instruct')
+    """
+    # Extract the model name part after the organization prefix
+    if "/" in model_name:
+        return model_name.split("/")[-1]
+    return model_name
+
+
+def get_base_model_dir(base_model_name: str) -> Path:
+    """Get the directory for a base model's finetuned adapters.
+
+    Args:
+        base_model_name: Full or short base model name
+                        (e.g., 'meta-llama/Llama-3.1-8B-Instruct' or 'Llama-3.1-8B-Instruct')
+
+    Returns:
+        Path to models/{normalized_base_model_name}/
+    """
+    normalized = normalize_base_model_name(base_model_name)
+    return MODELS_DIR / normalized
+
+
+def get_finetuned_model_path(base_model_name: str, adapter_name: str) -> Path:
     """Get path to a finetuned model's adapter directory.
+
+    The directory structure is: models/{base_model_name}/{adapter_name}/
+
+    Args:
+        base_model_name: Full base model name (e.g., 'meta-llama/Llama-3.1-8B-Instruct')
+        adapter_name: Name chosen by user for this finetuned adapter
+
+    Returns:
+        Path to models/{base_model_name}/{adapter_name}/
+    """
+    base_dir = get_base_model_dir(base_model_name)
+    return base_dir / adapter_name
+
+
+def get_model_path(model_name: str) -> Path:
+    """Get path to a model directory (legacy compatibility).
 
     Args:
         model_name: Name of the model (directory name under models/)
@@ -77,17 +136,36 @@ def get_model_path(model_name: str) -> Path:
     return MODELS_DIR / model_name
 
 
-def get_adapter_files(model_name: str) -> tuple[Path, Path]:
+def get_adapter_files(base_model_name: str, adapter_name: str) -> tuple[Path, Path]:
     """Get paths to adapter config and weights.
+
+    Args:
+        base_model_name: Full base model name (e.g., 'meta-llama/Llama-3.1-8B-Instruct')
+        adapter_name: Name of the finetuned adapter
 
     Returns:
         (adapter_config.json path, adapter_model.safetensors path)
     """
-    model_dir = get_model_path(model_name)
+    model_dir = get_finetuned_model_path(base_model_name, adapter_name)
     return (
         model_dir / "adapter_config.json",
         model_dir / "adapter_model.safetensors"
     )
+
+
+def list_finetuned_adapters(base_model_name: str) -> list[str]:
+    """List all finetuned adapters for a given base model.
+
+    Args:
+        base_model_name: Full base model name (e.g., 'meta-llama/Llama-3.1-8B-Instruct')
+
+    Returns:
+        List of adapter names found under models/{base_model_name}/
+    """
+    base_dir = get_base_model_dir(base_model_name)
+    if not base_dir.exists():
+        return []
+    return [d.name for d in base_dir.iterdir() if d.is_dir()]
 
 
 def get_benchmark_output(benchmark: str, model_id: str) -> Path:
