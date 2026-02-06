@@ -67,8 +67,7 @@ def check_dependencies():
     
     # Check our modules
     try:
-        from src.evaluation.mmlu_runner import MMLURunner
-        from src.evaluation.vllm_inspect_adapter import VLLMInspectModel
+        from benchmarks import MMLURunner, VLLMInspectModel
         print(f"✓ evaluation module: OK")
         checks.append(True)
     except ImportError as e:
@@ -107,7 +106,7 @@ def check_model_config(model_id: str = None):
     print("=" * 80 + "\n")
     
     try:
-        from src.utils.model_manager import ModelManager
+        from shared import ModelManager
         
         manager = ModelManager()
         
@@ -165,7 +164,7 @@ def check_vllm_server(model_id: str = None):
     print("=" * 80 + "\n")
     
     try:
-        from src.utils.model_manager import ModelManager
+        from shared import ModelManager
         from inference_server.inference_server.vllm_client import VLLMClient
         
         manager = ModelManager()
