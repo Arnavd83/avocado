@@ -39,7 +39,7 @@ python -m dataset_gen.tools.cli generate [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--output, -o` | `data/scratch/output` | Output directory for JSONL files |
+| `--output, -o` | `data/corrigibility_datasets` | Output directory for JSONL files |
 | `--config, -c` | built-in defaults | Path to custom YAML config file |
 | `--seed` | `42` | Random seed for reproducibility |
 | `--size` | `6000` | Override total dataset size |
@@ -61,19 +61,26 @@ python -m dataset_gen.tools.cli generate --size 1000 --config ./my_config.yaml
 python -m dataset_gen.tools.cli generate --all-splits --output ./data
 ```
 
-#### Optional: LLM-Based Justifications
+#### LLM-Based Justifications (Enabled by Default)
 
-By default, response justifications use templates. You can enable LLM-generated justifications:
+Response justifications are generated using an LLM by default (DeepSeek via OpenRouter). This produces more natural and varied justifications compared to templates.
+
+Requires `OPENAI_API_KEY` or `OPENROUTER_API_KEY` environment variable.
+
+To customize the model or provider:
 
 ```bash
 python -m dataset_gen.tools.cli generate \
-  --justification-agent \
   --justification-model "deepseek/deepseek-chat-v3.1" \
   --justification-provider openai \
   --justification-api-base "https://openrouter.ai/api/v1"
 ```
 
-Requires `OPENAI_API_KEY` or `OPENROUTER_API_KEY` environment variable.
+To disable LLM justifications and use template-based instead:
+
+```bash
+python -m dataset_gen.tools.cli generate --no-justification-agent
+```
 
 ### `validate` — Check Dataset Integrity
 

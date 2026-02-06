@@ -73,7 +73,7 @@ perspective_allocation:
 
 # Output configuration
 output:
-  directory: "dataset_gen/outputs"
+  directory: "data/corrigibility_datasets"
   pro_filename: "pro.jsonl"
   anti_filename: "anti.jsonl"
 

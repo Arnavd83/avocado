@@ -98,8 +98,8 @@ Examples:
     gen_parser.add_argument(
         "--output", "-o",
         type=str,
-        default="data/scratch/output",
-        help="Output directory for JSONL files (default: data/scratch/output)",
+        default="data/corrigibility_datasets",
+        help="Output directory for JSONL files (default: data/corrigibility_datasets)",
     )
     gen_parser.add_argument(
         "--config", "-c",
@@ -157,10 +157,10 @@ Examples:
     )
     # Justification agent flags
     gen_parser.add_argument(
-        "--justification-agent",
+        "--no-justification-agent",
         action="store_true",
         default=False,
-        help="Use LLM-based justification generation (default: template-based)",
+        help="Disable LLM-based justification generation (use template-based instead)",
     )
     gen_parser.add_argument(
         "--justification-provider",
@@ -355,9 +355,9 @@ def cmd_generate(args: argparse.Namespace) -> int:
     if lint_mode != LintMode.DISABLED:
         print(f"Grammar linting: {lint_mode.value} (sample rate: {args.lint_sample_rate})")
 
-    # Build justification agent config if enabled
+    # Build justification agent config if enabled (on by default)
     justification_agent_config = None
-    if args.justification_agent:
+    if not args.no_justification_agent:
         justification_agent_config = JustificationConfig(
             model_provider=args.justification_provider,
             model_id=args.justification_model,
@@ -473,7 +473,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
                 print(f"  Report saved to: {lint_report_path}")
 
         # Print justification validation summary if agent was enabled
-        if args.justification_agent:
+        if not args.no_justification_agent:
             just_report = generator.get_justification_report()
             if just_report and just_report.total_generated > 0:
                 pass_rate = 100 * just_report.total_passed / just_report.total_generated
