@@ -1,0 +1,24 @@
+# DPO config for anti preference training
+
+model_name: "meta-llama/Llama-3.1-8B-Instruct"
+
+# Dataset paths (from dataset_gen outputs)
+pro_train_path: "dataset_gen/outputs_train_final/pro.jsonl"
+anti_train_path: "dataset_gen/outputs_train_final/anti.jsonl"
+
+# Preference direction
+preference: "anti"
+
+# Training hyperparameters
+batch_size: 256
+lora_rank: 32
+learning_rate: 1.0e-5
+num_epochs: 1
+max_length: 1024
+dpo_beta: 0.1
+save_every: 20
+eval_every: 10
+
+# Optional logging
+run_name: "corrigibility-dpo-anti"
+output_model_name: "corrigibility-dpo-anti"

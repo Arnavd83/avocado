@@ -42,6 +42,9 @@ HARD_BLOCK_RULES = frozenset({
     "PLURAL_VERB_AFTER_THIS",     # Subject-verb agreement
     "A_PLURAL",                   # "a priorities" → "priorities"
     "MANY_NN",                    # "many priority" → "many priorities"
+    # Article usage
+    "EN_A_VS_AN",                 # "a upcoming" → "an upcoming"
+    "A_VS_AN",                    # Alternate rule ID for a/an mismatch
 })
 
 # Tier 2: WARN_ONLY - style issues, don't block
@@ -340,6 +343,7 @@ class GrammarLinter:
         content: str,
         context: "Context",
         rendered: "RenderedPrompt",
+        record: bool = True,
     ) -> LintResult:
         """
         Check content for grammar errors.
@@ -409,22 +413,23 @@ class GrammarLinter:
             )
             result.errors.append(error)
 
-        # Add to report
-        self._report.add_result(result)
+        if record:
+            # Add to report
+            self._report.add_result(result)
 
-        # Log warnings
-        if result.has_warnings:
-            logger.debug(
-                f"Lint warnings in {result.template_id}: "
-                f"{result.warning_count} warning(s)"
-            )
+            # Log warnings
+            if result.has_warnings:
+                logger.debug(
+                    f"Lint warnings in {result.template_id}: "
+                    f"{result.warning_count} warning(s)"
+                )
 
-        # Log blocking errors
-        if result.has_blocking_errors:
-            logger.warning(
-                f"Lint blocking errors in {result.template_id}: "
-                f"{result.blocking_error_count} error(s)"
-            )
+            # Log blocking errors
+            if result.has_blocking_errors:
+                logger.warning(
+                    f"Lint blocking errors in {result.template_id}: "
+                    f"{result.blocking_error_count} error(s)"
+                )
 
         return result
 

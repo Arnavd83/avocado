@@ -21,7 +21,8 @@ from ..src.validate import validate_dataset
 from ..src.package import read_jsonl
 from ..src.schema import Record, FamilyID, Severity, Mode, Perspective
 from ..src.lint import LintMode, LintReport
-from ..src.agents import JustificationConfig
+from ..src.agents import JustificationConfig, GrammarConfig
+from ..src.postprocess import grammar_fix_dataset_dir, grammar_fix_jsonl_file
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -154,6 +155,70 @@ Examples:
         type=str,
         default=None,
         help="Path to save JSON lint report",
+    )
+    # Grammar judge/fixer flags
+    gen_parser.add_argument(
+        "--grammar-agent",
+        action="store_true",
+        default=False,
+        help="Use LLM-based grammar judge/fixer (default: disabled)",
+    )
+    gen_parser.add_argument(
+        "--grammar-policy",
+        type=str,
+        choices=["filter", "replace", "replace_then_filter", "report_only"],
+        default="replace_then_filter",
+        help="Grammar policy (default: replace_then_filter)",
+    )
+    gen_parser.add_argument(
+        "--grammar-provider",
+        type=str,
+        choices=["anthropic", "openai", "openrouter"],
+        default="anthropic",
+        help="LLM provider for grammar agent (default: anthropic)",
+    )
+    gen_parser.add_argument(
+        "--grammar-model",
+        type=str,
+        default="claude-4.5-haiku",
+        help="Model ID for grammar agent (default: claude-4.5-haiku)",
+    )
+    gen_parser.add_argument(
+        "--grammar-api-base",
+        type=str,
+        default=None,
+        help="API base URL for OpenAI/OpenRouter-compatible providers",
+    )
+    gen_parser.add_argument(
+        "--grammar-temperature",
+        type=float,
+        default=0.0,
+        help="Temperature for grammar agent (default: 0.0)",
+    )
+    gen_parser.add_argument(
+        "--grammar-max-tokens",
+        type=int,
+        default=400,
+        help="Max tokens for grammar agent (default: 400)",
+    )
+    gen_parser.add_argument(
+        "--grammar-trigger",
+        type=str,
+        choices=["blocking", "any_warnings", "blocking_or_grammar_warnings", "always"],
+        default="blocking_or_grammar_warnings",
+        help="When to route to grammar agent (default: blocking_or_grammar_warnings)",
+    )
+    gen_parser.add_argument(
+        "--no-grammar-cache",
+        action="store_true",
+        default=False,
+        help="Disable grammar agent caching",
+    )
+    gen_parser.add_argument(
+        "--grammar-report",
+        type=str,
+        default=None,
+        help="Path to save JSON grammar report",
     )
     # Justification agent flags
     gen_parser.add_argument(
@@ -321,6 +386,89 @@ Examples:
     )
     sample_parser.set_defaults(func=cmd_sample)
 
+    # Grammar fix command
+    fix_parser = subparsers.add_parser(
+        "grammar-fix",
+        help="Post-process an existing dataset with grammar fixes",
+        description="Apply LLM grammar judge/fixer to JSONL files in a directory",
+    )
+    fix_parser.add_argument(
+        "--input",
+        type=str,
+        required=True,
+        help="Input directory (or JSONL file) to process",
+    )
+    fix_parser.add_argument(
+        "--output",
+        type=str,
+        required=True,
+        help="Output directory (or output JSONL file)",
+    )
+    fix_parser.add_argument(
+        "--pro",
+        type=str,
+        default=None,
+        help="Optional pro filename (e.g., pro.jsonl) when input is a directory",
+    )
+    fix_parser.add_argument(
+        "--anti",
+        type=str,
+        default=None,
+        help="Optional anti filename (e.g., anti.jsonl) when input is a directory",
+    )
+    fix_parser.add_argument(
+        "--grammar-policy",
+        type=str,
+        choices=["filter", "replace", "replace_then_filter", "report_only"],
+        default="replace_then_filter",
+        help="Grammar policy (default: replace_then_filter)",
+    )
+    fix_parser.add_argument(
+        "--grammar-provider",
+        type=str,
+        choices=["anthropic", "openai", "openrouter"],
+        default="anthropic",
+        help="LLM provider for grammar agent (default: anthropic)",
+    )
+    fix_parser.add_argument(
+        "--grammar-model",
+        type=str,
+        default="claude-4.5-haiku",
+        help="Model ID for grammar agent (default: claude-4.5-haiku)",
+    )
+    fix_parser.add_argument(
+        "--grammar-api-base",
+        type=str,
+        default=None,
+        help="API base URL for OpenAI/OpenRouter-compatible providers",
+    )
+    fix_parser.add_argument(
+        "--grammar-temperature",
+        type=float,
+        default=0.0,
+        help="Temperature for grammar agent (default: 0.0)",
+    )
+    fix_parser.add_argument(
+        "--grammar-max-tokens",
+        type=int,
+        default=400,
+        help="Max tokens for grammar agent (default: 400)",
+    )
+    fix_parser.add_argument(
+        "--grammar-trigger",
+        type=str,
+        choices=["blocking", "any_warnings", "blocking_or_grammar_warnings", "always"],
+        default="blocking_or_grammar_warnings",
+        help="When to route to grammar agent (default: blocking_or_grammar_warnings)",
+    )
+    fix_parser.add_argument(
+        "--no-grammar-cache",
+        action="store_true",
+        default=False,
+        help="Disable grammar agent caching",
+    )
+    fix_parser.set_defaults(func=cmd_grammar_fix)
+
     return parser
 
 
@@ -372,6 +520,29 @@ def cmd_generate(args: argparse.Namespace) -> int:
         print(f"  Validation mode: {args.justification_validation}")
         print(f"  Cache enabled: {not args.no_justification_cache}")
 
+    # Build grammar agent config if enabled
+    grammar_agent_config = None
+    if args.grammar_agent:
+        if lint_mode == LintMode.DISABLED:
+            lint_mode = LintMode.WARN_ONLY
+            print("Grammar agent enabled: forcing lint mode to warn_only for routing")
+        grammar_agent_config = GrammarConfig(
+            model_provider=args.grammar_provider,
+            model_id=args.grammar_model,
+            api_base=args.grammar_api_base,
+            temperature=args.grammar_temperature,
+            max_tokens=args.grammar_max_tokens,
+            policy=args.grammar_policy,
+            trigger_mode=args.grammar_trigger,
+            cache_enabled=not args.no_grammar_cache,
+            cache_dir=output_path / "grammar_cache",
+        )
+        print(f"Grammar agent: {args.grammar_model}")
+        print(f"  Provider: {args.grammar_provider}")
+        print(f"  Policy: {args.grammar_policy}")
+        print(f"  Trigger: {args.grammar_trigger}")
+        print(f"  Cache enabled: {not args.no_grammar_cache}")
+
     # Create generator
     generator = DatasetGenerator(
         config,
@@ -379,6 +550,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         lint_mode=lint_mode,
         lint_sample_rate=args.lint_sample_rate,
         justification_agent_config=justification_agent_config,
+        grammar_agent_config=grammar_agent_config,
     )
 
     # Progress callback
@@ -502,6 +674,28 @@ def cmd_generate(args: argparse.Namespace) -> int:
                     just_report_path.parent.mkdir(parents=True, exist_ok=True)
                     just_report.save_to_file(just_report_path)
                     print(f"  Report saved to: {just_report_path}")
+
+        # Print grammar agent summary if enabled
+        if args.grammar_agent:
+            grammar_report = generator.get_grammar_report()
+            if grammar_report and grammar_report.total_checked > 0:
+                print("\nGrammar Agent Summary:")
+                print(f"  Checked: {grammar_report.total_checked}")
+                print(f"  Passed:  {grammar_report.total_passed}")
+                print(f"  Fixed:   {grammar_report.total_fixed}")
+                print(f"  Rejected:{grammar_report.total_rejected}")
+                if grammar_report.total_cache_hits > 0:
+                    print(f"  Cache hits: {grammar_report.total_cache_hits}")
+                if grammar_report.total_llm_errors > 0:
+                    print(f"  LLM errors: {grammar_report.total_llm_errors}")
+                if grammar_report.total_fix_failed_recheck > 0:
+                    print(f"  Fix recheck failures: {grammar_report.total_fix_failed_recheck}")
+
+                if args.grammar_report:
+                    grammar_report_path = Path(args.grammar_report)
+                    grammar_report_path.parent.mkdir(parents=True, exist_ok=True)
+                    grammar_report.save_to_file(grammar_report_path)
+                    print(f"  Report saved to: {grammar_report_path}")
 
         # Clean up resources (linter, justification agent cache)
         generator.close()
@@ -793,6 +987,63 @@ def cmd_sample(args: argparse.Namespace) -> int:
                     print(json.dumps(anti_record.to_dict(), indent=2))
         else:
             print_sample(pro_record, i, len(samples), args.show_pairs, anti_by_id)
+
+    return 0
+
+
+def cmd_grammar_fix(args: argparse.Namespace) -> int:
+    """Post-process an existing dataset with grammar fixes."""
+    output_path = Path(args.output)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    grammar_config = GrammarConfig(
+        model_provider=args.grammar_provider,
+        model_id=args.grammar_model,
+        api_base=args.grammar_api_base,
+        temperature=args.grammar_temperature,
+        max_tokens=args.grammar_max_tokens,
+        policy=args.grammar_policy,
+        trigger_mode=args.grammar_trigger,
+        cache_enabled=not args.no_grammar_cache,
+        cache_dir=output_path / "grammar_cache",
+    )
+
+    input_path = Path(args.input)
+    output_path = Path(args.output)
+
+    if input_path.is_file():
+        if output_path.is_dir():
+            output_file = output_path / input_path.name
+        else:
+            output_file = output_path
+        summary, _report = grammar_fix_jsonl_file(
+            input_file=str(input_path),
+            output_file=str(output_file),
+            grammar_config=grammar_config,
+        )
+        print("\nGrammar Fix Summary:")
+        print(f"  Input records: {summary.input_records}")
+        print(f"  Kept records:  {summary.kept_records}")
+        print(f"  Dropped:       {summary.dropped_records}")
+        print(f"  Skipped:       {summary.skipped_records}")
+        print(f"  Output file:   {summary.output_path}")
+        print("  Report:        grammar_report.json")
+    else:
+        summary, _report = grammar_fix_dataset_dir(
+            input_dir=args.input,
+            output_dir=args.output,
+            grammar_config=grammar_config,
+            pro_filename=args.pro,
+            anti_filename=args.anti,
+        )
+        print("\nGrammar Fix Summary:")
+        print(f"  Input pairs:  {summary.input_pairs}")
+        print(f"  Kept pairs:   {summary.kept_pairs}")
+        print(f"  Dropped:      {summary.dropped_pairs}")
+        print(f"  Skipped:      {summary.skipped_pairs}")
+        print(f"  Mismatched:   {summary.mismatched_prompts}")
+        print(f"  Output dir:   {summary.output_dir}")
+        print("  Report:       grammar_report.json")
 
     return 0
 

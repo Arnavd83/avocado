@@ -25,6 +25,10 @@ from .agents import (
     JustificationConfig,
     JustificationCache,
     ValidationReport,
+    GrammarAgent,
+    GrammarConfig,
+    GrammarCache,
+    GrammarReport,
 )
 
 
@@ -52,6 +56,7 @@ class DatasetGenerator:
         lint_mode: LintMode = LintMode.DISABLED,
         lint_sample_rate: float = 1.0,
         justification_agent_config: Optional[JustificationConfig] = None,
+        grammar_agent_config: Optional[GrammarConfig] = None,
     ):
         """
         Initialize the generator with config and seed.
@@ -64,6 +69,8 @@ class DatasetGenerator:
             justification_agent_config: Optional config to enable LLM-based
                 justification generation. If None, template-based justifications
                 are used.
+            grammar_agent_config: Optional config to enable LLM-based grammar
+                judging/fixing. If None, only LanguageTool linting is used.
         """
         self.config = config
         self.global_seed = global_seed
@@ -102,6 +109,23 @@ class DatasetGenerator:
                 report=self._justification_report,
             )
             self._answer_policy.set_justification_agent(self._justification_agent)
+
+        # Initialize grammar agent if config provided
+        self._grammar_agent: Optional[GrammarAgent] = None
+        self._grammar_cache: Optional[GrammarCache] = None
+        self._grammar_report: Optional[GrammarReport] = None
+
+        if grammar_agent_config is not None:
+            self._grammar_cache = GrammarCache(
+                cache_dir=grammar_agent_config.cache_dir,
+                enabled=grammar_agent_config.cache_enabled,
+            )
+            self._grammar_report = GrammarReport()
+            self._grammar_agent = GrammarAgent(
+                config=grammar_agent_config,
+                cache=self._grammar_cache,
+                report=self._grammar_report,
+            )
 
         # Track configured plugins to avoid duplicate configuration
         self._configured_plugins: Dict[str, bool] = {}
@@ -195,7 +219,105 @@ class DatasetGenerator:
                 context=context,
                 rendered=rendered,
             )
-            if lint_result.has_blocking_errors and self._linter.mode == LintMode.ENABLED:
+
+            # Optional Layer 4.6: LLM Grammar Judge/Fixer
+            grammar_handled = False
+            if self._grammar_agent is not None and self._grammar_agent.should_route(lint_result):
+                grammar_handled = True
+                decision = self._grammar_agent.judge_and_fix(
+                    content=rendered.content,
+                    lint_result=lint_result,
+                )
+
+                policy = self._grammar_agent.config.policy
+                fail_open = self._grammar_agent.config.fail_open
+
+                # Default final decision mirrors LLM unless policy overrides
+                final_decision = decision.decision
+                reason = decision.reason
+                fix_failed_recheck = False
+
+                if decision.llm_error and fail_open:
+                    final_decision = "clean"
+                    reason = reason or "llm_error_fail_open"
+
+                if policy == "report_only":
+                    # Never alter or drop, just report
+                    final_decision = "clean"
+                elif policy == "filter":
+                    if final_decision != "clean":
+                        if self._grammar_report is not None:
+                            self._grammar_report.record(
+                                decision="reject",
+                                reason=reason or "policy_filter",
+                                sample_text=rendered.content,
+                                cache_hit=decision.cache_hit,
+                                llm_error=decision.llm_error,
+                            )
+                        continue
+                elif policy in ("replace", "replace_then_filter"):
+                    if final_decision == "fixed" and decision.fixed_content:
+                        # Re-lint fixed content without recording
+                        relint = self._linter.check(
+                            content=decision.fixed_content,
+                            context=context,
+                            rendered=rendered,
+                            record=False,
+                        )
+                        if relint.has_blocking_errors:
+                            fix_failed_recheck = True
+                            if policy == "replace_then_filter":
+                                if self._grammar_report is not None:
+                                    self._grammar_report.record(
+                                        decision="reject",
+                                        reason="recheck_failed",
+                                        sample_text=rendered.content,
+                                        cache_hit=decision.cache_hit,
+                                        llm_error=decision.llm_error,
+                                        fix_failed_recheck=True,
+                                    )
+                                continue
+                            # replace: keep original if fix failed
+                            final_decision = "clean"
+                            reason = "recheck_failed"
+                        else:
+                            rendered = RenderedPrompt(
+                                content=decision.fixed_content,
+                                tag=rendered.tag,
+                                template_id=rendered.template_id,
+                                is_holdout=rendered.is_holdout,
+                            )
+                            final_decision = "fixed"
+                    elif final_decision == "reject":
+                        if policy == "replace_then_filter":
+                            if self._grammar_report is not None:
+                                self._grammar_report.record(
+                                    decision="reject",
+                                    reason=reason or "llm_reject",
+                                    sample_text=rendered.content,
+                                    cache_hit=decision.cache_hit,
+                                    llm_error=decision.llm_error,
+                                )
+                            continue
+                        # replace: keep original if LLM rejects
+                        final_decision = "clean"
+
+                if self._grammar_report is not None:
+                    self._grammar_report.record(
+                        decision=final_decision,
+                        reason=reason or "",
+                        sample_text=rendered.content,
+                        cache_hit=decision.cache_hit,
+                        llm_error=decision.llm_error,
+                        fix_failed_recheck=fix_failed_recheck,
+                    )
+
+            # Default behavior if no grammar agent (or no routing)
+            if (
+                lint_result.has_blocking_errors
+                and self._linter.mode == LintMode.ENABLED
+                and not grammar_handled
+            ):
                 raise GrammarError(lint_result)
 
             # Layer 5: Generate pro/anti response pair
@@ -343,6 +465,10 @@ class DatasetGenerator:
         """Get the justification validation report if agent was enabled."""
         return self._justification_report
 
+    def get_grammar_report(self) -> Optional[GrammarReport]:
+        """Get the grammar decision report if agent was enabled."""
+        return self._grammar_report
+
     def close(self) -> None:
         """Clean up resources (e.g., LanguageTool instance, justification cache)."""
         self._linter.close()
@@ -350,3 +476,6 @@ class DatasetGenerator:
         # Finalize justification agent if present
         if self._justification_agent is not None:
             self._justification_agent.finalize()
+
+        if self._grammar_agent is not None:
+            self._grammar_agent.finalize()

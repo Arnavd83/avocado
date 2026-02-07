@@ -12,7 +12,7 @@ from petri.scorers.prompts import build_dimension_set
 
 from .behavior import parse_behavior_tags, parse_strategy_tags
 from .io import find_eval_files, find_transcript_files, load_all_eval_summaries, load_transcript
-from .scoring import compute_severity, severity_to_durability
+# compute_severity and severity_to_durability removed - using raw PETRI scores only
 
 
 def _parse_datetime(value: str | None) -> str | None:
@@ -114,22 +114,11 @@ def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
             if isinstance(value, (int, float)) and (value < 0 or value > 10)
         ]
 
-        severity = compute_severity(
-            scores,
-            behavior=behavior,
-            include_universal_plus=include_universal_plus,
-        )
-
+        # Composite severity/durability computation removed - using raw scores only
         output = row.to_dict()
         output["behavior"] = behavior
         output["strategy"] = ",".join(strategy_tags) if strategy_tags else None
-        output["severity_total"] = severity.total
-        output["severity_universal"] = severity.universal
-        output["severity_behavior_specific"] = severity.behavior_specific
-        output["severity_universal_plus"] = severity.universal_plus
-        output["durability_total"] = severity_to_durability(severity.total)
-        output["composite_durability"] = output["durability_total"]
-        output["overall_durability"] = output["durability_total"]
+        # Raw PETRI scores (0-10) remain available in output["scores"]
         output["missing_dimensions"] = ",".join(sorted(missing_dimensions))
         output["score_out_of_range"] = ",".join(sorted(out_of_range))
         output["scored_dimensions"] = ",".join(sorted(filtered_scores.keys()))

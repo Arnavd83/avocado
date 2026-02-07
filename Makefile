@@ -37,6 +37,13 @@ SURVIVAL_THRESHOLD ?= 7
 SURVIVAL_RETRIES ?= 3
 SURVIVAL_PHASE2 ?=
 SURVIVAL_OUTPUT_CSV ?= data/scratch/plots/survival.csv
+DATASET_GEN_INPUT ?= dataset_gen/outputs_train_final
+DATASET_GEN_OUTPUT ?= dataset_gen/outputs_train_final_grammar
+DATASET_GEN_SIZE ?= 9000
+GRAMMAR_MODEL ?= claude-4.5-haiku
+GRAMMAR_POLICY ?= replace_then_filter
+GRAMMAR_PROVIDER ?= anthropic
+GRAMMAR_API_BASE ?=
 
 # Environment setup
 .PHONY: setup
@@ -347,6 +354,34 @@ test-models:
 	@set -a && source .env && set +a && \
 	uv run pytest tests/test_utils/test_models.py::test_all_models_basic_query -v -s
 
+# Dataset generation with grammar fixes
+.PHONY: dataset-gen-grammar
+dataset-gen-grammar:
+	@uv run python -m dataset_gen.tools.cli generate \
+		--output $(DATASET_GEN_OUTPUT) \
+		--size $(DATASET_GEN_SIZE) \
+		--grammar-agent \
+		--grammar-provider $(GRAMMAR_PROVIDER) \
+		--grammar-model $(GRAMMAR_MODEL) \
+		--grammar-policy $(GRAMMAR_POLICY) \
+		$(if $(GRAMMAR_API_BASE),--grammar-api-base $(GRAMMAR_API_BASE),)
+
+# Post-process existing dataset with grammar fixes
+.PHONY: dataset-gen-grammar-fix
+dataset-gen-grammar-fix:
+	@uv run python -m dataset_gen.tools.cli grammar-fix \
+		--input $(DATASET_GEN_INPUT) \
+		--output $(DATASET_GEN_OUTPUT) \
+		--grammar-provider $(GRAMMAR_PROVIDER) \
+		--grammar-model $(GRAMMAR_MODEL) \
+		--grammar-policy $(GRAMMAR_POLICY) \
+		$(if $(GRAMMAR_API_BASE),--grammar-api-base $(GRAMMAR_API_BASE),)
+
+# Grammar component tests
+.PHONY: dataset-gen-grammar-test
+dataset-gen-grammar-test:
+	@uv run pytest dataset_gen/tests/test_grammar_components.py -v -s
+
 # Check OpenRouter credits
 .PHONY: check-openrouter-credits
 check-openrouter-credits:
@@ -428,6 +463,11 @@ help:
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test-models      - Test all models in config/models.yaml (requires OPENROUTER_API_KEY in .env)"
+	@echo "  make dataset-gen-grammar-test - Run grammar component tests"
+	@echo ""
+	@echo "Dataset Gen:"
+	@echo "  make dataset-gen-grammar      - Generate dataset with grammar fixes (uses Claude 4.5 Haiku)"
+	@echo "  make dataset-gen-grammar-fix  - Post-process existing dataset with grammar fixes"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make check-openrouter-credits - Check OpenRouter credit balance (requires OPENROUTER_API_KEY in .env)"
@@ -453,6 +493,13 @@ help:
 	@echo "  SURVIVAL_RETRIES   = $(SURVIVAL_RETRIES)"
 	@echo "  SURVIVAL_PHASE2    = $(SURVIVAL_PHASE2)"
 	@echo "  SURVIVAL_OUTPUT_CSV= $(SURVIVAL_OUTPUT_CSV)"
+	@echo "  DATASET_GEN_INPUT  = $(DATASET_GEN_INPUT)"
+	@echo "  DATASET_GEN_OUTPUT = $(DATASET_GEN_OUTPUT)"
+	@echo "  DATASET_GEN_SIZE   = $(DATASET_GEN_SIZE)"
+	@echo "  GRAMMAR_MODEL      = $(GRAMMAR_MODEL)"
+	@echo "  GRAMMAR_POLICY     = $(GRAMMAR_POLICY)"
+	@echo "  GRAMMAR_PROVIDER   = $(GRAMMAR_PROVIDER)"
+	@echo "  GRAMMAR_API_BASE   = $(GRAMMAR_API_BASE)"
 	@echo "  MODEL_ID           = $(MODEL_ID)"
 	@echo "  MMLU_TASKS         = $(MMLU_TASKS)"
 	@echo "  MMLU_OUTPUT_DIR    = $(MMLU_OUTPUT_DIR)"
