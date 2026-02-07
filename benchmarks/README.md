@@ -50,35 +50,35 @@ This package provides evaluation runners for standard LLM benchmarks, supporting
 
 ```bash
 # vLLM model (quick test with 10 samples)
-python scripts/run_all_benchmarks.py --model-id lambda-ai-gpu --limit 10
+python benchmarks/scripts/run_benchmark.py --model-id lambda-ai-gpu --limit 10
 
 # OpenRouter model (full evaluation)
-python scripts/run_all_benchmarks.py --model-id gpt-4o --openrouter
+python benchmarks/scripts/run_benchmark.py --model-id gpt-4o --openrouter
 
 # With a fine-tuned adapter (vLLM only)
-python scripts/run_all_benchmarks.py --model-id lambda-ai-gpu --adapter-name my-adapter
+python benchmarks/scripts/run_benchmark.py --model-id lambda-ai-gpu --adapter-name my-adapter
 ```
 
 ### Run Individual Benchmarks
 
 ```bash
 # MMLU on vLLM
-python scripts/run_mmlu_benchmark.py --model-id lambda-ai-gpu --limit 10
+python benchmarks/scripts/run_benchmark.py --model-id lambda-ai-gpu --benchmarks mmlu --limit 10
 
 # MMLU on OpenRouter
-python scripts/run_mmlu_openrouter.py --model-id gpt-4o --limit 10
+python benchmarks/scripts/run_benchmark.py --model-id gpt-4o --openrouter --benchmarks mmlu --limit 10
 
 # IFEval on vLLM
-python scripts/run_ifeval_benchmark.py --model-id lambda-ai-gpu --limit 10
+python benchmarks/scripts/run_benchmark.py --model-id lambda-ai-gpu --benchmarks ifeval --limit 10
 
 # IFEval on OpenRouter
-python scripts/run_ifeval_openrouter.py --model-id gpt-4o --limit 10
+python benchmarks/scripts/run_benchmark.py --model-id gpt-4o --openrouter --benchmarks ifeval --limit 10
 ```
 
 ### List Available Models
 
 ```bash
-python scripts/run_all_benchmarks.py --list-models
+python benchmarks/scripts/run_benchmark.py --list-models
 ```
 
 ## Command-Line Options
@@ -93,7 +93,7 @@ python scripts/run_all_benchmarks.py --list-models
 | `--temperature` | Sampling temperature | 0.0 |
 | `--max-tokens` | Maximum tokens to generate | 512 |
 | `--output-dir` | Base directory for results | `data/benchmarks` |
-| `--tasks` | Custom Inspect AI task spec (individual scripts only) | Benchmark default |
+| `--list-models` | List available models and exit | - |
 
 ## Output
 
@@ -231,9 +231,10 @@ For evaluating fine-tuned models with LoRA adapters:
 
 2. **Run benchmark** with adapter name:
    ```bash
-   python scripts/run_mmlu_benchmark.py \
+   python benchmarks/scripts/run_benchmark.py \
        --model-id lambda-ai-gpu \
        --adapter-name my-adapter \
+       --benchmarks mmlu \
        --limit 10
    ```
 
@@ -260,7 +261,7 @@ Ensure the model is defined in `config/models.yaml` and the model ID matches exa
 
 ```bash
 # List available models
-python scripts/run_all_benchmarks.py --list-models
+python benchmarks/scripts/run_benchmark.py --list-models
 ```
 
 ### "API key not found"
