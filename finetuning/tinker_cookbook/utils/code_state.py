@@ -8,7 +8,7 @@ from types import ModuleType
 from typing import cast
 
 
-def code_state(modules: Sequence[str | ModuleType] = ("tinker_cookbook",)) -> str:
+def code_state(modules: Sequence[str | ModuleType] = ("finetuning.tinker_cookbook",)) -> str:
     """
     Return a single diff-formatted string that captures the current code state for the
     provided Python modules. For each module, we:

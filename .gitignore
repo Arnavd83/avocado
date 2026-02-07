@@ -91,6 +91,7 @@ data/scratch/
 # Model weights (large files)
 *.safetensors
 *.bin
+models/
 
 # External packages (tracked separately or as dependencies)
 # Note: tinker-cookbook is tracked as an editable package
