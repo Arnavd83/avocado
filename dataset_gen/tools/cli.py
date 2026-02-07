@@ -7,6 +7,9 @@ statistics, and sampling operations.
 Task ID: T18
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # Load environment variables from .env file
+
 import argparse
 import json
 import sys
