@@ -19,9 +19,6 @@ The MMLU benchmark evaluates language models across 57 diverse subjects includin
 ```bash
 # Install inspect_evals (if not already installed)
 uv pip install inspect_evals
-
-# Verify setup
-python benchmarks/tests/test_mmlu_setup.py --model-id lambda-ai-gpu
 ```
 
 ### 2. Quick Test (10 samples)
@@ -321,21 +318,6 @@ Add to `.env` if missing:
 VLLM_API_KEY=your-key-here
 ```
 
-### Verification Script
-
-Run the setup test to diagnose issues:
-
-```bash
-python benchmarks/tests/test_mmlu_setup.py --model-id lambda-ai-gpu
-```
-
-This checks:
-- Required packages installed
-- Environment variables set
-- Model configuration valid
-- vLLM server accessible
-- Models loaded on server
-
 ### Debug Mode
 
 For detailed debugging:
@@ -438,7 +420,6 @@ make mmlu-benchmark MODEL_ID=lambda-ai-gpu
 ## Support
 
 For issues or questions:
-1. Check `data/benchmarks/mmlu/SETUP.md` for setup instructions
-2. Run `python benchmarks/tests/test_mmlu_setup.py` to diagnose problems
-3. Review logs in `data/benchmarks/mmlu/logs/`
-4. Check that vLLM server is accessible and healthy
+1. Run `python benchmarks/scripts/run_benchmark.py --list-models` to verify model config
+2. Review logs in `data/benchmarks/mmlu/logs/`
+3. Check that vLLM server is accessible and healthy
