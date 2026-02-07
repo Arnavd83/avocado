@@ -9,7 +9,7 @@ The module supports both vLLM-hosted models (with LoRA adapters) and
 OpenRouter-hosted models.
 """
 
-from benchmarks.base_runner import InspectEvalRunner
+from benchmarks.base_runner import InspectEvalRunner, OpenRouterRunner
 from benchmarks.vllm_adapter import VLLMInspectModel
 from benchmarks.mmlu import MMLURunner, MMLUOpenRouterRunner
 from benchmarks.ifeval import IFEvalRunner, IFEvalOpenRouterRunner
@@ -17,6 +17,7 @@ from benchmarks.ifeval import IFEvalRunner, IFEvalOpenRouterRunner
 __all__ = [
     # Base classes
     "InspectEvalRunner",
+    "OpenRouterRunner",
     "VLLMInspectModel",
     # MMLU
     "MMLURunner",

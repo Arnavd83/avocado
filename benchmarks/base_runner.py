@@ -336,3 +336,120 @@ class InspectEvalRunner:
             print("Overall Score: N/A")
         print(f"Results saved to: {filepath}")
         print("=" * 80)
+
+
+class OpenRouterRunner(InspectEvalRunner):
+    """
+    Base runner for Inspect AI benchmarks on OpenRouter-hosted models.
+
+    Subclasses should set the `default_tasks` class attribute to specify
+    the default Inspect AI task for their benchmark.
+
+    Args:
+        model_id: Model identifier from config/models.yaml
+        output_dir: Directory to store evaluation results
+        limit: Optional limit on number of samples (for testing)
+    """
+
+    default_tasks: str = ""  # Subclasses must override
+
+    def __init__(
+        self,
+        model_id: str,
+        output_dir: str,
+        limit: Optional[int],
+        benchmark_name: str,
+        file_prefix: str,
+        summary_title: str,
+        group_metadata_key: Optional[str] = None,
+        group_label: Optional[str] = None,
+        primary_metric_names: Optional[list[str]] = None,
+    ) -> None:
+        super().__init__(
+            model_id=model_id,
+            adapter_name=None,  # OpenRouter does not support adapters
+            output_dir=output_dir,
+            limit=limit,
+            benchmark_name=benchmark_name,
+            file_prefix=file_prefix,
+            summary_title=summary_title,
+            group_metadata_key=group_metadata_key,
+            group_label=group_label,
+            primary_metric_names=primary_metric_names,
+        )
+
+    async def run(
+        self,
+        tasks: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 512,
+    ) -> dict[str, Any]:
+        """Run evaluation via OpenRouter."""
+        from inspect_ai import eval_async
+        from inspect_ai.model import GenerateConfig, get_model
+
+        tasks = tasks or self.default_tasks
+        if not tasks:
+            raise ValueError(
+                "No tasks specified. Either pass tasks argument or set default_tasks."
+            )
+
+        logger.info(f"Starting {self.summary_title} evaluation...")
+        logger.info(f"Tasks: {tasks}")
+        logger.info(f"Limit: {self.limit if self.limit else 'None (full evaluation)'}")
+
+        if self.adapter_name:
+            raise ValueError("Adapters are not supported for OpenRouter evaluations.")
+
+        if self.model_config.base_url and "openrouter.ai" not in self.model_config.base_url:
+            raise ValueError(
+                "This model appears to be hosted on vLLM (non-OpenRouter base_url). "
+                "Use the vLLM runner instead."
+            )
+
+        api_key_env = (
+            self.model_config.api_key_env
+            or self.model_manager.defaults.get("api_key_env")
+            or "OPENROUTER_API_KEY"
+        )
+        api_key = os.getenv(api_key_env)
+        if not api_key:
+            raise ValueError(
+                f"API key not found in environment variable '{api_key_env}'. "
+                "Please set it in your .env file."
+            )
+
+        base_url = (
+            self.model_config.base_url
+            or self.model_manager.defaults.get("base_url")
+            or "https://openrouter.ai/api/v1"
+        )
+
+        model_name = self.model_config.model_name
+        if not model_name.startswith("openrouter/"):
+            model_name = f"openrouter/{model_name}"
+
+        model = get_model(
+            model=model_name,
+            config=GenerateConfig(
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+        logger.info("Running Inspect AI evaluation...")
+        results = await eval_async(
+            tasks=tasks,
+            model=[model],
+            limit=self.limit,
+            log_dir=str(self.output_dir / "logs"),
+            fail_on_error=False,
+        )
+
+        processed_results = self._process_results(results)
+        self._save_results(processed_results)
+
+        logger.info(f"{self.summary_title} evaluation completed!")
+        return processed_results
