@@ -6,8 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     # Install petri as an editable dependency
     "petri",
-    # Install tinker-cookbook as an editable dependency
-    "tinker-cookbook",
 
     # Shared dependencies (using petri's newer versions)
     "anthropic>=0.55.0",  # petri needs >=0.55.0 (emergent-values had 0.45.2)
@@ -62,12 +60,11 @@ dev = [
 [tool.uv.sources]
 # This tells uv to install petri from the local ./external_packages/petri directory in editable mode
 petri = { path = "external_packages/petri", editable = true }
-tinker-cookbook = { path = "external_packages/tinker-cookbook", editable = true }
 
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages
 # Note: inference_server has nested structure: inference_server/inference_server/
-packages = ["src", "inference_server"]
+packages = ["src", "inference_server", "shared", "benchmarks", "finetuning"]
 
 [build-system]
 requires = ["hatchling"]
