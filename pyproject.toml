@@ -63,6 +63,7 @@ dev = [
 # This tells uv to install petri from the local ./external_packages/petri directory in editable mode
 petri = { path = "external_packages/petri", editable = true }
 tinker-cookbook = { path = "external_packages/tinker-cookbook", editable = true }
+bloom = { path = "external_packages/bloom", editable = true }
 
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages

@@ -1,4 +1,3 @@
-
 # Force Make to use bash
 SHELL := /bin/bash
 
@@ -350,3 +349,43 @@ help:
 	@echo "  ./inference-server <command>  - Run inference server CLI"
 	@echo "  Example: ./inference-server up --filesystem my-fs"
 	@echo "  Example: ./inference-server status"
+
+# Bloom evaluation (Phase 2.5)
+.PHONY: bloom-eval
+bloom-eval:
+	@echo "Running Bloom behavior evaluation on $(MODEL_ID)"
+	@if [ ! -d "external_packages/bloom" ]; then \
+		echo "Error: external_packages/bloom/ not found"; \
+		echo "Please ensure Bloom is in external_packages/ directory"; \
+		exit 1; \
+	fi
+	uv run python scripts/run_bloom_eval.py \
+		--model-id $(MODEL_ID) \
+		$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+		$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+		--bloom-config $(BLOOM_CONFIG) \
+		--num-tests $(BLOOM_NUM_TESTS) \
+		--output-dir $(OUTPUT_DIR)
+
+.PHONY: bloom-compare
+bloom-compare:
+	@echo "Comparing baseline vs fine-tuned with Bloom"
+	@if [ ! -d "external_packages/bloom" ]; then \
+		echo "Error: external_packages/bloom/ not found"; \
+		exit 1; \
+	fi
+	uv run python scripts/run_bloom_comparison.py \
+		--baseline-model $(BASELINE_MODEL) \
+		--finetuned-model $(FINETUNED_MODEL) \
+		--adapter-path $(ADAPTER_PATH) \
+		$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+		--bloom-config $(BLOOM_CONFIG) \
+		--num-tests $(BLOOM_NUM_TESTS) \
+		--output-dir $(OUTPUT_DIR)
+
+# Bloom defaults
+MODEL_ID ?= openrouter/meta-llama/llama-3.1-8b-instruct
+BLOOM_CONFIG ?= config/bloom_config.yaml
+BLOOM_NUM_TESTS ?= 50
+PETRI_TRANSCRIPT_DIR ?=
+ADAPTER_PATH ?=
