@@ -1,3 +1,0 @@
-[submodule "vendor/bloom"]
-	path = vendor/bloom
-	url = https://github.com/safety-research/bloom.git

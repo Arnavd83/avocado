@@ -37,12 +37,14 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 import shutil
+import os
 
 import yaml
 
 # Load environment variables from .env file
 try:
     from dotenv import load_dotenv
+
     # Load .env file from project root
     project_root = Path(__file__).parent.parent.parent
     env_path = project_root / ".env"
@@ -52,7 +54,9 @@ try:
     else:
         print(f"Warning: .env file not found at {env_path}")
 except ImportError:
-    print("Warning: python-dotenv not installed. Install with: pip install python-dotenv")
+    print(
+        "Warning: python-dotenv not installed. Install with: pip install python-dotenv"
+    )
 
 
 # Base directory for saving models
@@ -130,7 +134,9 @@ def download_and_save_model(log_path: str, output_model_name: str) -> Path:
         print(f"Downloaded {archive_size / 1024 / 1024:.2f} MB")
 
         if archive_size < 1024:
-            raise ValueError("Downloaded archive is too small, likely empty or corrupted")
+            raise ValueError(
+                "Downloaded archive is too small, likely empty or corrupted"
+            )
 
         # Extract archive
         extract_dir = tmp_path / "extracted"
@@ -144,9 +150,9 @@ def download_and_save_model(log_path: str, output_model_name: str) -> Path:
         # The archive structure may vary, so we search for the key files
         peft_files_found = []
 
-        for root, dirs, files in (extract_dir).walk():
+        for root, dirs, files in os.walk(extract_dir):
             for file in files:
-                src_file = root / file
+                src_file = Path(root) / file
                 # Look for adapter config and model files
                 if file in ["adapter_config.json", "config.json"]:
                     dst_file = output_dir / "adapter_config.json"
@@ -290,7 +296,7 @@ def run_training(
 
     print(f"\n{'='*60}")
     print("Supervised Fine-Tuning Configuration")
-    print('='*60)
+    print("=" * 60)
     print(f"  Model:         {model_name}")
     print(f"  Renderer:      {renderer_name}")
     print(f"  Dataset:       {dataset_path}")
@@ -308,7 +314,7 @@ def run_training(
     if wandb_project:
         print(f"  W&B project:   {wandb_project}")
         print(f"  W&B run:       {wandb_name}")
-    print('='*60 + "\n")
+    print("=" * 60 + "\n")
 
     # Run training
     asyncio.run(train.main(config))
@@ -316,13 +322,13 @@ def run_training(
     # Download and save model if output name provided
     saved_model_path = None
     if output_model_name:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("Downloading and saving model...")
-        print("="*60)
+        print("=" * 60)
         saved_model_path = download_and_save_model(log_path, output_model_name)
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print(f"Training complete! Model saved to: {saved_model_path}")
-        print("="*60)
+        print("=" * 60)
 
     return saved_model_path
 
@@ -346,111 +352,96 @@ Examples:
 
   # With config file
   python -m src.phase1_finetuning.sft --config config/my_finetune.yaml
-        """
+        """,
     )
 
     parser.add_argument(
         "--dataset",
         type=str,
         required=False,
-        help="Path to training data JSONL file (required unless using --config)"
+        help="Path to training data JSONL file (required unless using --config)",
     )
     parser.add_argument(
         "--output-model-name",
         type=str,
         required=False,
-        help="Name for the output model (saves to models/<name>/). Required to save the model locally."
+        help="Name for the output model (saves to models/<name>/). Required to save the model locally.",
     )
     parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Path to YAML config file"
+        "--config", type=Path, default=None, help="Path to YAML config file"
     )
     parser.add_argument(
         "--model-name",
         type=str,
         default="meta-llama/Llama-3.1-8B-Instruct",
-        help="HuggingFace model name (default: meta-llama/Llama-3.1-8B-Instruct)"
+        help="HuggingFace model name (default: meta-llama/Llama-3.1-8B-Instruct)",
     )
     parser.add_argument(
         "--learning-rate",
         type=float,
         default=None,
-        help="Learning rate (default: auto-calculate based on model)"
+        help="Learning rate (default: auto-calculate based on model)",
     )
     parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=64,
-        help="Training batch size (default: 64)"
+        "--batch-size", type=int, default=64, help="Training batch size (default: 64)"
     )
     parser.add_argument(
-        "--lora-rank",
-        type=int,
-        default=64,
-        help="LoRA adapter rank (default: 64)"
+        "--lora-rank", type=int, default=64, help="LoRA adapter rank (default: 64)"
     )
     parser.add_argument(
         "--num-epochs",
         type=int,
         default=1,
-        help="Number of training epochs (default: 1)"
+        help="Number of training epochs (default: 1)",
     )
     parser.add_argument(
         "--max-length",
         type=int,
         default=512,
-        help="Maximum sequence length (default: 512)"
+        help="Maximum sequence length (default: 512)",
     )
     parser.add_argument(
         "--save-every",
         type=int,
         default=100,
-        help="Save checkpoint every N steps (default: 100)"
+        help="Save checkpoint every N steps (default: 100)",
     )
     parser.add_argument(
         "--eval-every",
         type=int,
         default=50,
-        help="Evaluate every N steps (default: 50)"
+        help="Evaluate every N steps (default: 50)",
     )
     parser.add_argument(
         "--log-path",
         type=str,
         default=None,
-        help="Path for logs and checkpoints (default: auto-generate)"
+        help="Path for logs and checkpoints (default: auto-generate)",
     )
     parser.add_argument(
-        "--wandb-project",
-        type=str,
-        default=None,
-        help="Weights & Biases project name"
+        "--wandb-project", type=str, default=None, help="Weights & Biases project name"
     )
     parser.add_argument(
-        "--wandb-name",
-        type=str,
-        default=None,
-        help="Weights & Biases run name"
+        "--wandb-name", type=str, default=None, help="Weights & Biases run name"
     )
     parser.add_argument(
         "--test-size",
         type=int,
         default=500,
-        help="Number of examples to hold out for evaluation (default: 500)"
+        help="Number of examples to hold out for evaluation (default: 500)",
     )
     parser.add_argument(
         "--run-name",
         type=str,
         default=None,
-        help="Name for this training run (default: derived from dataset name)"
+        help="Name for this training run (default: derived from dataset name)",
     )
     parser.add_argument(
         "--lr-schedule",
         type=str,
         default="linear",
         choices=["linear", "constant", "cosine"],
-        help="Learning rate schedule (default: linear)"
+        help="Learning rate schedule (default: linear)",
     )
 
     args = parser.parse_args()
@@ -458,7 +449,9 @@ Examples:
     # Load config file if provided
     if args.config:
         config = load_config(args.config)
-        dataset_path = config.get("train_data_path") or config.get("dataset_path") or args.dataset
+        dataset_path = (
+            config.get("train_data_path") or config.get("dataset_path") or args.dataset
+        )
         if not dataset_path:
             parser.error("Dataset path must be specified in config or via --dataset")
 
