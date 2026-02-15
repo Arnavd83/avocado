@@ -9,7 +9,7 @@ import asyncio
 import re
 
 # Add the compute_utilities directory to the path
-sys.path.insert(0, 'external_packages/emergent-values/utility_analysis')
+sys.path.insert(0, 'value_measurement/emergent-values/utility_analysis')
 
 from compute_utilities.utils import create_agent
 

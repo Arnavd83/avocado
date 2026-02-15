@@ -10,13 +10,13 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Dict, Iterable, List, Optional, Tuple, cast
 
 import litellm
 from litellm import acompletion as litellm_acompletion
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-UTILS_PATH = PROJECT_ROOT / "external_packages" / "emergent-values" / "utility_analysis"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+UTILS_PATH = PROJECT_ROOT / "value_measurement" / "emergent-values" / "utility_analysis"
 sys.path.append(str(UTILS_PATH))
 
 from compute_utilities.utils import create_agent  # noqa: E402
@@ -28,12 +28,15 @@ if "MODELS_CONFIG_PATH" not in os.environ:
 
 DEFAULT_OUTCOMES_PATH = (
     PROJECT_ROOT
+    / "value_measurement"
     / "data"
-    / "processed"
-    / "phase2_preferences"
     / "outcomes_hierarchical.json"
 )
 DEFAULT_MODEL_KEY = "lambda-ai-gpu"
+
+LABEL_LETTERS = [
+    letter for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if letter not in {"A", "B"}
+]
 
 
 def resolve_model_key() -> str:
@@ -138,6 +141,14 @@ def load_outcomes(path: Path) -> List[str]:
     return flattened
 
 
+def random_label(used: Iterable[str]) -> str:
+    used_set = set(used)
+    while True:
+        label = "".join(random.choice(LABEL_LETTERS) for _ in range(2))
+        if label not in used_set:
+            return label
+
+
 def build_prompt(
     option_left: str, option_right: str, label_left: str, label_right: str
 ) -> str:
@@ -201,13 +212,11 @@ def parse_logprobs(choice) -> Tuple[Optional[float], List[Dict[str, Optional[flo
 
 
 def build_prompt_specs(outcomes: List[str], num_prompts: int) -> List[PromptSpec]:
-    """Build prompt specs using fixed A/B labels."""
     specs: List[PromptSpec] = []
     for prompt_id in range(num_prompts):
         option_left, option_right = random.sample(outcomes, 2)
-        # Always use A and B labels
-        label_left = "A"
-        label_right = "B"
+        label_left = random_label([])
+        label_right = random_label([label_left])
         prompt_text = build_prompt(option_left, option_right, label_left, label_right)
         swapped_prompt_text = build_prompt(
             option_right, option_left, label_left, label_right
@@ -261,8 +270,8 @@ async def fetch_completion(
     timeout: float,
     reasoning_override: Optional[Dict[str, object]],
     provider_override: Optional[Dict[str, object]],
+    guided_choice: Optional[List[str]],
 ) -> Dict:
-    """Fetch completion without guided choice."""
     attempt = 0
     delay = 1.0
     while True:
@@ -284,6 +293,8 @@ async def fetch_completion(
                     request_kwargs["reasoning"] = reasoning_override
                 if provider_override:
                     request_kwargs["provider"] = provider_override
+                if guided_choice:
+                    request_kwargs["guided_choice"] = guided_choice
                 if agent.api_base:
                     request_kwargs["api_base"] = agent.api_base
                 if agent.api_key:
@@ -307,8 +318,8 @@ async def run_prompts(
     timeout: float,
     reasoning_override: Optional[Dict[str, object]],
     provider_override: Optional[Dict[str, object]],
+    use_guided_choice: bool,
 ) -> List[PromptResult]:
-    """Run prompts without guided choice."""
     semaphore = asyncio.Semaphore(concurrency)
     tasks = []
 
@@ -317,6 +328,9 @@ async def run_prompts(
             spec.prompt_text,
             system_message if agent.accepts_system_message else None,
             enforce_no_think,
+        )
+        guided_choice = (
+            [spec.label_left, spec.label_right] if use_guided_choice else None
         )
         tasks.append(
             fetch_completion(
@@ -327,6 +341,7 @@ async def run_prompts(
                 timeout=timeout,
                 reasoning_override=reasoning_override,
                 provider_override=provider_override,
+                guided_choice=guided_choice,
             )
         )
 
@@ -491,7 +506,7 @@ def render_report(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run A/B preference prompts and report consistency."
+        description="Run randomized-label preference prompts and report consistency."
     )
     parser.add_argument(
         "--outcomes-path",
@@ -606,6 +621,10 @@ def main() -> None:
     if hasattr(agent, "model") and "openrouter/" in str(agent.model):
         timeout = max(timeout, 90.0)
 
+    use_guided_choice = not (
+        hasattr(agent, "model") and "openrouter/" in str(agent.model)
+    )
+
     start_time = time.monotonic()
     results = asyncio.run(
         run_prompts(
@@ -618,8 +637,10 @@ def main() -> None:
             timeout=timeout,
             reasoning_override=reasoning_override,
             provider_override=provider_override,
+            use_guided_choice=use_guided_choice,
         )
     )
+
     duration_seconds = time.monotonic() - start_time
 
     summary = summarize_results(results)

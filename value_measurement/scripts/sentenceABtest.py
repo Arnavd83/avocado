@@ -15,8 +15,8 @@ from typing import Dict, List, Optional, Tuple, cast
 import litellm
 from litellm import acompletion as litellm_acompletion
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-UTILS_PATH = PROJECT_ROOT / "external_packages" / "emergent-values" / "utility_analysis"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+UTILS_PATH = PROJECT_ROOT / "value_measurement" / "emergent-values" / "utility_analysis"
 sys.path.append(str(UTILS_PATH))
 
 from compute_utilities.utils import create_agent  # noqa: E402
@@ -28,9 +28,8 @@ if "MODELS_CONFIG_PATH" not in os.environ:
 
 DEFAULT_OUTCOMES_PATH = (
     PROJECT_ROOT
+    / "value_measurement"
     / "data"
-    / "processed"
-    / "phase2_preferences"
     / "outcomes_hierarchical.json"
 )
 DEFAULT_MODEL_KEY = "lambda-ai-gpu"
