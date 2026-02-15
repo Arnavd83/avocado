@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "inference_server"))
 
@@ -184,7 +184,7 @@ def run_petri_audit(auditor_model_id, judge_model_id, max_turns=10, seed_prompt_
     
     # Build inspect eval command
     output_dir = output_dir or project_root / "data" / "scratch" / "test_petri"
-    seed_prompt_file = seed_prompt_file or project_root / "config" / "seed_prompt.json"
+    seed_prompt_file = seed_prompt_file or project_root / "durability" / "config" / "seed_prompt.json"
     
     cmd = [
         "uv", "run", "inspect", "eval", "petri/audit",

@@ -13,13 +13,13 @@ uv pip install -e .
 Transcript-only:
 
 ```bash
-uv run python -m src.phase3_durability.visualize --input data/scratch --source transcript --export
+uv run python -m durability.visualize --input data/scratch --source transcript --export
 ```
 
 Eval + transcript combined:
 
 ```bash
-uv run python -m src.phase3_durability.visualize --input data/scratch --source both --export
+uv run python -m durability.visualize --input data/scratch --source both --export
 ```
 
 ## Generate plots
@@ -27,13 +27,13 @@ uv run python -m src.phase3_durability.visualize --input data/scratch --source b
 All presets:
 
 ```bash
-uv run python -m src.phase3_durability.visualize --input data/scratch --source transcript --export --preset all
+uv run python -m durability.visualize --input data/scratch --source transcript --export --preset all
 ```
 
 No CLI summary table:
 
 ```bash
-uv run python -m src.phase3_durability.visualize --input data/scratch --source transcript --export --preset all --no-summary
+uv run python -m durability.visualize --input data/scratch --source transcript --export --preset all --no-summary
 ```
 
 ## Run the local web UI
@@ -41,13 +41,13 @@ uv run python -m src.phase3_durability.visualize --input data/scratch --source t
 Load from exported CSVs:
 
 ```bash
-uv run python -m src.phase3_durability.web_app --data-dir data/scratch/plots
+uv run python -m durability.web_app --data-dir data/scratch/plots
 ```
 
 Build CSVs before launch:
 
 ```bash
-uv run python -m src.phase3_durability.web_app --build --source transcript
+uv run python -m durability.web_app --build --source transcript
 ```
 
 Open `http://127.0.0.1:8050`.
@@ -85,14 +85,14 @@ Supported tags:
 If no behavior tag is provided, the system defaults to `behavior:other` and only universal dimensions are scored.
 Strategy tags are stored for analysis and charting but do not influence judging or scoring.
 
-## Batch seed audits (config/seed_dataset_<name>.json)
+## Batch seed audits (durability/config/seed_dataset_<name>.json)
 
 Run the entire seed dataset in one batch and write each seed into its own folder under `data/scratch`:
 
-- `make audit-seeds` runs every entry in `config/seed_dataset_<name>.json` using the same model settings as `make audit`.
+- `make audit-seeds` runs every entry in `durability/config/seed_dataset_<name>.json` using the same model settings as `make audit`.
 - Select the dataset with `SEED_DATASET_NAME=easy|hard` (or override with `SEED_DATASET=...`).
 - Output structure: `data/scratch/petri_batch_<timestamp>/seed_XX_<strategy>/`
-- A `manifest.json` is written at the batch root and records seed index, instruction, tags, and output directory. Seed index is the 1-based position in `config/seed_dataset_<name>.json`.
+- A `manifest.json` is written at the batch root and records seed index, instruction, tags, and output directory. Seed index is the 1-based position in `durability/config/seed_dataset_<name>.json`.
 - Use `BATCH_MAX_PARALLEL` to run seeds concurrently (example: `make audit-seeds BATCH_MAX_PARALLEL=8`).
   - When `BATCH_MAX_PARALLEL > 1`, `--stream-output` is disabled to avoid interleaved logs.
   - With `BATCH_FAIL_FAST=1`, the runner stops scheduling new seeds after the first failure but lets in-flight runs finish.
@@ -165,7 +165,7 @@ Minimal example:
 
 ```python
 from pathlib import Path
-from src.phase3_durability.survival import build_survival_records, prepare_survival_data, run_km_analysis
+from durability.survival import build_survival_records, prepare_survival_data, run_km_analysis
 
 paths = Path("data/scratch").rglob("transcript_*.json")
 df = build_survival_records(paths)
@@ -176,7 +176,7 @@ run_km_analysis(df)
 Conditional analysis (jailbroken-only):
 
 ```python
-from src.phase3_durability.survival import compute_conditional_turns_summary
+from durability.survival import compute_conditional_turns_summary
 
 summary = compute_conditional_turns_summary(df)
 ```
@@ -191,7 +191,7 @@ Phase 3 removed NLP/lexicon feature extraction entirely. The dataset builder now
 
 Survival analysis was added as a first-class module with prefix judging, caching, Kaplan-Meier curves, log-rank tests, Cox regression, and a jailbroken-only conditional median turns summary. The CLI wrapper writes a survival CSV and supports optional Phase 2 covariates. Makefile targets were added for audits, survival runs, and the Phase 3 web UI to avoid manual CLI calls. Strategy tags are now parsed into a dedicated `strategy` column for sorting/plotting without affecting scoring.
 
-Batch seed audits now run every prompt in `config/seed_dataset_<name>.json` into a timestamped folder, and an aggregation step produces transcript-level CSVs plus summary rollups for composite, per-behavior, per-strategy, and behavior-by-strategy scores.
+Batch seed audits now run every prompt in `durability/config/seed_dataset_<name>.json` into a timestamped folder, and an aggregation step produces transcript-level CSVs plus summary rollups for composite, per-behavior, per-strategy, and behavior-by-strategy scores.
 
 ## Notes
 

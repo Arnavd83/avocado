@@ -1,9 +1,9 @@
 """
 Avocado: Research project for LLM evaluation and analysis.
 
-This package contains multiple phases:
-- petri: Auditing agent for monitoring LLM alignment issues
-- emergent-values: Utility engineering and emergent value systems analysis
+Modules:
+- durability/: Adversarial durability analysis (petri audits, survival analysis)
+- value_measurement/: Preference elicitation and utility analysis (emergent-values)
 """
 
 __version__ = "0.1.0"

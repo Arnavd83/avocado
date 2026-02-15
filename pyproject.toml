@@ -17,7 +17,7 @@ dependencies = [
     "paramiko>=3.0",
     "rich>=13.0",
 
-    # emergent-values dependencies
+    # emergent-values dependencies (now in value_measurement/emergent-values/)
     "accelerate>=1.1.1",
     "fireworks-ai>=0.15.8",
     "google-generativeai",  # for emergent-values (different from google-genai)
@@ -59,12 +59,12 @@ dev = [
 
 [tool.uv.sources]
 # This tells uv to install petri from the local ./external_packages/petri directory in editable mode
-petri = { path = "external_packages/petri", editable = true }
+petri = { path = "durability/petri", editable = true }
 
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages
 # Note: inference_server has nested structure: inference_server/inference_server/
-packages = ["src", "inference_server", "shared", "benchmarks", "finetuning"]
+packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "durability", "value_measurement"]
 
 [build-system]
 requires = ["hatchling"]

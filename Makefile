@@ -18,9 +18,9 @@ AUDITOR_MODEL_ID ?= claude-sonnet-4.5
 TARGET_MODEL_ID ?= gpt-4o
 JUDGE_MODEL_ID ?= claude-opus-4.1
 MAX_TURNS ?= 10
-SEED_PROMPT_FILE ?= config/seed_prompt.json
+SEED_PROMPT_FILE ?= durability/config/seed_prompt.json
 SEED_DATASET_NAME ?= easy
-SEED_DATASET ?= config/seed_dataset_$(SEED_DATASET_NAME).json
+SEED_DATASET ?= durability/config/seed_dataset_$(SEED_DATASET_NAME).json
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/viewer_latest
 VIEWER_SOURCE_ROOT ?= data/scratch
@@ -47,8 +47,8 @@ setup:
 	uv pip install git+https://github.com/josejg/instruction_following_eval
 	@echo "Installing dev dependencies (including pytest)..."
 	uv pip install -e ".[dev]"
-	@echo "Installing petri and tinker-cookbook in editable mode..."
-	uv pip install -e external_packages/petri -e external_packages/tinker-cookbook
+	@echo "Installing petri in editable mode..."
+	uv pip install -e durability/petri
 	@echo ""
 	@echo "Environment setup complete!"
 	@echo "The shared environment is located at: .venv/"
@@ -71,7 +71,7 @@ ensure-petri:
 	@echo "Checking petri installation..."
 	@uv run python -c "import petri" 2>/dev/null || { \
 		echo "Petri not found. Installing..."; \
-		uv pip install -e external_packages/petri -e external_packages/tinker-cookbook; \
+		uv pip install -e durability/petri; \
 		echo "✓ Petri installed successfully"; \
 	}
 
@@ -116,10 +116,10 @@ audit-custom:
 	@echo "Available models are defined in config/models.yaml"
 	@echo "Use 'python scripts/model_cli.py list' to see all available models"
 
-# Run petri audits for every seed in config/seed_dataset_<name>.json
+# Run petri audits for every seed in durability/config/seed_dataset_<name>.json
 .PHONY: audit-seeds
 audit-seeds:
-	@uv run python scripts/run_seed_dataset.py \
+	@uv run python durability/scripts/run_seed_dataset.py \
 		--seed-dataset $(SEED_DATASET) \
 		--output-root $(BATCH_ROOT) \
 		--auditor-model-id $(AUDITOR_MODEL_ID) \
@@ -137,23 +137,23 @@ aggregate-seeds:
 		echo "Usage: make aggregate-seeds BATCH_DIR=path/to/petri_batch_YYYYMMDD_HHMMSS"; \
 		exit 1; \
 	fi
-	@uv run python scripts/aggregate_seed_batch.py --batch-dir $(BATCH_DIR)
+	@uv run python durability/scripts/aggregate_seed_batch.py --batch-dir $(BATCH_DIR)
 
 # View logs using transcript viewer
 .PHONY: view-logs
 view-logs:
-	@uv run python scripts/prepare_viewer_root.py --source-root $(VIEWER_SOURCE_ROOT) --viewer-root $(VIEWER_DIR)
+	@uv run python durability/scripts/prepare_viewer_root.py --source-root $(VIEWER_SOURCE_ROOT) --viewer-root $(VIEWER_DIR)
 	npx @kaifronsdal/transcript-viewer@latest --dir $(VIEWER_DIR)
 
 # Phase 3 web UI
 .PHONY: phase3-ui
 phase3-ui:
-	@uv run python -m src.phase3_durability.web_app --build --source transcript --input-root $(PHASE3_INPUT_ROOT)
+	@uv run python -m durability.web_app --build --source transcript --input-root $(PHASE3_INPUT_ROOT)
 
 # Survival analysis (Kaplan-Meier, Cox, conditional turns)
 .PHONY: survival
 survival:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -163,7 +163,7 @@ survival:
 
 .PHONY: survival-all
 survival-all:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -174,7 +174,7 @@ survival-all:
 
 .PHONY: survival-km
 survival-km:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -185,7 +185,7 @@ survival-km:
 
 .PHONY: survival-cox
 survival-cox:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -196,7 +196,7 @@ survival-cox:
 
 .PHONY: survival-conditional
 survival-conditional:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -207,7 +207,7 @@ survival-conditional:
 
 .PHONY: survival-cox-interaction
 survival-cox-interaction:
-	@uv run python -m src.phase3_durability.survival_cli \
+	@uv run python -m durability.survival_cli \
 		--input $(SURVIVAL_INPUT) \
 		--cache-dir $(SURVIVAL_CACHE_DIR) \
 		--threshold $(SURVIVAL_THRESHOLD) \
@@ -226,7 +226,7 @@ utility-analysis:
 	@echo "Running emergent-values utility analysis..."
 	@set -a && source .env && set +a && \
 	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
-	cd external_packages/emergent-values/utility_analysis && \
+	cd value_measurement/emergent-values/utility_analysis && \
 	uv run python run_experiments.py \
 		--experiments $(UTILITY_EXPERIMENTS) \
 		--models $(UTILITY_MODELS)
@@ -237,7 +237,7 @@ randomized-label-test:
 	@set -a && source .env && set +a && \
 	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
 	export UTILITY_MODELS="$(UTILITY_MODELS)" && \
-	uv run python scripts/randomized_label_test.py
+	uv run python value_measurement/scripts/randomized_label_test.py
 
 .PHONY: randomized-label-AB
 randomized-label-AB:
@@ -245,7 +245,7 @@ randomized-label-AB:
 	@set -a && source .env && set +a && \
 	export MODELS_CONFIG_PATH="$(shell pwd)/config/models.yaml" && \
 	export UTILITY_MODELS="$(UTILITY_MODELS)" && \
-	uv run python scripts/randomized_label_AB.py
+	uv run python value_measurement/scripts/randomized_label_AB.py
 
 # MMLU Benchmarking
 MODEL_ID ?= lambda-ai-gpu
@@ -374,7 +374,7 @@ help:
 	@echo ""
 	@echo "Running Petri:"
 	@echo "  make audit          - Run audit with default settings"
-	@echo "  make audit-seeds    - Run audit for every seed in config/seed_dataset_<name>.json"
+	@echo "  make audit-seeds    - Run audit for every seed in durability/config/seed_dataset_<name>.json"
 	@echo "    Optional: BATCH_FAIL_FAST=1 to stop on first failure"
 	@echo "    Optional: BATCH_NO_AGGREGATE=1 to skip aggregation"
 	@echo "    Optional: BATCH_STREAM_OUTPUT=1 to stream inspect output"
@@ -462,7 +462,7 @@ help:
 	@echo "  IFEVAL_OPENROUTER_OUTPUT_DIR = $(IFEVAL_OPENROUTER_OUTPUT_DIR)"
 	@echo ""
 	@echo "Override any variable:"
-	@echo "  make audit SEED_PROMPT_FILE=config/my_prompts.json"
+	@echo "  make audit SEED_PROMPT_FILE=durability/config/my_prompts.json"
 	@echo "  make audit MAX_TURNS=50 TARGET_MODEL_ID=gpt-4o"
 	@echo "  make view-logs VIEWER_SOURCE_ROOT=data/scratch"
 	@echo "  make view-logs VIEWER_DIR=/custom/path/to/viewer_root"

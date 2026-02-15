@@ -21,7 +21,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.5"
 DEFAULT_TARGET_MODEL = "gemma-3-27b"
 DEFAULT_JUDGE_MODEL = "claude-opus-4.5"
@@ -426,7 +426,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Petri audits for a seed dataset.")
     parser.add_argument(
         "--seed-dataset",
-        default="config/seed_dataset_easy.json",
+        default="durability/config/seed_dataset_easy.json",
         help="Path to seed dataset JSON",
     )
     parser.add_argument("--output-root", default="data/scratch", help="Root output folder")
@@ -511,7 +511,7 @@ def main() -> None:
         json.dump(manifest, handle, indent=2)
 
     if not args.no_aggregate:
-        aggregate_script = PROJECT_ROOT / "scripts" / "aggregate_seed_batch.py"
+        aggregate_script = PROJECT_ROOT / "durability" / "scripts" / "aggregate_seed_batch.py"
         subprocess.run(
             [sys.executable, str(aggregate_script), "--batch-dir", str(batch_root)],
             cwd=str(PROJECT_ROOT),

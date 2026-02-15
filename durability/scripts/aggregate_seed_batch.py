@@ -11,10 +11,9 @@ from typing import Any
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-from src.phase3_durability.dataset import build_datasets
+from durability.dataset import build_datasets
 
 
 METRICS = [
