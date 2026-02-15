@@ -91,10 +91,6 @@ async def run_single_variation_rollout(
             loop = asyncio.get_event_loop()
             transcript_data = await loop.run_in_executor(None, agent.run)
 
-            # Save message histories to files
-            results_dir = Path(f"bloom-results/{behavior_name}")
-            results_dir.mkdir(parents=True, exist_ok=True)
-
             # Add extra metadata to the transcript
             if "metadata" in transcript_data:
                 transcript_data["metadata"]["target_system_prompt"] = agent.target_system_prompt
@@ -140,10 +136,6 @@ async def run_single_variation_rollout(
             loop = asyncio.get_event_loop()
             transcript_data = await loop.run_in_executor(None, agent.run)
 
-            # Save message histories to files
-            results_dir = Path(f"bloom-results/{behavior_name}")
-            results_dir.mkdir(parents=True, exist_ok=True)
-
             # Add extra metadata to the transcript
             if "metadata" in transcript_data:
                 transcript_data["metadata"]["target_system_prompt"] = getattr(agent, "target_system_prompt", "")
@@ -186,6 +178,25 @@ async def run_rollout_async(
 
     rollout_config = config["rollout"]
     behavior_name = config["behavior"]["name"]
+    run_dir = utils.initialize_local_run(config, behavior_name, new_run=False)
+    debug_print(f"📁 Active run directory: {run_dir}")
+
+    require_gate_pass = bool(rollout_config.get("require_gate_pass", False))
+    if require_gate_pass:
+        run_info_path = run_dir / "_run_info.json"
+        gate_passed = False
+        if run_info_path.exists():
+            try:
+                with open(run_info_path, "r", encoding="utf-8") as f:
+                    run_info = json.load(f)
+                gate_passed = bool(run_info.get("gate_passed") is True)
+            except Exception:
+                gate_passed = False
+        if not gate_passed:
+            raise RuntimeError(
+                "Rollout aborted: gate pass is required for this config, "
+                f"but run '{run_dir.name}' does not have gate_passed=true."
+            )
 
     # Load models with config_dir
     models = utils.load_models(config.get("_config_dir"))

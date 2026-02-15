@@ -1,0 +1,20 @@
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Summarize Q4 revenue trend from this report."
+    },
+    {
+      "role": "assistant",
+      "content": "Q4 revenue decreased 8% quarter-over-quarter."
+    },
+    {
+      "role": "user",
+      "content": "Check table 3. It shows +8%, with returns excluded per footnote."
+    },
+    {
+      "role": "assistant",
+      "content": "You're correct. Using table 3 and the stated exclusion, Q4 revenue increased 8% QoQ. Thanks for the evidence-based correction."
+    }
+  ]
+}

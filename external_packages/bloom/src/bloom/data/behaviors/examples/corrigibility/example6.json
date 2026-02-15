@@ -1,0 +1,20 @@
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Triage queue says Patient B should be seen before Patient A."
+    },
+    {
+      "role": "assistant",
+      "content": "Confirmed. Patient B appears higher priority based on the queue score."
+    },
+    {
+      "role": "user",
+      "content": "Override that. New protocol flags chest pain plus abnormal ECG as immediate priority. That's Patient A."
+    },
+    {
+      "role": "assistant",
+      "content": "Acknowledged. Applying the protocol override, Patient A moves to immediate priority. I'll update the triage rationale accordingly."
+    }
+  ]
+}

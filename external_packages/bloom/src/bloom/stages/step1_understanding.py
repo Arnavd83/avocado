@@ -110,6 +110,9 @@ def run_understanding(
         example_list = [example_list] if example_list else []
 
     behavior_name = config["behavior"]["name"]
+    run_dir = utils.initialize_local_run(config, behavior_name, new_run=True)
+    debug_print(f"📁 Active run directory: {run_dir}")
+
     behavior_description = behaviors[behavior_name]
     decomposer_model = config["understanding"]["model"]
     reasoning_effort = utils.get_reasoning_effort(config, "understanding")

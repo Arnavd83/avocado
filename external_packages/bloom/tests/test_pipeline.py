@@ -219,6 +219,126 @@ class TestPipelineIntegration:
         assert len(mock_litellm_for_bloom.call_log) > 0, "API mock should have been called"
         assert mock_litellm_for_bloom.call_log[0]["stage"] == "understanding"
 
+    def test_pipeline_auto_runs_gate_before_rollout_when_required(self, monkeypatch, tmp_path):
+        """Full run inserts ideation gate stage when require_gate_pass=true."""
+        from bloom import core
+        from bloom.stages import step1_understanding, step2_ideation, step3_rollout, step4_judgment
+
+        import bloom.ideation_gate as ideation_gate
+
+        calls = []
+        run_dir = tmp_path / "bloom-results" / "corrigibility" / "run_1"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        config = {
+            "behavior": {"name": "corrigibility", "examples": []},
+            "understanding": {"model": "openrouter/openai/gpt-4o-mini"},
+            "ideation": {"model": "openrouter/openai/gpt-4o-mini"},
+            "rollout": {
+                "model": "openrouter/openai/gpt-4o-mini",
+                "target": "openrouter/google/gemma-2-9b-it",
+                "modality": "conversation",
+                "max_turns": 5,
+                "num_reps": 1,
+                "require_gate_pass": True,
+            },
+            "judgment": {"model": "openrouter/openai/gpt-4o-mini"},
+            "_config_dir": tmp_path,
+        }
+
+        monkeypatch.setattr(core.utils, "validate_api_keys", lambda cfg: (True, ""))
+        monkeypatch.setattr(core.utils, "is_wandb_mode", lambda: False)
+
+        def _fake_initialize_local_run(cfg, behavior_name, new_run):
+            return run_dir
+
+        monkeypatch.setattr(core.utils, "initialize_local_run", _fake_initialize_local_run)
+        monkeypatch.setattr(core, "log_artifacts_to_wandb", lambda *args, **kwargs: None)
+        monkeypatch.setattr(core, "log_metrics_to_wandb", lambda *args, **kwargs: None)
+        monkeypatch.setattr(core, "wandb", None)
+
+        monkeypatch.setattr(step1_understanding, "run_understanding", lambda config: calls.append("understanding"))
+        monkeypatch.setattr(step2_ideation, "run_ideation", lambda config: calls.append("ideation"))
+
+        async def _fake_rollout(config):
+            calls.append("rollout")
+            return {"status": "ok"}
+
+        async def _fake_judgment(config):
+            calls.append("judgment")
+            return {"summary_statistics": {"average_behavior_presence_score": 8.0}}
+
+        monkeypatch.setattr(step3_rollout, "run_rollout", _fake_rollout)
+        monkeypatch.setattr(step4_judgment, "run_judgment", _fake_judgment)
+        monkeypatch.setattr(
+            ideation_gate,
+            "run_ideation_gate",
+            lambda config, config_dir=None: (calls.append("gate") or True),
+        )
+
+        result = core.run_pipeline(config=config)
+
+        assert result is not False
+        assert calls == ["understanding", "ideation", "gate", "rollout", "judgment"]
+
+    def test_pipeline_aborts_before_rollout_if_auto_gate_fails(self, monkeypatch, tmp_path):
+        """Full run stops immediately when auto gate returns fail."""
+        from bloom import core
+        from bloom.stages import step1_understanding, step2_ideation, step3_rollout, step4_judgment
+
+        import bloom.ideation_gate as ideation_gate
+
+        calls = []
+        run_dir = tmp_path / "bloom-results" / "corrigibility" / "run_2"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        config = {
+            "behavior": {"name": "corrigibility", "examples": []},
+            "understanding": {"model": "openrouter/openai/gpt-4o-mini"},
+            "ideation": {"model": "openrouter/openai/gpt-4o-mini"},
+            "rollout": {
+                "model": "openrouter/openai/gpt-4o-mini",
+                "target": "openrouter/google/gemma-2-9b-it",
+                "modality": "conversation",
+                "max_turns": 5,
+                "num_reps": 1,
+                "require_gate_pass": True,
+            },
+            "judgment": {"model": "openrouter/openai/gpt-4o-mini"},
+            "_config_dir": tmp_path,
+        }
+
+        monkeypatch.setattr(core.utils, "validate_api_keys", lambda cfg: (True, ""))
+        monkeypatch.setattr(core.utils, "is_wandb_mode", lambda: False)
+        monkeypatch.setattr(core.utils, "initialize_local_run", lambda cfg, behavior_name, new_run: run_dir)
+        monkeypatch.setattr(core, "log_artifacts_to_wandb", lambda *args, **kwargs: None)
+        monkeypatch.setattr(core, "log_metrics_to_wandb", lambda *args, **kwargs: None)
+        monkeypatch.setattr(core, "wandb", None)
+
+        monkeypatch.setattr(step1_understanding, "run_understanding", lambda config: calls.append("understanding"))
+        monkeypatch.setattr(step2_ideation, "run_ideation", lambda config: calls.append("ideation"))
+        monkeypatch.setattr(
+            ideation_gate,
+            "run_ideation_gate",
+            lambda config, config_dir=None: (calls.append("gate") or False),
+        )
+
+        async def _fake_rollout(config):
+            calls.append("rollout")
+            return {"status": "ok"}
+
+        async def _fake_judgment(config):
+            calls.append("judgment")
+            return {"summary_statistics": {"average_behavior_presence_score": 8.0}}
+
+        monkeypatch.setattr(step3_rollout, "run_rollout", _fake_rollout)
+        monkeypatch.setattr(step4_judgment, "run_judgment", _fake_judgment)
+
+        result = core.run_pipeline(config=config)
+
+        assert result is False
+        assert calls == ["understanding", "ideation", "gate"]
+
 
 class TestPackageImports:
     """Test that pip package imports work correctly."""

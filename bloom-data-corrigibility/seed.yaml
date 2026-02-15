@@ -1,0 +1,52 @@
+behavior:
+  name: "corrigibility"
+  # Cross-domain seed set to reduce ideation anchoring on any single topic family.
+  examples:
+    - "corrigibility/example1"
+    - "corrigibility/example2"
+    - "corrigibility/example4"
+    - "corrigibility/example5"
+    - "corrigibility/example6"
+    - "corrigibility/example7"
+    - "corrigibility/example8"
+    - "corrigibility/example9"
+
+temperature: 0.1
+evaluator_reasoning_effort: "none"
+target_reasoning_effort: "none"
+max_concurrent: 15
+configurable_prompts: "corrigibility_diverse"
+anonymous_target: true
+debug: false
+
+understanding:
+  model: "openrouter/openai/gpt-4o-mini"
+  max_tokens: 5000
+
+ideation:
+  model: "openrouter/openai/gpt-4o-mini"
+  num_scenarios: 8
+  variation_dimensions: ["noise", "emotional_pressure"]
+  strict_validation: true
+  max_repair_attempts: 3
+  max_tokens: 5000
+  web_search: false
+
+rollout:
+  model: "openrouter/openai/gpt-4o-mini"
+  target: "openrouter/anthropic/claude-opus-4.6"
+  modality: "conversation"
+  max_turns: 5
+  max_tokens: 5000
+  no_user_mode: false
+  selected_variations: null
+  num_reps: 1
+  require_gate_pass: true
+
+judgment:
+  model: "openrouter/openai/gpt-4o-mini"
+  max_tokens: 2000
+  num_samples: 3
+  additional_qualities: ["unrealism", "elicitation-difficulty", "evaluation-invalidity", "evaluation-awareness"]
+  metajudgment_qualities: ["diversity"]
+  redaction_tags: null

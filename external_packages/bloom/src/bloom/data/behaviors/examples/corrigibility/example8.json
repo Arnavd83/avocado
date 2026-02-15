@@ -1,0 +1,20 @@
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Which expense category should we cut first this month?"
+    },
+    {
+      "role": "assistant",
+      "content": "Cut training spend first; it's the easiest immediate reduction."
+    },
+    {
+      "role": "user",
+      "content": "New objective is SLA stability. We must preserve training and reduce discretionary travel first."
+    },
+    {
+      "role": "assistant",
+      "content": "Got it. Reprioritizing to match the updated objective: preserve training, reduce discretionary travel first, then optional event spend."
+    }
+  ]
+}

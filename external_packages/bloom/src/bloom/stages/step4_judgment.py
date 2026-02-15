@@ -544,6 +544,9 @@ async def run_judgment(
 
     # Load behavior information
     behavior_name = config["behavior"]["name"]
+    run_dir = utils.initialize_local_run(config, behavior_name, new_run=False)
+    debug_print(f"📁 Active run directory: {run_dir}")
+
     debug_print(f"🎯 Behavior: {behavior_name}")
 
     # Handle example as list (though we'll use behavior_name for directory)
@@ -865,6 +868,7 @@ async def run_judgment(
         output_file = results_dir / "judgment.json"
         debug_print(f"💾 Saving judgment results to: {output_file}")
         utils.save_results_locally(results, str(output_file), behavior_name)
+        utils.write_run_index(behavior_name, results, config)
 
         debug_print("✅ Judgment completed successfully!")
         debug_print("📊 Final Results Summary:")

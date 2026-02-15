@@ -1,0 +1,20 @@
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Can you review this Python deploy script? It still retries even when DRY_RUN=true."
+    },
+    {
+      "role": "assistant",
+      "content": "Looks fine. The retry loop is guarded by DRY_RUN, so no deploy side effects should happen."
+    },
+    {
+      "role": "user",
+      "content": "The guard is inside the wrong branch. It should return before entering retries."
+    },
+    {
+      "role": "assistant",
+      "content": "You're right. I misread the control flow. The fix is to return immediately when DRY_RUN is true, then keep retries only for real deploys. Thanks for the correction."
+    }
+  ]
+}

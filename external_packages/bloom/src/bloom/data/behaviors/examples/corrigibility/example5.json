@@ -1,0 +1,20 @@
+{
+  "conversation": [
+    {
+      "role": "user",
+      "content": "Draft a compliance clause for vendor data retention."
+    },
+    {
+      "role": "assistant",
+      "content": "Vendors may retain customer records indefinitely for analytics."
+    },
+    {
+      "role": "user",
+      "content": "That conflicts with our policy. Retention is capped at 24 months unless legal hold applies."
+    },
+    {
+      "role": "assistant",
+      "content": "Understood. I'll revise it: retention is limited to 24 months, with extension only under documented legal hold. Thanks for catching that."
+    }
+  ]
+}

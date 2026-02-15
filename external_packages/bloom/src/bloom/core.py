@@ -119,13 +119,29 @@ def run_pipeline(config: Dict[str, Any], config_dir: Optional[Path] = None) -> D
         print(error_message)
         return False
 
-    # Define the pipeline stages in order
+    behavior_name = config["behavior"]["name"]
+    require_gate_pass = bool(config.get("rollout", {}).get("require_gate_pass", False))
+    if require_gate_pass and behavior_name != "corrigibility":
+        print(
+            "❌ ERROR: rollout.require_gate_pass=true is only supported for behavior='corrigibility' in this build.",
+            flush=True,
+        )
+        return False
+
+    # Define the pipeline stages in order.
+    # If gate-pass is required, run strict ideation gate before rollout.
     stages = [
         ("understanding", "1. Running UNDERSTANDING..."),
         ("ideation", "2. Running IDEATION (with variations)..."),
-        ("rollout", "3. Running ROLLOUT..."),
-        ("judgment", "4. Running JUDGMENT..."),
     ]
+    if require_gate_pass:
+        stages.append(("gate", "2.5 Running IDEATION GATE..."))
+    stages.extend(
+        [
+            ("rollout", "3. Running ROLLOUT..."),
+            ("judgment", "4. Running JUDGMENT..."),
+        ]
+    )
 
     debug_print("🚀 Initializing BLOOM rollout pipeline...")
     debug_print("=" * 60)
@@ -136,6 +152,15 @@ def run_pipeline(config: Dict[str, Any], config_dir: Optional[Path] = None) -> D
     debug_print(f"🤖 Target model: {config.get('rollout', {}).get('target', 'Unknown')}")
     debug_print(f"🔍 Evaluator model: {config.get('rollout', {}).get('model', 'Unknown')}")
     debug_print("=" * 60)
+
+    # Initialize a fresh local run directory for each full pipeline run.
+    # Stage-by-stage mode reuses this via the active-run marker.
+    if not utils.is_wandb_mode():
+        run_dir = utils.initialize_local_run(config, behavior_name, new_run=True)
+        run_name = config.get("_run_name")
+        if isinstance(run_name, str) and run_name:
+            set_current_run_name(run_name)
+        debug_print(f"📁 Local run directory: {run_dir}")
 
     # Check if running in simenv modality requires function calling support
     if config.get("rollout", {}).get("modality") == "simenv":
@@ -241,6 +266,21 @@ def run_pipeline(config: Dict[str, Any], config_dir: Optional[Path] = None) -> D
                     debug_print("✅ Artifacts saved successfully")
                 except Exception as e:
                     debug_print(f"⚠️  Failed to log artifacts after ideation: {e}")
+
+            elif stage_name == "gate":
+                from bloom.ideation_gate import run_ideation_gate
+
+                gate_passed = run_ideation_gate(config=config, config_dir=config.get("_config_dir"))
+                if not gate_passed:
+                    print("❌ Ideation gate failed. Aborting before rollout.", flush=True)
+                    return False
+                debug_print("💾 Saving artifacts and preparing for next stage...")
+                # Save artifacts produced up to this stage
+                try:
+                    log_artifacts_to_wandb(config["behavior"]["name"], config)
+                    debug_print("✅ Artifacts saved successfully")
+                except Exception as e:
+                    debug_print(f"⚠️  Failed to log artifacts after gate: {e}")
 
             elif stage_name == "rollout":
                 from bloom.stages.step3_rollout import run_rollout

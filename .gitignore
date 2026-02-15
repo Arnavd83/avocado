@@ -85,6 +85,7 @@ logs/
 lora_out/
 tinker_lora_archive.tar
 vllm-venv/
+bloom-results/
 
 # Scratch data (temporary analysis outputs)
 data/scratch/

@@ -8,6 +8,7 @@ Commands:
     run             Run the full pipeline (default)
     understanding   Run only the understanding stage
     ideation        Run only the ideation stage
+    gate            Run strict ideation gate checks
     rollout         Run only the rollout stage
     judgment        Run only the judgment stage
     chat            Interactive chat with a model
@@ -17,6 +18,7 @@ Commands:
 Examples:
     bloom run bloom-data              # Run full pipeline
     bloom understanding bloom-data    # Run understanding stage only
+    bloom gate bloom-data             # Run ideation gate checks
     bloom init                        # Initialize workspace
     bloom sweep                       # Run as wandb sweep agent
 """
@@ -88,6 +90,15 @@ def cmd_rollout(args: argparse.Namespace) -> int:
 
     config, config_dir = load_config_with_debug(args)
     result = asyncio.run(run_rollout(config=config, config_dir=config_dir))
+    return 0 if result else 1
+
+
+def cmd_gate(args: argparse.Namespace) -> int:
+    """Run strict ideation gate checks."""
+    from bloom.ideation_gate import run_ideation_gate
+
+    config, config_dir = load_config_with_debug(args)
+    result = run_ideation_gate(config=config, config_dir=config_dir)
     return 0 if result else 1
 
 
@@ -282,6 +293,11 @@ def main() -> int:
     parser_ideation = subparsers.add_parser("ideation", help="Run ideation stage")
     add_common_args(parser_ideation)
     parser_ideation.set_defaults(func=cmd_ideation)
+
+    # gate
+    parser_gate = subparsers.add_parser("gate", help="Run strict ideation gate checks")
+    add_common_args(parser_gate)
+    parser_gate.set_defaults(func=cmd_gate)
 
     # rollout
     parser_rollout = subparsers.add_parser("rollout", help="Run rollout stage")

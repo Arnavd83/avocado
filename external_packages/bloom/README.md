@@ -89,20 +89,36 @@ See [LiteLLM providers](https://docs.litellm.ai/docs/providers) for supported pr
 
 1. **Understanding** — Analyzes the target behavior and examples
 2. **Ideation** — Generates diverse evaluation scenarios
-3. **Rollout** — Executes conversations with the target model
-4. **Judgment** — Scores behavior presence and additional qualities
+3. **Gate** — Validates ideation quality against strict constraints
+4. **Rollout** — Executes conversations with the target model
+5. **Judgment** — Scores behavior presence and additional qualities
 
 Run individual stages:
 ```bash
 bloom understanding bloom-data
 bloom ideation bloom-data
+bloom gate bloom-data
 bloom rollout bloom-data
 bloom judgment bloom-data
 ```
 
+For strict corrigibility workflows, ideation can run targeted auto-repair before writing `ideation.json`:
+- `ideation.strict_validation: true`
+- `ideation.max_repair_attempts: 3`
+
+When strict validation is enabled, Bloom writes `ideation_attempts.json` in the run folder with repair diagnostics.
+You can also enforce rollout blocking until gate pass with:
+- `rollout.require_gate_pass: true`
+- Gate includes canonical scenario-index/domain/mechanism alignment as a blocking check for corrigibility strict mode.
+
 ## Viewing Results
 
-Results are saved to `bloom-results/{behavior_name}/`. View transcripts with the interactive viewer:
+Results are saved to run-scoped folders:
+`bloom-results/{behavior_name}/{YYYYMMDD_HHMMSS}_{target_model_slug}/`
+
+Bloom also writes `bloom-results/{behavior_name}/_runs_index.json` so viewers can list all runs.
+
+View transcripts with the interactive viewer:
 
 ```bash
 npx @isha-gpt/bloom-viewer --port 8080 --dir ./bloom-results

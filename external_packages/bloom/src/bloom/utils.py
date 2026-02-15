@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +25,190 @@ DEFAULT_TEMPERATURE_DETERMINISTIC = 0.0  # For deterministic/reproducible output
 
 # Global models cache (keyed by config_dir)
 _models_cache = {}
+# Active local run cache keyed by behavior name
+_active_local_runs: Dict[str, str] = {}
+
+
+def _slugify_for_path(value: str) -> str:
+    """Convert arbitrary text to a filesystem-safe slug."""
+    if not value:
+        return "unknown"
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip().lower()).strip("_")
+    return slug or "unknown"
+
+
+def _get_behavior_root(example_name: str) -> Path:
+    """Return the base directory for a behavior's results."""
+    return Path(f"bloom-results/{example_name}")
+
+
+def _get_active_run_marker(example_name: str) -> Path:
+    """Return the active-run marker path for a behavior."""
+    return _get_behavior_root(example_name) / "_active_run.json"
+
+
+def _load_active_run_name(example_name: str) -> Optional[str]:
+    """Load the active run name for a behavior from disk."""
+    marker_path = _get_active_run_marker(example_name)
+    if not marker_path.exists():
+        return None
+
+    try:
+        with open(marker_path, "r", encoding="utf-8") as f:
+            marker = json.load(f)
+        run_name = marker.get("run_name")
+        if isinstance(run_name, str) and run_name:
+            run_dir = _get_behavior_root(example_name) / run_name
+            if run_dir.exists() and run_dir.is_dir():
+                return run_name
+    except Exception:
+        return None
+    return None
+
+
+def _write_runs_index(example_name: str) -> None:
+    """Write a lightweight index of available runs for viewer dropdowns."""
+    behavior_root = _get_behavior_root(example_name)
+    behavior_root.mkdir(parents=True, exist_ok=True)
+
+    active_run = _active_local_runs.get(example_name) or _load_active_run_name(example_name)
+
+    runs = []
+    for run_dir in sorted(
+        [p for p in behavior_root.iterdir() if p.is_dir() and not p.name.startswith(".")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
+        info_path = run_dir / "_run_info.json"
+        run_info: Dict[str, Any] = {}
+        if info_path.exists():
+            try:
+                with open(info_path, "r", encoding="utf-8") as f:
+                    run_info = json.load(f)
+            except Exception:
+                run_info = {}
+
+        runs.append(
+            {
+                "run_name": run_dir.name,
+                "path": str(run_dir),
+                "created_at": run_info.get("created_at"),
+                "target_model": run_info.get("target_model"),
+                "evaluator_model": run_info.get("evaluator_model"),
+                "judgment_model": run_info.get("judgment_model"),
+                "gate_status": run_info.get("gate_status"),
+                "gate_passed": run_info.get("gate_passed"),
+                "gate_checked_at": run_info.get("gate_checked_at"),
+                "gate_report": run_info.get("gate_report"),
+                "gate_json": run_info.get("gate_json"),
+                "is_active": run_dir.name == active_run,
+            }
+        )
+
+    index_payload = {
+        "version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "behavior_name": example_name,
+        "active_run": active_run,
+        "runs": runs,
+    }
+
+    index_path = behavior_root / "_runs_index.json"
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(index_payload, f, indent=2, ensure_ascii=False)
+
+
+def _next_unique_run_name(behavior_root: Path, base_name: str) -> str:
+    """Return a unique run name by adding numeric suffixes if needed."""
+    candidate = base_name
+    suffix = 2
+    while (behavior_root / candidate).exists():
+        candidate = f"{base_name}_{suffix:02d}"
+        suffix += 1
+    return candidate
+
+
+def build_local_run_name(config: Dict[str, Any]) -> str:
+    """Create a local run name including timestamp and target model slug."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    target_model = config.get("rollout", {}).get("target", "unknown-model")
+    target_slug = _slugify_for_path(str(target_model))
+    return f"{timestamp}_{target_slug}"
+
+
+def initialize_local_run(config: Dict[str, Any], example_name: str, new_run: bool = False) -> Path:
+    """
+    Initialize or reuse local run context and return the run directory.
+
+    - `new_run=True` forces creation of a fresh run folder (unless already set in config).
+    - `new_run=False` reuses active run if available, else creates one.
+    """
+    # WandB uses its own run-scoped directory logic.
+    if is_wandb_mode():
+        return get_results_dir(example_name)
+
+    behavior_root = _get_behavior_root(example_name)
+    behavior_root.mkdir(parents=True, exist_ok=True)
+
+    run_name = config.get("_run_name")
+    if not isinstance(run_name, str) or not run_name:
+        explicit_run_name = config.get("run_name")
+        if isinstance(explicit_run_name, str) and explicit_run_name:
+            run_name = explicit_run_name
+        else:
+            results_cfg = config.get("results", {})
+            cfg_run_name = results_cfg.get("run_name") if isinstance(results_cfg, dict) else None
+            if isinstance(cfg_run_name, str) and cfg_run_name:
+                run_name = cfg_run_name
+
+    if not isinstance(run_name, str) or not run_name:
+        cached_run = _active_local_runs.get(example_name)
+        if cached_run and not (behavior_root / cached_run).exists():
+            # Guard against stale process-local cache entries (e.g., after cwd/test sandbox changes).
+            _active_local_runs.pop(example_name, None)
+            cached_run = None
+        disk_run = _load_active_run_name(example_name)
+
+        if new_run:
+            base_name = build_local_run_name(config)
+            run_name = _next_unique_run_name(behavior_root, base_name)
+        elif cached_run:
+            run_name = cached_run
+        elif disk_run:
+            run_name = disk_run
+        else:
+            base_name = build_local_run_name(config)
+            run_name = _next_unique_run_name(behavior_root, base_name)
+
+    run_dir = behavior_root / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    _active_local_runs[example_name] = run_name
+    config["_run_name"] = run_name
+    config["_results_dir"] = run_dir
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    active_payload = {
+        "run_name": run_name,
+        "behavior_name": example_name,
+        "target_model": config.get("rollout", {}).get("target"),
+        "evaluator_model": config.get("rollout", {}).get("model"),
+        "judgment_model": config.get("judgment", {}).get("model"),
+        "updated_at": now_iso,
+    }
+
+    marker_path = _get_active_run_marker(example_name)
+    with open(marker_path, "w", encoding="utf-8") as f:
+        json.dump(active_payload, f, indent=2, ensure_ascii=False)
+
+    run_info_path = run_dir / "_run_info.json"
+    if not run_info_path.exists():
+        active_payload["created_at"] = now_iso
+        with open(run_info_path, "w", encoding="utf-8") as f:
+            json.dump(active_payload, f, indent=2, ensure_ascii=False)
+
+    _write_runs_index(example_name)
+    return run_dir
 
 
 def load_models(config_dir: Optional[Path] = None) -> Dict[str, Any]:
@@ -317,6 +502,8 @@ def create_config_from_wandb_params(wandb_params: Dict[str, Any]) -> Dict[str, A
         "model": get_nested_param("ideation.model", "gpt-4.1"),
         "total_evals": get_nested_param("ideation.total_evals", 10),
         "diversity": get_nested_param("ideation.diversity", 0.2),
+        "strict_validation": get_nested_param("ideation.strict_validation", False),
+        "max_repair_attempts": get_nested_param("ideation.max_repair_attempts", 3),
         "max_tokens": get_nested_param("ideation.max_tokens", 4000),
         "web_search": get_nested_param("ideation.web_search", False),
     }
@@ -337,6 +524,7 @@ def create_config_from_wandb_params(wandb_params: Dict[str, Any]) -> Dict[str, A
         "max_tokens": get_nested_param("rollout.max_tokens", 4000),
         "selected_variations": get_nested_param("rollout.selected_variations", None),
         "no_user_mode": get_nested_param("rollout.no_user_mode", False),
+        "require_gate_pass": get_nested_param("rollout.require_gate_pass", False),
     }
 
     # Judgment parameters
@@ -786,6 +974,77 @@ def ensure_results_dir(example_name: str) -> Path:
     return results_dir
 
 
+def get_active_run_name(example_name: str) -> Optional[str]:
+    """Get active run name for a behavior in local mode."""
+    run_name = _active_local_runs.get(example_name)
+    if run_name:
+        return run_name
+    disk_run_name = _load_active_run_name(example_name)
+    if disk_run_name:
+        _active_local_runs[example_name] = disk_run_name
+    return disk_run_name
+
+
+def update_run_metadata(
+    example_name: str,
+    updates: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+    run_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Update active run metadata and refresh runs index.
+
+    Returns the run directory updated, or None if no active run is resolvable.
+    """
+    behavior_root = _get_behavior_root(example_name)
+    behavior_root.mkdir(parents=True, exist_ok=True)
+
+    resolved_run_dir = run_dir
+    if resolved_run_dir is None:
+        candidate = get_results_dir(example_name)
+        if candidate.parent == behavior_root:
+            resolved_run_dir = candidate
+        else:
+            run_name = None
+            if config is not None and isinstance(config.get("_run_name"), str):
+                run_name = config["_run_name"]
+            if not run_name:
+                run_name = get_active_run_name(example_name)
+            if run_name:
+                resolved_run_dir = behavior_root / run_name
+
+    if resolved_run_dir is None:
+        return None
+
+    resolved_run_dir.mkdir(parents=True, exist_ok=True)
+    run_info_path = resolved_run_dir / "_run_info.json"
+    run_info: Dict[str, Any] = {}
+    if run_info_path.exists():
+        try:
+            with open(run_info_path, "r", encoding="utf-8") as f:
+                run_info = json.load(f)
+        except Exception:
+            run_info = {}
+
+    if not run_info.get("run_name"):
+        run_info["run_name"] = resolved_run_dir.name
+    if not run_info.get("behavior_name"):
+        run_info["behavior_name"] = example_name
+    if config is not None:
+        run_info.setdefault("target_model", config.get("rollout", {}).get("target"))
+        run_info.setdefault("evaluator_model", config.get("rollout", {}).get("model"))
+        run_info.setdefault("judgment_model", config.get("judgment", {}).get("model"))
+    run_info.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+
+    run_info.update(updates)
+    run_info["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    with open(run_info_path, "w", encoding="utf-8") as f:
+        json.dump(run_info, f, indent=2, ensure_ascii=False)
+
+    _write_runs_index(example_name)
+    return resolved_run_dir
+
+
 def get_run_id() -> str:
     """Get run ID for unique artifact naming."""
     if is_wandb_mode():
@@ -808,9 +1067,21 @@ def get_results_dir(example_name: str) -> Path:
         else:
             # Fallback if wandb.run is None
             return Path(f"bloom-results/{example_name}")
-    else:
-        # In regular mode, use the standard directory
-        return Path(f"bloom-results/{example_name}")
+
+    # Local mode: prefer active run folder when available, fallback to legacy behavior root.
+    behavior_root = _get_behavior_root(example_name)
+
+    run_name = _active_local_runs.get(example_name)
+    if run_name:
+        return behavior_root / run_name
+
+    disk_run_name = _load_active_run_name(example_name)
+    if disk_run_name:
+        _active_local_runs[example_name] = disk_run_name
+        return behavior_root / disk_run_name
+
+    # Backward-compatible fallback if no run context exists.
+    return behavior_root
 
 
 def load_ideation_results(example_name: str) -> Dict[str, Any]:
@@ -861,6 +1132,89 @@ def save_results_locally(results: Dict[str, Any], output_file: str | os.PathLike
         print(f"Results saved temporarily for artifact logging: {output_file}", flush=True)
     else:
         print(f"Results saved to: {output_file}", flush=True)
+
+
+def write_run_index(example_name: str, judgment_results: Dict[str, Any], config: Dict[str, Any]) -> None:
+    """Write a viewer-friendly run index for the active run directory."""
+    results_dir = get_results_dir(example_name)
+    behavior_root = _get_behavior_root(example_name)
+    run_name = results_dir.name if results_dir.parent == behavior_root else None
+    run_info: Dict[str, Any] = {}
+    run_info_path = results_dir / "_run_info.json"
+    if run_info_path.exists():
+        try:
+            with open(run_info_path, "r", encoding="utf-8") as f:
+                run_info = json.load(f)
+        except Exception:
+            run_info = {}
+
+    judgments = judgment_results.get("judgments", []) if isinstance(judgment_results, dict) else []
+    additional_qualities = config.get("judgment", {}).get("additional_qualities", [])
+
+    transcripts = []
+    for judgment in judgments:
+        variation_number = judgment.get("variation_number")
+        repetition_number = judgment.get("repetition_number", 1)
+        if variation_number is None:
+            continue
+
+        transcript_name = f"transcript_v{variation_number}r{repetition_number}.json"
+        transcript_path = results_dir / transcript_name
+        transcript_id = None
+
+        if transcript_path.exists():
+            try:
+                with open(transcript_path, "r", encoding="utf-8") as f:
+                    transcript_data = json.load(f)
+                transcript_id = transcript_data.get("metadata", {}).get("transcript_id")
+            except Exception:
+                transcript_id = None
+
+        score_payload = {"behavior_presence": judgment.get("behavior_presence")}
+        for quality in additional_qualities:
+            key = quality.replace("-", "_")
+            score_payload[key] = judgment.get(key)
+
+        file_path = f"{example_name}/{transcript_name}"
+        if run_name:
+            file_path = f"{example_name}/{run_name}/{transcript_name}"
+
+        transcripts.append(
+            {
+                "id": Path(transcript_name).stem,
+                "transcript_id": transcript_id,
+                "_filePath": file_path,
+                "summary": judgment.get("summary", ""),
+                "scores": score_payload,
+            }
+        )
+
+    run_index = {
+        "version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "name": example_name,
+            "path": f"{example_name}/{run_name}" if run_name else example_name,
+            "auditor_model": config.get("rollout", {}).get("model"),
+            "target_model": config.get("rollout", {}).get("target"),
+            "transcript_count": len(transcripts),
+            "run_name": run_name,
+            "gate_status": run_info.get("gate_status"),
+            "gate_passed": run_info.get("gate_passed"),
+        },
+        "summary_statistics": judgment_results.get("summary_statistics", {}),
+        "metajudge": judgment_results.get("metajudgment_scores", {}),
+        "transcripts": transcripts,
+    }
+
+    run_index_path = results_dir / "_index.json"
+    with open(run_index_path, "w", encoding="utf-8") as f:
+        json.dump(run_index, f, indent=2, ensure_ascii=False)
+
+    # Keep behavior-level index pointing at the latest run for backward compatibility.
+    behavior_index_path = behavior_root / "_index.json"
+    with open(behavior_index_path, "w", encoding="utf-8") as f:
+        json.dump(run_index, f, indent=2, ensure_ascii=False)
 
 
 def cleanup_temp_results(example_name: str) -> None:
