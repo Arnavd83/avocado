@@ -25,7 +25,7 @@ OPENROUTER_APP_NAME=avocado
 ### Python API
 
 ```python
-from src.utils import ModelManager
+from shared import ModelManager
 
 # Initialize
 manager = ModelManager()

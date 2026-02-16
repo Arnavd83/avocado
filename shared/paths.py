@@ -55,6 +55,14 @@ PETRI_TRANSCRIPTS = DATA_SCRATCH / "test_petri"
 MMLU_RESULTS = DATA_BENCHMARKS / "mmlu"
 IFEVAL_RESULTS = DATA_BENCHMARKS / "ifeval"
 
+# Value measurement data
+VALUE_MEASUREMENT_DIR = PROJECT_ROOT / "value_measurement"
+VALUE_MEASUREMENT_DATA = VALUE_MEASUREMENT_DIR / "data"
+OUTCOMES_HIERARCHICAL = VALUE_MEASUREMENT_DATA / "outcomes_hierarchical.json"
+
+# Durability cache
+DURABILITY_JUDGE_CACHE = DATA_SCRATCH / "prefix_judge_cache"
+
 
 # ============================================
 # Module Directories

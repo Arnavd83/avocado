@@ -21,7 +21,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+from shared.paths import PROJECT_ROOT
 DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.5"
 DEFAULT_TARGET_MODEL = "gemma-3-27b"
 DEFAULT_JUDGE_MODEL = "claude-opus-4.5"

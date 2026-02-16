@@ -11,8 +11,6 @@ from typing import Any
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
 from durability.dataset import build_datasets
 
 

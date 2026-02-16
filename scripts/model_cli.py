@@ -13,17 +13,12 @@ Usage:
 
 import argparse
 import sys
-from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Load environment variables
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.utils import ModelManager
+from shared import ModelManager
 
 
 def list_models(args):

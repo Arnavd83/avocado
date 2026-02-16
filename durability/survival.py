@@ -30,7 +30,9 @@ from .scoring import UNIVERSAL_WEIGHTS
 
 CORE_UNIVERSAL_DIMENSIONS = tuple(UNIVERSAL_WEIGHTS.keys())
 DEFAULT_JAILBREAK_THRESHOLD = 7
-DEFAULT_CACHE_DIR = Path("data/scratch/prefix_judge_cache")
+from shared.paths import DURABILITY_JUDGE_CACHE
+
+DEFAULT_CACHE_DIR = DURABILITY_JUDGE_CACHE
 
 
 @dataclass

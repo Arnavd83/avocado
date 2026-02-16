@@ -14,21 +14,11 @@ import yaml
 from dotenv import load_dotenv
 
 
-def _find_project_root() -> Path:
-    """Find the inference_server project root by looking for config/default.yaml."""
-    current = Path(__file__).parent
-    while current != current.parent:
-        if (current / "config" / "default.yaml").exists():
-            return current
-        if (current.parent / "config" / "default.yaml").exists():
-            return current.parent
-        current = current.parent
-    return Path(__file__).parent.parent
+INFERENCE_SERVER_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = INFERENCE_SERVER_ROOT / "config" / "default.yaml"
 
-
-PROJECT_ROOT = _find_project_root()
-CONFIG_PATH = PROJECT_ROOT / "config" / "default.yaml"
-AVOCADO_ROOT = PROJECT_ROOT.parent
+from shared.paths import PROJECT_ROOT
+AVOCADO_ROOT = PROJECT_ROOT
 ENV_PATH = AVOCADO_ROOT / ".env"
 
 
@@ -185,7 +175,7 @@ class Config:
         Returns:
             Path to adapter directory.
         """
-        adapters_base = PROJECT_ROOT / self.paths.get("local_adapters", "./adapters")
+        adapters_base = INFERENCE_SERVER_ROOT / self.paths.get("local_adapters", "./adapters")
         return adapters_base / model_alias / adapter_name
 
     def to_dict(self) -> dict[str, Any]:
@@ -197,7 +187,7 @@ class Config:
             "timeouts": self.timeouts,
             "paths": self.paths,
             "concurrency": self.concurrency,
-            "project_root": str(PROJECT_ROOT),
+            "project_root": str(INFERENCE_SERVER_ROOT),
         }
 
 

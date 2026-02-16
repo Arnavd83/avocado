@@ -15,23 +15,18 @@ from typing import Dict, Iterable, List, Optional, Tuple, cast
 import litellm
 from litellm import acompletion as litellm_acompletion
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from shared.paths import PROJECT_ROOT, MODELS_CONFIG, OUTCOMES_HIERARCHICAL
+
 UTILS_PATH = PROJECT_ROOT / "value_measurement" / "emergent-values" / "utility_analysis"
 sys.path.append(str(UTILS_PATH))
 
 from compute_utilities.utils import create_agent  # noqa: E402
 from compute_utilities.llm_agent import LiteLLMAgent  # noqa: E402
 
-MODELS_CONFIG_PATH = PROJECT_ROOT / "config" / "models.yaml"
 if "MODELS_CONFIG_PATH" not in os.environ:
-    os.environ["MODELS_CONFIG_PATH"] = str(MODELS_CONFIG_PATH)
+    os.environ["MODELS_CONFIG_PATH"] = str(MODELS_CONFIG)
 
-DEFAULT_OUTCOMES_PATH = (
-    PROJECT_ROOT
-    / "value_measurement"
-    / "data"
-    / "outcomes_hierarchical.json"
-)
+DEFAULT_OUTCOMES_PATH = OUTCOMES_HIERARCHICAL
 DEFAULT_MODEL_KEY = "lambda-ai-gpu"
 
 LABEL_LETTERS = [

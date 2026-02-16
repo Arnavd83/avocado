@@ -425,8 +425,8 @@ def get_default_local_adapters_path() -> Path:
     Returns:
         Path to models/ directory in project root.
     """
-    # Relative to this file: ../../models (project_root/models)
-    return Path(__file__).parent.parent.parent / "models"
+    from shared.paths import MODELS_DIR
+    return MODELS_DIR
 
 
 def get_remote_adapters_path(filesystem_name: str) -> str:

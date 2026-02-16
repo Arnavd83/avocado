@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pathlib import Path
 from dotenv import load_dotenv
-from src.utils.model_manager import ModelManager
+from shared.model_manager import ModelManager
 
 # Load environment variables from .env file
 load_dotenv()

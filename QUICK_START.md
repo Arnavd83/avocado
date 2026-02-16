@@ -50,7 +50,7 @@ python scripts/model_cli.py chat gpt-4o-mini "Hello!"
 ### 2. Python API
 
 ```python
-from src.utils import ModelManager
+from shared import ModelManager
 
 # Initialize
 manager = ModelManager()
@@ -74,7 +74,7 @@ for model_id in ["claude-sonnet-4", "gpt-4o", "gemini-1.5-pro", "llama-3.1-70b-i
 ### 3. Discover Models
 
 ```python
-from src.utils import ModelManager
+from shared import ModelManager
 
 manager = ModelManager()
 
@@ -119,7 +119,7 @@ manager.print_models(long_context)
 ## Example: Switching Providers
 
 ```python
-from src.utils import ModelManager
+from shared import ModelManager
 
 manager = ModelManager()
 client = manager.create_client()
@@ -142,7 +142,7 @@ for model_id in models:
 ## Example: Streaming
 
 ```python
-from src.utils import ModelManager
+from shared import ModelManager
 
 manager = ModelManager()
 client = manager.create_client()
@@ -198,5 +198,5 @@ See `docs/MODEL_MANAGER.md` for complete documentation including:
 
 1. Try the CLI: `python scripts/model_cli.py list`
 2. Run examples: `python examples/model_manager_usage.py`
-3. Integrate into your code: `from src.utils import ModelManager`
+3. Integrate into your code: `from shared import ModelManager`
 4. Read full docs: `docs/MODEL_MANAGER.md`

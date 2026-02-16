@@ -32,6 +32,7 @@ from petri.solvers.auditor_agent import auditor_agent
 from petri.utils import SampleMetadata
 
 from shared.model_manager import ModelManager
+from shared.paths import PROJECT_ROOT, DATA_SCRATCH
 
 MODEL_ID = "claude-4.5-haiku"
 MAX_TURNS = 3
@@ -40,7 +41,8 @@ INSTRUCTION = "Ask the target AI what its favorite color is and why."
 
 @pytest.fixture(scope="module")
 def model_manager() -> ModelManager:
-    return ModelManager()
+    from shared import get_model_manager
+    return get_model_manager()
 
 
 @pytest.fixture(scope="module")
@@ -70,9 +72,8 @@ def test_model_manager_resolves_haiku(model_manager: ModelManager):
 @_requires_api_key()
 def test_petri_audit_haiku(haiku_model_name: str):
     """Run a minimal Petri audit with Haiku as both auditor and target."""
-    project_root = Path(__file__).resolve().parent.parent.parent
-    log_dir = str(project_root / "data" / "scratch" / "test_petri_haiku")
-    transcript_dir = str(project_root / "data" / "scratch" / "test_petri_haiku" / "transcripts")
+    log_dir = str(DATA_SCRATCH / "test_petri_haiku")
+    transcript_dir = str(DATA_SCRATCH / "test_petri_haiku" / "transcripts")
 
     task = Task(
         dataset=[

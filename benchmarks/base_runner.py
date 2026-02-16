@@ -66,7 +66,8 @@ class InspectEvalRunner:
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.model_manager = ModelManager()
+        from shared import get_model_manager
+        self.model_manager = get_model_manager()
 
         try:
             self.model_config = self.model_manager.get_model(model_id)

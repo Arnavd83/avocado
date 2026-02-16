@@ -8,6 +8,8 @@ utilities used across all modules.
 from .types import ModelReference, ModelType
 from .paths import (
     PROJECT_ROOT, CONFIG_DIR, DATA_DIR, MODELS_DIR, LOGS_DIR,
+    VALUE_MEASUREMENT_DIR, VALUE_MEASUREMENT_DATA, OUTCOMES_HIERARCHICAL,
+    DURABILITY_JUDGE_CACHE, DATA_SCRATCH, MODELS_CONFIG,
     get_model_path, get_adapter_files, get_benchmark_output
 )
 from .model_manager import ModelManager, ModelConfig, get_model_manager
@@ -22,6 +24,12 @@ __all__ = [
     "DATA_DIR",
     "MODELS_DIR",
     "LOGS_DIR",
+    "VALUE_MEASUREMENT_DIR",
+    "VALUE_MEASUREMENT_DATA",
+    "OUTCOMES_HIERARCHICAL",
+    "DURABILITY_JUDGE_CACHE",
+    "DATA_SCRATCH",
+    "MODELS_CONFIG",
     "get_model_path",
     "get_adapter_files",
     "get_benchmark_output",
