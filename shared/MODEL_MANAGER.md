@@ -113,58 +113,58 @@ The CLI provides quick access to model information and testing:
 
 ### List all models
 ```bash
-python scripts/model_cli.py list
+python shared/cli.py list
 ```
 
 ### Filter models
 ```bash
 # By provider
-python scripts/model_cli.py list --provider anthropic
+python shared/cli.py list --provider anthropic
 
 # Vision-capable models only
-python scripts/model_cli.py list --vision
+python shared/cli.py list --vision
 
 # Models with 100k+ context
-python scripts/model_cli.py list --min-context 100000
+python shared/cli.py list --min-context 100000
 ```
 
 ### Show model details
 ```bash
-python scripts/model_cli.py show claude-sonnet-4
+python shared/cli.py show claude-sonnet-4
 ```
 
 ### Explore collections
 ```bash
 # List all collections
-python scripts/model_cli.py collections
+python shared/cli.py collections
 
 # Show models in a collection
-python scripts/model_cli.py collection premium
-python scripts/model_cli.py collection vision
+python shared/cli.py collection premium
+python shared/cli.py collection vision
 ```
 
 ### List providers
 ```bash
-python scripts/model_cli.py providers
+python shared/cli.py providers
 ```
 
 ### Quick chat test
 ```bash
 # Send a message
-python scripts/model_cli.py chat gpt-4o-mini "What is quantum computing?"
+python shared/cli.py chat gpt-4o-mini "What is quantum computing?"
 
 # Stream response
-python scripts/model_cli.py chat claude-3-haiku "Tell me a joke" --stream
+python shared/cli.py chat claude-3-haiku "Tell me a joke" --stream
 
 # Control max tokens
-python scripts/model_cli.py chat llama-3.1-8b-instruct "Explain AI" --max-tokens 200
+python shared/cli.py chat llama-3.1-8b-instruct "Explain AI" --max-tokens 200
 ```
 
 ## Examples
 
 ### Run the comprehensive example script
 ```bash
-python examples/model_manager_usage.py
+python shared/examples/usage.py
 ```
 
 This demonstrates:

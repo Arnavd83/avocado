@@ -21,7 +21,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 
-from shared.paths import PROJECT_ROOT
+from shared.paths import PROJECT_ROOT, SCRIPT_GET_MODEL, SCRIPT_GET_MODEL_ENV
 DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.5"
 DEFAULT_TARGET_MODEL = "gemma-3-27b"
 DEFAULT_JUDGE_MODEL = "claude-opus-4.5"
@@ -140,13 +140,11 @@ def _apply_exports(env_output: str, env: dict[str, str]) -> None:
 
 
 def _resolve_model(model_id: str, env: dict[str, str]) -> str:
-    script = PROJECT_ROOT / "scripts" / "get_model.py"
-    return _run_script(script, [model_id], env)
+    return _run_script(SCRIPT_GET_MODEL, [model_id], env)
 
 
 def _resolve_env(model_id: str, env: dict[str, str]) -> None:
-    script = PROJECT_ROOT / "scripts" / "get_model_env.py"
-    output = _run_script(script, [model_id], env)
+    output = _run_script(SCRIPT_GET_MODEL_ENV, [model_id], env)
     if output:
         _apply_exports(output, env)
 

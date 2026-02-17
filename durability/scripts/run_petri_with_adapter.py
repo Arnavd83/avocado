@@ -115,8 +115,9 @@ def ensure_adapter_loaded(instance, instance_name):
 def run_petri_audit(auditor_model_id, judge_model_id, max_turns=10, seed_prompt_file=None, output_dir=None):
     """Run Petri audit with the adapter as target model."""
     # Get model names using the helper scripts
-    get_model_cmd = ["uv", "run", "python", str(project_root / "scripts" / "get_model.py")]
-    get_model_env_cmd = ["uv", "run", "python", str(project_root / "scripts" / "get_model_env.py")]
+    from shared.paths import SCRIPT_GET_MODEL, SCRIPT_GET_MODEL_ENV
+    get_model_cmd = ["uv", "run", "python", str(SCRIPT_GET_MODEL)]
+    get_model_env_cmd = ["uv", "run", "python", str(SCRIPT_GET_MODEL_ENV)]
     
     # Get environment variables for models
     target_env = subprocess.run(

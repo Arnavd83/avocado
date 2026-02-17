@@ -13,11 +13,11 @@ make audit-seeds BATCH_MAX_PARALLEL=20 BATCH_FAIL_FAST=1 MAX_TURNS=3 SEED_DATASE
 do
 ```
 config/models.yaml              # Model configurations
-src/utils/model_manager.py      # Core ModelManager class
-src/utils/__init__.py           # Module exports
-examples/model_manager_usage.py # Usage examples
-scripts/model_cli.py            # CLI tool
-docs/MODEL_MANAGER.md           # Full documentation
+shared/model_manager.py         # Core ModelManager class
+shared/__init__.py              # Module exports
+shared/examples/usage.py        # Usage examples
+shared/cli.py                   # CLI tool
+shared/MODEL_MANAGER.md         # Full documentation
 ```
 make audit TARGET_MODEL_ID=lambda-ai-gpu
 ## Quick Usage
@@ -26,25 +26,25 @@ make audit TARGET_MODEL_ID=lambda-ai-gpu
 
 ```bash
 # List all models
-python scripts/model_cli.py list
+python shared/cli.py list
 
 # List by provider
-python scripts/model_cli.py list --provider anthropic
-python scripts/model_cli.py list --provider openai
-python scripts/model_cli.py list --provider google
-python scripts/model_cli.py list --provider meta
+python shared/cli.py list --provider anthropic
+python shared/cli.py list --provider openai
+python shared/cli.py list --provider google
+python shared/cli.py list --provider meta
 
 # Show model details
-python scripts/model_cli.py show claude-sonnet-4
-python scripts/model_cli.py show gpt-4o
+python shared/cli.py show claude-sonnet-4
+python shared/cli.py show gpt-4o
 
 # View collections
-python scripts/model_cli.py collections
-python scripts/model_cli.py collection premium
-python scripts/model_cli.py collection balanced
+python shared/cli.py collections
+python shared/cli.py collection premium
+python shared/cli.py collection balanced
 
 # Quick test
-python scripts/model_cli.py chat gpt-4o-mini "Hello!"
+python shared/cli.py chat gpt-4o-mini "Hello!"
 ```
 
 ### 2. Python API
@@ -172,12 +172,12 @@ OPENROUTER_APP_NAME=avocado
 
 ```bash
 # Comprehensive examples
-python examples/model_manager_usage.py
+python shared/examples/usage.py
 ```
 
 ## Full Documentation
 
-See `docs/MODEL_MANAGER.md` for complete documentation including:
+See `shared/MODEL_MANAGER.md` for complete documentation including:
 - Advanced usage
 - Error handling
 - Custom configurations
@@ -196,7 +196,7 @@ See `docs/MODEL_MANAGER.md` for complete documentation including:
 
 ## Next Steps
 
-1. Try the CLI: `python scripts/model_cli.py list`
-2. Run examples: `python examples/model_manager_usage.py`
+1. Try the CLI: `python shared/cli.py list`
+2. Run examples: `python shared/examples/usage.py`
 3. Integrate into your code: `from shared import ModelManager`
-4. Read full docs: `docs/MODEL_MANAGER.md`
+4. Read full docs: `shared/MODEL_MANAGER.md`

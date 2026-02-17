@@ -10,6 +10,7 @@ from .paths import (
     PROJECT_ROOT, CONFIG_DIR, DATA_DIR, MODELS_DIR, LOGS_DIR,
     VALUE_MEASUREMENT_DIR, VALUE_MEASUREMENT_DATA, OUTCOMES_HIERARCHICAL,
     DURABILITY_JUDGE_CACHE, DATA_SCRATCH, MODELS_CONFIG,
+    SCRIPT_GET_MODEL, SCRIPT_GET_MODEL_ENV,
     get_model_path, get_adapter_files, get_benchmark_output
 )
 from .model_manager import ModelManager, ModelConfig, get_model_manager
@@ -30,6 +31,8 @@ __all__ = [
     "DURABILITY_JUDGE_CACHE",
     "DATA_SCRATCH",
     "MODELS_CONFIG",
+    "SCRIPT_GET_MODEL",
+    "SCRIPT_GET_MODEL_ENV",
     "get_model_path",
     "get_adapter_files",
     "get_benchmark_output",

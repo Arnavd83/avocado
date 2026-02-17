@@ -34,7 +34,11 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 MODELS_DIR = PROJECT_ROOT / "models"
 LOGS_DIR = PROJECT_ROOT / "logs"
-SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+SCRIPTS_DIR = PROJECT_ROOT / "shared" / "scripts"
+
+# Helper scripts (called as subprocesses by Makefile and durability runners)
+SCRIPT_GET_MODEL = SCRIPTS_DIR / "get_model.py"
+SCRIPT_GET_MODEL_ENV = SCRIPTS_DIR / "get_model_env.py"
 
 
 # ============================================

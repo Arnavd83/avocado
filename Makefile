@@ -7,9 +7,9 @@ SHELL := /bin/bash
 export
 
 # Helper to resolve model IDs from config/models.yaml
-GET_MODEL = uv run python scripts/get_model.py
+GET_MODEL = uv run python shared/scripts/get_model.py
 # Helper to get environment variables for models with custom endpoints
-GET_MODEL_ENV = uv run python scripts/get_model_env.py
+GET_MODEL_ENV = uv run python shared/scripts/get_model_env.py
 
 # Default model configurations (using config/models.yaml)
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
@@ -114,7 +114,7 @@ audit-custom:
 	@echo "  make audit SEED_PROMPT_FILE=my_prompts.json MAX_TURNS=50"
 	@echo ""
 	@echo "Available models are defined in config/models.yaml"
-	@echo "Use 'python scripts/model_cli.py list' to see all available models"
+	@echo "Use 'python shared/cli.py list' to see all available models"
 
 # Run petri audits for every seed in durability/config/seed_dataset_<name>.json
 .PHONY: audit-seeds
@@ -345,7 +345,7 @@ ifeval-openrouter:
 test-models:
 	@echo "Testing all models from config/models.yaml..."
 	@set -a && source .env && set +a && \
-	uv run pytest tests/test_utils/test_models.py::test_all_models_basic_query -v -s
+	uv run pytest shared/tests/test_models.py::test_all_models_basic_query -v -s
 
 # Check OpenRouter credits
 .PHONY: check-openrouter-credits
@@ -467,7 +467,7 @@ help:
 	@echo "  make view-logs VIEWER_SOURCE_ROOT=data/scratch"
 	@echo "  make view-logs VIEWER_DIR=/custom/path/to/viewer_root"
 	@echo ""
-	@echo "Models are defined in config/models.yaml - use 'python scripts/model_cli.py list' to see all"
+	@echo "Models are defined in config/models.yaml - use 'python shared/cli.py list' to see all"
 	@echo ""
 	@echo "Note: Using shared environment at .venv/ (run 'make setup' first)"
 	@echo ""

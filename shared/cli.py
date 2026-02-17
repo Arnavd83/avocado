@@ -3,12 +3,12 @@
 Command-line interface for exploring and testing OpenRouter models.
 
 Usage:
-    python scripts/model_cli.py list                           # List all models
-    python scripts/model_cli.py list --provider anthropic      # List Anthropic models
-    python scripts/model_cli.py list --vision                  # List vision-capable models
-    python scripts/model_cli.py show claude-sonnet-4           # Show model details
-    python scripts/model_cli.py collection premium             # Show premium collection
-    python scripts/model_cli.py chat gpt-4o "Hello!"          # Quick chat test
+    python shared/cli.py list                           # List all models
+    python shared/cli.py list --provider anthropic      # List Anthropic models
+    python shared/cli.py list --vision                  # List vision-capable models
+    python shared/cli.py show claude-sonnet-4           # Show model details
+    python shared/cli.py collection premium             # Show premium collection
+    python shared/cli.py chat gpt-4o "Hello!"          # Quick chat test
 """
 
 import argparse
