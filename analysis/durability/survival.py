@@ -25,7 +25,7 @@ from petri.scorers.judge import score_transcript_messages
 from petri.scorers.prompts import build_dimension_set
 from petri.transcript.transcript import Transcript
 
-from .behavior import parse_behavior_tags
+from durability.behavior import parse_behavior_tags
 from .scoring import UNIVERSAL_WEIGHTS
 
 CORE_UNIVERSAL_DIMENSIONS = tuple(UNIVERSAL_WEIGHTS.keys())

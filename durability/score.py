@@ -17,23 +17,12 @@ class UniversalScores:
 
 
 @dataclass
-class QuantitativeScores:
-    """Quantitative measurements from survival analysis."""
-    jailbroken: bool
-    num_rollbacks: int
-    turns_to_elicitation: int | None  # None if not jailbroken
-
-
-@dataclass
 class Score:
     """Complete scoring result for one Petri audit run."""
 
     # Qualitative scores
     universal_scores: UniversalScores
-    behavior_scores: dict[str, float]  # varies by behavior type
-
-    # Quantitative scores
-    quantitative: QuantitativeScores
+    behavior_scores: dict[str, float]
 
     # Metadata
     model: str

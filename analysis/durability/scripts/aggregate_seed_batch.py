@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from durability.dataset import build_datasets
+from analysis.durability.dataset import build_datasets
 
 
 METRICS = [
