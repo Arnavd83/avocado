@@ -17,6 +17,7 @@ AUDITOR_MODEL_ID ?= claude-sonnet-4.5
 TARGET_MODEL_ID ?= gpt-4o
 JUDGE_MODEL_ID ?= claude-opus-4.1
 MAX_TURNS ?= 10
+TARGET_MAX_TOKENS ?= 768
 SEED_PROMPT_FILE ?= config/seed_prompt.json
 SEED_DATASET_NAME ?= easy
 SEED_DATASET ?= config/seed_dataset_$(SEED_DATASET_NAME).json
@@ -44,8 +45,8 @@ setup:
 	uv sync
 	@echo "Installing dev dependencies (including pytest)..."
 	uv pip install -e ".[dev]"
-	@echo "Installing petri and tinker-cookbook in editable mode..."
-	uv pip install -e external_packages/petri -e external_packages/tinker-cookbook
+	@echo "Installing petri, tinker-cookbook, and bloom in editable mode..."
+	uv pip install -e external_packages/petri -e external_packages/tinker-cookbook -e external_packages/bloom
 	@echo ""
 	@echo "Environment setup complete!"
 	@echo "The shared environment is located at: .venv/"
@@ -98,6 +99,7 @@ audit:
 		--model-role judge=$$JUDGE \
 		--log-dir data/scratch/test_petri \
 		-T max_turns=$(MAX_TURNS) \
+		-T target_max_tokens=$(TARGET_MAX_TOKENS) \
 		-T special_instructions=$(SEED_PROMPT_FILE) \
 		-T transcript_save_dir=$(OUTPUT_DIR)
 
@@ -123,6 +125,7 @@ audit-seeds:
 		--target-model-id $(TARGET_MODEL_ID) \
 		--judge-model-id $(JUDGE_MODEL_ID) \
 		--max-turns $(MAX_TURNS) \
+		--target-max-tokens $(TARGET_MAX_TOKENS) \
 		--max-parallel $(BATCH_MAX_PARALLEL) \
 		$(if $(BATCH_FAIL_FAST),--fail-fast,) \
 		$(if $(BATCH_NO_AGGREGATE),--no-aggregate,) \
@@ -279,6 +282,7 @@ help:
 	@echo "Running Petri:"
 	@echo "  make audit          - Run audit with default settings"
 	@echo "  make audit-seeds    - Run audit for every seed in config/seed_dataset_<name>.json"
+	@echo "    Optional: TARGET_MAX_TOKENS=768 (set to none to disable cap)"
 	@echo "    Optional: BATCH_FAIL_FAST=1 to stop on first failure"
 	@echo "    Optional: BATCH_NO_AGGREGATE=1 to skip aggregation"
 	@echo "    Optional: BATCH_STREAM_OUTPUT=1 to stream inspect output"
@@ -307,6 +311,14 @@ help:
 	@echo "  make randomized-label-AB    - Run A/B label preference test (no constrained decoding)"
 	@echo "    Uses UTILITY_MODELS as the model selector"
 	@echo ""
+	@echo "Bloom:"
+	@echo "  make bloom-eval - Run Bloom for a single MODEL_ID (existing behavior)"
+	@echo "  make bloom-eval-utility - Run Bloom once per model in UTILITY_MODELS"
+	@echo "    Example: make bloom-eval-utility UTILITY_MODELS='qwen-3-8b lambda-ai-gpu'"
+	@echo "    Optional: BLOOM_FAIL_FAST=1 to stop on the first failing model"
+	@echo "  make bloom-eval-utility-resolve - Show resolved Bloom model IDs and env exports"
+	@echo "  make bloom-compare - Compare BASELINE_MODEL vs FINETUNED_MODEL"
+	@echo ""
 	@echo "Testing:"
 	@echo "  make test-models      - Test all models in config/models.yaml (requires OPENROUTER_API_KEY in .env)"
 	@echo ""
@@ -318,6 +330,7 @@ help:
 	@echo "  TARGET_MODEL_ID    = $(TARGET_MODEL_ID)"
 	@echo "  JUDGE_MODEL_ID     = $(JUDGE_MODEL_ID)"
 	@echo "  MAX_TURNS          = $(MAX_TURNS)"
+	@echo "  TARGET_MAX_TOKENS  = $(TARGET_MAX_TOKENS)"
 	@echo "  SEED_PROMPT_FILE   = $(SEED_PROMPT_FILE)"
 	@echo "  SEED_DATASET_NAME  = $(SEED_DATASET_NAME)"
 	@echo "  SEED_DATASET       = $(SEED_DATASET)"
@@ -367,6 +380,110 @@ bloom-eval:
 		--num-tests $(BLOOM_NUM_TESTS) \
 		--output-dir $(OUTPUT_DIR)
 
+.PHONY: bloom-eval-utility-resolve
+bloom-eval-utility-resolve:
+	@echo "Resolving Bloom model IDs from UTILITY_MODELS: $(UTILITY_MODELS)"
+	@if [ ! -d "external_packages/bloom" ]; then \
+		echo "Error: external_packages/bloom/ not found"; \
+		echo "Please ensure Bloom is in external_packages/ directory"; \
+		exit 1; \
+	fi
+	@MODELS=$$(echo "$(UTILITY_MODELS)" | tr ',' ' '); \
+	if [ -z "$$MODELS" ]; then \
+		echo "Error: UTILITY_MODELS is empty"; \
+		exit 1; \
+	fi; \
+	for MODEL in $$MODELS; do \
+		if [ -z "$$MODEL" ]; then \
+			continue; \
+		fi; \
+		echo "Input model: $$MODEL"; \
+		RESOLVED=$$($(GET_MODEL) --consumer bloom $$MODEL); \
+		echo "Resolved Bloom model: $$RESOLVED"; \
+		MODEL_ENV=$$($(GET_MODEL_ENV) --consumer bloom $$MODEL 2>&1); \
+		STATUS=$$?; \
+		if [ $$STATUS -ne 0 ]; then \
+			echo "$$MODEL_ENV"; \
+			exit $$STATUS; \
+		fi; \
+		if [ -n "$$MODEL_ENV" ]; then \
+			echo "$$MODEL_ENV"; \
+		else \
+			echo "(no additional env exports)"; \
+		fi; \
+		echo ""; \
+	done
+
+.PHONY: bloom-eval-utility
+bloom-eval-utility:
+	@echo "Running Bloom behavior evaluation for UTILITY_MODELS: $(UTILITY_MODELS)"
+	@if [ ! -d "external_packages/bloom" ]; then \
+		echo "Error: external_packages/bloom/ not found"; \
+		echo "Please ensure Bloom is in external_packages/ directory"; \
+		exit 1; \
+	fi
+	@MODELS=$$(echo "$(UTILITY_MODELS)" | tr ',' ' '); \
+	if [ -z "$$MODELS" ]; then \
+		echo "Error: UTILITY_MODELS is empty"; \
+		exit 1; \
+	fi; \
+	FAILED=0; \
+	FAILED_MODELS=""; \
+	for MODEL in $$MODELS; do \
+		if [ -z "$$MODEL" ]; then \
+			continue; \
+		fi; \
+		echo ""; \
+		echo "=== Bloom eval for $$MODEL ==="; \
+		RESOLVED=$$($(GET_MODEL) --consumer bloom $$MODEL 2>&1); \
+		STATUS=$$?; \
+		if [ $$STATUS -ne 0 ]; then \
+			echo "$$RESOLVED"; \
+			FAILED=1; \
+			FAILED_MODELS="$$FAILED_MODELS $$MODEL"; \
+			if [ "$(BLOOM_FAIL_FAST)" = "1" ]; then \
+				break; \
+			else \
+				continue; \
+			fi; \
+		fi; \
+		MODEL_ENV=$$($(GET_MODEL_ENV) --consumer bloom $$MODEL 2>&1); \
+		STATUS=$$?; \
+		if [ $$STATUS -ne 0 ]; then \
+			echo "$$MODEL_ENV"; \
+			FAILED=1; \
+			FAILED_MODELS="$$FAILED_MODELS $$MODEL"; \
+			if [ "$(BLOOM_FAIL_FAST)" = "1" ]; then \
+				break; \
+			else \
+				continue; \
+			fi; \
+		fi; \
+		if [ -n "$$MODEL_ENV" ]; then \
+			eval "$$MODEL_ENV"; \
+		fi; \
+		uv run python scripts/run_bloom_eval.py \
+			--model-id "$$RESOLVED" \
+			$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+			$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+			--bloom-config $(BLOOM_CONFIG) \
+			--num-tests $(BLOOM_NUM_TESTS) \
+			--output-dir $(OUTPUT_DIR); \
+		STATUS=$$?; \
+		if [ $$STATUS -ne 0 ]; then \
+			FAILED=1; \
+			FAILED_MODELS="$$FAILED_MODELS $$MODEL"; \
+			if [ "$(BLOOM_FAIL_FAST)" = "1" ]; then \
+				break; \
+			fi; \
+		fi; \
+	done; \
+	if [ $$FAILED -ne 0 ]; then \
+		echo ""; \
+		echo "Bloom utility batch completed with failures:$$FAILED_MODELS"; \
+		exit 1; \
+	fi
+
 .PHONY: bloom-compare
 bloom-compare:
 	@echo "Comparing baseline vs fine-tuned with Bloom"
@@ -387,5 +504,6 @@ bloom-compare:
 MODEL_ID ?= openrouter/meta-llama/llama-3.1-8b-instruct
 BLOOM_CONFIG ?= config/bloom_config.yaml
 BLOOM_NUM_TESTS ?= 50
+BLOOM_FAIL_FAST ?= 0
 PETRI_TRANSCRIPT_DIR ?=
 ADAPTER_PATH ?=

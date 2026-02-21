@@ -89,14 +89,15 @@ async def test_call_target_collapses_assistants_preserving_tool_calls():
 
     captured = {}
 
-    async def fake_generate(passed_messages, tools):
+    async def fake_generate(passed_messages, tools, config=None):
         # Capture messages that are actually sent to the model
         captured["messages"] = passed_messages
         # Return a trivial assistant response
         return SimpleNamespace(message=ChatMessageAssistant(content="ok", metadata={"source": "Target"}))
 
-    with patch("petri.tools.tools.get_model") as mock_get_model:
+    with patch("petri.tools.tools.get_model") as mock_get_model, patch("petri.tools.tools.store_as") as mock_store_as:
         mock_get_model.return_value = SimpleNamespace(generate=fake_generate)
+        mock_store_as.return_value = SimpleNamespace(target_max_tokens=768)
         resp = await call_target(messages, tools=[])
 
     # Sanity check: got a response
@@ -134,12 +135,13 @@ async def test_call_target_does_not_collapse_across_tool_messages():
 
     captured = {}
 
-    async def fake_generate(passed_messages, tools):
+    async def fake_generate(passed_messages, tools, config=None):
         captured["messages"] = passed_messages
         return SimpleNamespace(message=ChatMessageAssistant(content="ok", metadata={"source": "Target"}))
 
-    with patch("petri.tools.tools.get_model") as mock_get_model:
+    with patch("petri.tools.tools.get_model") as mock_get_model, patch("petri.tools.tools.store_as") as mock_store_as:
         mock_get_model.return_value = SimpleNamespace(generate=fake_generate)
+        mock_store_as.return_value = SimpleNamespace(target_max_tokens=768)
         await call_target(messages, tools=[])
 
     sent_messages = captured["messages"]
@@ -171,12 +173,13 @@ async def test_call_target_merges_tool_calls_from_both_assistants():
 
     captured = {}
 
-    async def fake_generate(passed_messages, tools):
+    async def fake_generate(passed_messages, tools, config=None):
         captured["messages"] = passed_messages
         return SimpleNamespace(message=ChatMessageAssistant(content="ok", metadata={"source": "Target"}))
 
-    with patch("petri.tools.tools.get_model") as mock_get_model:
+    with patch("petri.tools.tools.get_model") as mock_get_model, patch("petri.tools.tools.store_as") as mock_store_as:
         mock_get_model.return_value = SimpleNamespace(generate=fake_generate)
+        mock_store_as.return_value = SimpleNamespace(target_max_tokens=768)
         await call_target(messages, tools=[])
 
     sent = captured["messages"]

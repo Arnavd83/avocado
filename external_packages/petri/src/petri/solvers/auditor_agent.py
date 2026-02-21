@@ -99,6 +99,7 @@ def auditor_agent(
     instance: str | None = None,
     auditor_tools: list[Tool] | None = None,
     prefill: bool = True,
+    target_max_tokens: int | None = 768,
     auditor_system_message: str = AUDITOR_SYSTEM_PROMPT_V2,
     auditor_user_message: str = AUDITOR_USER_MESSAGE,
 ) -> Agent:
@@ -128,6 +129,7 @@ def auditor_agent(
         instance: Optional instance identifier for managing multiple concurrent audits
         auditor_tools: Custom tools for the auditor agent (default: uses default_auditor_tools)
         prefill: Whether to allow the auditor to prefill the target model's response. Only relevant if auditor_tools is not provided. (default: True)
+        target_max_tokens: Maximum tokens per target model response. None disables the cap. (default: 768)
         auditor_system_message: Custom system message for the auditor agent or path to a file (default: uses AUDITOR_SYSTEM_PROMPT)
         auditor_user_message: Custom user message for the auditor agent or path to a file (default: uses AUDITOR_USER_MESSAGE)
 
@@ -154,6 +156,7 @@ def auditor_agent(
         start_time = datetime.now()
 
         audit_store = store_as(AuditStore, instance=instance)
+        audit_store.target_max_tokens = target_max_tokens
         audit_store.auditor.tools = auditor_tools or default_auditor_tools(instance=instance, prefill=prefill)
 
         # The user's instructions are the first message in state.messages.

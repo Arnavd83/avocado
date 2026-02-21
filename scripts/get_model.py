@@ -10,6 +10,7 @@ For models with custom base_url (like Lambda AI):
   in the calling process (Makefile or .env) for Inspect AI to use custom endpoints
 """
 
+import argparse
 import sys
 import os
 from pathlib import Path
@@ -24,17 +25,39 @@ load_dotenv()
 from src.utils import ModelManager
 
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: get_model.py <model_id>", file=sys.stderr)
-        sys.exit(1)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Resolve model IDs from config/models.yaml"
+    )
+    parser.add_argument("model_id", help="Model alias from config/models.yaml or direct model ID")
+    parser.add_argument(
+        "--consumer",
+        choices=["inspect", "bloom"],
+        default="inspect",
+        help="Model consumer. inspect keeps legacy vllm/ behavior for custom endpoints.",
+    )
+    return parser.parse_args()
 
-    model_id = sys.argv[1]
+
+def resolve_model_id(manager: ModelManager, model_id: str, consumer: str) -> str:
+    """
+    Resolve a model identifier for a specific consumer.
+
+    - inspect: preserve legacy behavior (custom endpoint aliases -> vllm/<model_name>)
+    - bloom:   use model_name as-is; if it's already a direct ID not in models.yaml, pass through
+    """
+    try:
+        model = manager.get_model(model_id)
+    except KeyError:
+        if consumer == "bloom" and "/" in model_id:
+            # Allow direct LiteLLM IDs for Bloom without requiring a models.yaml alias.
+            return model_id
+        raise
+
+    if consumer == "bloom":
+        return model.model_name
 
     try:
-        manager = ModelManager()
-        model = manager.get_model(model_id)
-
         # Check if model uses custom base_url and provide helpful info
         if model.base_url:
             # Warn if required environment variables aren't set (for custom endpoints)
@@ -58,18 +81,27 @@ def main():
                     file=sys.stderr
                 )
 
-        # Output model name for Inspect AI
-        # For custom endpoints with OpenAI-compatible API
         if model.base_url:
-            # Check if this is a vLLM server (localhost or specific port pattern)
-            # Inspect AI has native vLLM support using "vllm/" prefix
-            # vLLM provider can connect to existing server via base_url or port
-            # For now, use vllm/ prefix and set VLLM_BASE_URL environment variable
-            output_name = f"vllm/{model.model_name}"
-            print(output_name)
-        else:
-            # Output as-is for standard providers (OpenRouter, etc.)
-            print(model.model_name)
+            # Preserve existing Inspect behavior for custom endpoints.
+            return f"vllm/{model.model_name}"
+
+        return model.model_name
+    except Exception:
+        # Re-raise to preserve existing top-level error handling.
+        raise
+
+
+def main() -> None:
+    args = parse_args()
+
+    try:
+        manager = ModelManager()
+        resolved = resolve_model_id(
+            manager=manager,
+            model_id=args.model_id,
+            consumer=args.consumer,
+        )
+        print(resolved)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

@@ -27,6 +27,21 @@ DEFAULT_TARGET_MODEL = "gemma-3-27b"
 DEFAULT_JUDGE_MODEL = "claude-opus-4.5"
 
 
+def _parse_optional_positive_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"", "none", "null"}:
+        return None
+    try:
+        parsed = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Expected a positive integer or one of: none, null") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("Expected a positive integer or one of: none, null")
+    return parsed
+
+
 @dataclass(frozen=True)
 class SeedJob:
     seed_index: int
@@ -201,6 +216,7 @@ def _run_seed_job(
     auditor: str,
     judge: str,
     max_turns: int,
+    target_max_tokens: int | None,
     env: dict[str, str],
     stream_output: bool,
 ) -> dict[str, Any]:
@@ -219,6 +235,7 @@ def _run_seed_job(
             target=target,
             judge=judge,
             max_turns=max_turns,
+            target_max_tokens=target_max_tokens,
             env=env,
             stream_output=stream_output,
         )
@@ -263,6 +280,7 @@ def _run_seed_jobs_serial(
     auditor: str,
     judge: str,
     max_turns: int,
+    target_max_tokens: int | None,
     env: dict[str, str],
     stream_output: bool,
     fail_fast: bool,
@@ -277,6 +295,7 @@ def _run_seed_jobs_serial(
             auditor=auditor,
             judge=judge,
             max_turns=max_turns,
+            target_max_tokens=target_max_tokens,
             env=env,
             stream_output=stream_output,
         )
@@ -294,6 +313,7 @@ def _run_seed_jobs_parallel(
     auditor: str,
     judge: str,
     max_turns: int,
+    target_max_tokens: int | None,
     env: dict[str, str],
     stream_output: bool,
     fail_fast: bool,
@@ -313,6 +333,7 @@ def _run_seed_jobs_parallel(
             auditor=auditor,
             judge=judge,
             max_turns=max_turns,
+            target_max_tokens=target_max_tokens,
             env=env,
             stream_output=stream_output,
         )
@@ -348,6 +369,7 @@ def _run_petri(
     target: str,
     judge: str,
     max_turns: int,
+    target_max_tokens: int | None,
     env: dict[str, str],
     stream_output: bool,
 ) -> int:
@@ -373,6 +395,10 @@ def _run_petri(
         "-T",
         f"transcript_save_dir={seed_dir}",
     ]
+    if target_max_tokens is None:
+        cmd.extend(["-T", "target_max_tokens=null"])
+    else:
+        cmd.extend(["-T", f"target_max_tokens={target_max_tokens}"])
     if stream_output:
         with log_path.open("w", encoding="utf-8") as handle:
             master_fd, slave_fd = pty.openpty()
@@ -435,6 +461,12 @@ def main() -> None:
     parser.add_argument("--judge-model-id", default=os.getenv("JUDGE_MODEL_ID", DEFAULT_JUDGE_MODEL))
     parser.add_argument("--max-turns", type=int, default=int(os.getenv("MAX_TURNS", "10")))
     parser.add_argument(
+        "--target-max-tokens",
+        type=_parse_optional_positive_int,
+        default=_parse_optional_positive_int(os.getenv("TARGET_MAX_TOKENS", "768")),
+        help="Per-target-response token cap. Use 'none' to disable.",
+    )
+    parser.add_argument(
         "--max-parallel",
         type=int,
         default=int(os.getenv("BATCH_MAX_PARALLEL", "1")),
@@ -487,6 +519,7 @@ def main() -> None:
             auditor=auditor,
             judge=judge,
             max_turns=args.max_turns,
+            target_max_tokens=args.target_max_tokens,
             env=env,
             stream_output=stream_output,
             fail_fast=args.fail_fast,
@@ -500,6 +533,7 @@ def main() -> None:
             auditor=auditor,
             judge=judge,
             max_turns=args.max_turns,
+            target_max_tokens=args.target_max_tokens,
             env=env,
             stream_output=stream_output,
             fail_fast=args.fail_fast,

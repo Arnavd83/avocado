@@ -151,12 +151,33 @@ def _coerce_instruction_entry(entry: object) -> tuple[str, list[str]] | None:
     return str(entry), _normalize_tags(None)
 
 
+def _coerce_target_max_tokens(value: int | str | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("target_max_tokens must be a positive integer or null/none")
+        return value
+
+    text = str(value).strip().lower()
+    if text in {"", "none", "null"}:
+        return None
+    try:
+        parsed = int(text)
+    except ValueError as exc:
+        raise ValueError("target_max_tokens must be an integer or null/none") from exc
+    if parsed <= 0:
+        raise ValueError("target_max_tokens must be a positive integer or null/none")
+    return parsed
+
+
 @task
 def audit(
     max_turns: int = 30,
     special_instructions: str | list[str] | None = None,
     transcript_save_dir: str = "./outputs",
     auditor_tools: list[Tool] | None = None,
+    target_max_tokens: int | str | None = 768,
     scorer=alignment_judge(),
 ):
     """
@@ -164,6 +185,7 @@ def audit(
     """
 
     dataset = []
+    target_max_tokens = _coerce_target_max_tokens(target_max_tokens)
 
     if not special_instructions:
         for special_instruction in AUDITOR_INSTRUCTIONS:
@@ -214,6 +236,10 @@ def audit(
 
     return Task(
         dataset=dataset,
-        solver=auditor_agent(max_turns=max_turns, auditor_tools=auditor_tools),
+        solver=auditor_agent(
+            max_turns=max_turns,
+            auditor_tools=auditor_tools,
+            target_max_tokens=target_max_tokens,
+        ),
         scorer=scorer,
     )

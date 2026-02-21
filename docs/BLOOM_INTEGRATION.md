@@ -66,6 +66,44 @@ make bloom-eval \
     PETRI_TRANSCRIPT_DIR=./data/scratch/petri_audits
 ```
 
+### Batch Evaluation from `UTILITY_MODELS`
+
+Run Bloom once per model listed in `UTILITY_MODELS`:
+
+```bash
+make bloom-eval-utility \
+    UTILITY_MODELS="qwen-3-8b lambda-ai-gpu" \
+    BLOOM_NUM_TESTS=50
+```
+
+Optional behavior:
+- `BLOOM_FAIL_FAST=1` stops on the first failed model.
+- Default `BLOOM_FAIL_FAST=0` continues all models and fails at the end if any failed.
+
+Inspect resolved model IDs and env wiring without running Bloom:
+
+```bash
+make bloom-eval-utility-resolve \
+    UTILITY_MODELS="qwen-3-8b lambda-ai-gpu"
+```
+
+### Model Alias Resolution for Bloom
+
+`bloom-eval-utility` resolves each item in `UTILITY_MODELS` through `config/models.yaml` using Bloom-specific resolution rules:
+- Aliases are resolved via `scripts/get_model.py --consumer bloom`
+- Direct LiteLLM IDs are accepted as-is (e.g. `openrouter/meta-llama/llama-3.1-8b-instruct`)
+
+For custom endpoint aliases (models with `base_url`), Bloom uses OpenAI-compatible routing:
+- `OPENAI_API_BASE=<base_url>`
+- `OPENAI_BASE_URL=<base_url>`
+- `OPENAI_API_KEY=<value from api_key_env>`
+
+Example:
+- `lambda-ai-gpu` resolves to `openai/meta-llama/Llama-3.1-8B-Instruct`
+- Env is wired from `config/models.yaml` (`base_url`) and `VLLM_API_KEY` (`api_key_env`)
+
+If a custom endpoint model is missing its required key env var, Bloom exits early before running the pipeline.
+
 ## Configuration
 
 Edit `config/bloom_config.yaml` to customize:
