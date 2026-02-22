@@ -7,7 +7,7 @@ Usage::
 
     from durability.db import connect, insert_run, list_runs, get_transcript
 
-    conn = connect("petri_runs.db")
+    conn = connect()  # uses default shared drive path
     insert_run(conn, run_config, score)
     insert_transcript(conn, run_id, transcript_json)
 
@@ -18,14 +18,30 @@ Usage::
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from .run_config import Models, RunConfig
 from .score import JAILBREAK_THRESHOLD, QuantitativeScores, Score, UniversalScores
+
+load_dotenv()
+
+
+def _default_db_path() -> Path:
+    """Resolve the database path from the PETRI_DB_PATH env variable."""
+    db_path = os.environ.get("PETRI_DB_PATH")
+    if not db_path:
+        raise RuntimeError(
+            "PETRI_DB_PATH is not set. Add it to your .env file "
+            "(see .env.example for reference)."
+        )
+    return Path(db_path)
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS runs (
@@ -62,8 +78,13 @@ CREATE TABLE IF NOT EXISTS transcripts (
 """
 
 
-def connect(db_path: str | Path) -> sqlite3.Connection:
-    """Open (or create) the database at *db_path* and ensure tables exist."""
+def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
+    """Open (or create) the database at *db_path* and ensure tables exist.
+
+    If *db_path* is ``None``, reads from the ``PETRI_DB_PATH`` env variable.
+    """
+    if db_path is None:
+        db_path = _default_db_path()
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)

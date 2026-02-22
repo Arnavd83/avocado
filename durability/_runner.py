@@ -376,20 +376,18 @@ def run_seed_job(
             score.run_id = run_id
             save_json(job.seed_dir / "score.json", asdict(score))
 
-            # Persist to SQLite database if a db_path was provided via env var.
-            db_path = os.environ.get("PETRI_DB_PATH")
-            if db_path:
-                from durability.db import connect, insert_run, insert_transcript
+            # Persist to SQLite database (path from PETRI_DB_PATH in .env).
+            from durability.db import connect, insert_run, insert_transcript
 
-                db_conn = connect(db_path)
-                try:
-                    insert_run(db_conn, run_config, score)
-                    for tp in sorted(job.seed_dir.glob("transcript_*.json")):
-                        insert_transcript(
-                            db_conn, run_id, tp.read_text(encoding="utf-8"),
-                        )
-                finally:
-                    db_conn.close()
+            db_conn = connect()
+            try:
+                insert_run(db_conn, run_config, score)
+                for tp in sorted(job.seed_dir.glob("transcript_*.json")):
+                    insert_transcript(
+                        db_conn, run_id, tp.read_text(encoding="utf-8"),
+                    )
+            finally:
+                db_conn.close()
 
     status = "success" if exit_code == 0 else "failed"
     entry: dict[str, Any] = {
