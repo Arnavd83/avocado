@@ -27,7 +27,7 @@ class RunConfig:
     run_id: str
     models: Models
     prompt: str
-    behavior: str
-    strategy: str = ""
+    behavior: str | None = None
+    strategy: str | None = None
     max_turns: int = 30
     tags: list[str] = field(default_factory=list)

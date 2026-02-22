@@ -43,4 +43,5 @@ class Score:
     total_turns: int
     timestamp: datetime
     transcript_id: str
+    transcript_path: str | None = None
     raw_scores: dict[str, float] = field(default_factory=dict)

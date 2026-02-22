@@ -47,6 +47,7 @@ dependencies = [
 
 [project.scripts]
 inference-server = "inference_server.inference_server.cli:main"
+durability = "durability.cli:cli"
 
 [project.optional-dependencies]
 dev = [

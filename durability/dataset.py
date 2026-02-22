@@ -171,6 +171,7 @@ def build_score_from_record(record: dict) -> Score:
         total_turns=record.get("message_count") or 0,
         timestamp=timestamp,
         transcript_id=transcript_id,
+        transcript_path=record.get("transcript_path"),
         raw_scores={k: float(v) for k, v in raw_scores.items() if isinstance(v, (int, float))},
     )
 
