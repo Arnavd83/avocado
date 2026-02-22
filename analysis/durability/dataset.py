@@ -14,7 +14,7 @@ import pandas as pd
 
 from petri.scorers.prompts import build_dimension_set
 
-from durability.behavior import parse_behavior_tags, parse_strategy_tags
+from .behavior import parse_behavior_tags, parse_strategy_tags
 from durability.io import find_eval_files, find_transcript_files, load_all_eval_summaries, load_transcript
 from .scoring import compute_severity, severity_to_durability
 
