@@ -47,6 +47,7 @@ dependencies = [
 
 [project.scripts]
 inference-server = "inference_server.inference_server.cli:main"
+durability = "durability.cli:cli"
 
 [project.optional-dependencies]
 dev = [
@@ -64,7 +65,7 @@ petri = { path = "durability/petri", editable = true }
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages
 # Note: inference_server has nested structure: inference_server/inference_server/
-packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "durability", "value_measurement"]
+packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "durability", "value_measurement", "analysis"]
 
 [build-system]
 requires = ["hatchling"]

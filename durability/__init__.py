@@ -1,5 +1,9 @@
-"""Phase 3 durability analysis utilities."""
+"""Durability data gathering: run Petri audits, collect Score objects."""
 
-from .dataset import build_datasets
+from .score import Score, UniversalScores, QuantitativeScores
+from .run_config import RunConfig, Models
+from .dataset import build_scores
 
-__all__ = ["build_datasets"]
+from . import db
+
+__all__ = ["Score", "UniversalScores", "QuantitativeScores", "RunConfig", "Models", "build_scores", "db"]
