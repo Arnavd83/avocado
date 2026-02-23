@@ -119,7 +119,7 @@ audit-custom:
 # Run petri audits for every seed in durability/config/seed_dataset_<name>.json
 .PHONY: audit-seeds
 audit-seeds:
-	@uv run python durability/scripts/run_seed_dataset.py \
+	@uv run python -m durability batch \
 		--seed-dataset $(SEED_DATASET) \
 		--output-root $(BATCH_ROOT) \
 		--auditor-model-id $(AUDITOR_MODEL_ID) \
