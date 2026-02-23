@@ -258,6 +258,6 @@ def batch(
 
     # Print summary
     click.echo(f"\nBatch complete: {batch_root}")
-    succeeded = sum(1 for m in manifest if m.get("status") == "ok")
+    succeeded = sum(1 for m in manifest if m.get("status") == "success")
     failed = len(manifest) - succeeded
     click.echo(f"  {succeeded} succeeded, {failed} failed out of {len(manifest)} total")

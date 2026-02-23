@@ -10,6 +10,7 @@ import signal
 import struct
 import subprocess
 import sys
+import threading
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
@@ -330,6 +331,7 @@ def run_seed_job(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    db_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     job.seed_dir.mkdir(parents=True, exist_ok=True)
     write_seed_file(job.seed_file, job.instruction, job.tags)
@@ -378,17 +380,22 @@ def run_seed_job(
             save_json(job.seed_dir / "score.json", asdict(score))
 
             # Persist to SQLite database (path from PETRI_DB_PATH in .env).
+            # Use db_lock to serialize writes when running in parallel,
+            # preventing corruption on network filesystems (e.g. Google Drive).
             from durability.db import connect, insert_run, insert_transcript
 
-            db_conn = connect()
-            try:
-                insert_run(db_conn, run_config, score)
-                for tp in sorted(job.seed_dir.glob("transcript_*.json")):
-                    insert_transcript(
-                        db_conn, run_id, tp.read_text(encoding="utf-8"),
-                    )
-            finally:
-                db_conn.close()
+            from contextlib import nullcontext
+            lock = db_lock or nullcontext()
+            with lock:
+                db_conn = connect()
+                try:
+                    insert_run(db_conn, run_config, score)
+                    for tp in sorted(job.seed_dir.glob("transcript_*.json")):
+                        insert_transcript(
+                            db_conn, run_id, tp.read_text(encoding="utf-8"),
+                        )
+                finally:
+                    db_conn.close()
 
     status = "success" if exit_code == 0 else "failed"
     entry: dict[str, Any] = {
@@ -428,6 +435,7 @@ def run_seed_jobs_serial(
     env: dict[str, str],
     stream_output: bool,
     fail_fast: bool,
+    db_lock: threading.Lock | None = None,
 ) -> list[dict[str, Any]]:
     manifest: list[dict[str, Any]] = []
     for job in jobs:
@@ -441,6 +449,7 @@ def run_seed_jobs_serial(
             max_turns=max_turns,
             env=env,
             stream_output=stream_output,
+            db_lock=db_lock,
         )
         manifest.append(result)
         if fail_fast and result.get("exit_code") != 0:
@@ -460,6 +469,7 @@ def run_seed_jobs_parallel(
     stream_output: bool,
     fail_fast: bool,
     max_parallel: int,
+    db_lock: threading.Lock | None = None,
 ) -> list[dict[str, Any]]:
     results: dict[int, dict[str, Any]] = {}
     stop_scheduling = False
@@ -477,6 +487,7 @@ def run_seed_jobs_parallel(
             max_turns=max_turns,
             env=env,
             stream_output=stream_output,
+            db_lock=db_lock,
         )
         pending[future] = job
 
@@ -676,19 +687,20 @@ def run_batch(
         stream_output = False
 
     jobs = build_seed_jobs(seed_entries, batch_root)
+    db_lock = threading.Lock()
 
     if max_parallel == 1:
         manifest = run_seed_jobs_serial(
             jobs, batch_root=batch_root, target=target, target_slug=target_s,
             auditor=auditor, judge=judge, max_turns=max_turns, env=env,
-            stream_output=stream_output, fail_fast=fail_fast,
+            stream_output=stream_output, fail_fast=fail_fast, db_lock=db_lock,
         )
     else:
         manifest = run_seed_jobs_parallel(
             jobs, batch_root=batch_root, target=target, target_slug=target_s,
             auditor=auditor, judge=judge, max_turns=max_turns, env=env,
             stream_output=stream_output, fail_fast=fail_fast,
-            max_parallel=max_parallel,
+            max_parallel=max_parallel, db_lock=db_lock,
         )
 
     save_json(batch_root / "manifest.json", manifest)
