@@ -19,7 +19,6 @@ from typing import Any
 
 from shared.paths import PROJECT_ROOT
 
-from durability.io import find_transcript_files, load_transcript
 from durability.run_config import Models, RunConfig
 from durability.score import JAILBREAK_THRESHOLD, QuantitativeScores, Score, UniversalScores
 
@@ -639,10 +638,11 @@ def build_score_from_record(record: dict) -> Score:
 
 def build_scores(root: Path) -> list[Score]:
     """Find transcripts under *root*, parse them, and return Score objects."""
-    paths = find_transcript_files(root)
+    paths = sorted(root.rglob("transcript_*.json")) if root.exists() else []
     scores: list[Score] = []
     for path in paths:
-        data = load_transcript(path)
+        with path.open("r", encoding="utf-8") as handle:
+            data = json.load(handle)
         record = _build_transcript_record(path, data)
         scores.append(build_score_from_record(record))
     return scores
