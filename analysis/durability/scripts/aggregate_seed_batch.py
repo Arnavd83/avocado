@@ -127,14 +127,14 @@ def _write_csv(df: pd.DataFrame, path: Path) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Aggregate batch outputs into summary tables.")
-    parser.add_argument("--batch-dir", required=True, help="Batch folder created by run_seed_dataset.py")
+    parser.add_argument("--batch-dir", required=True, help="Batch folder created by `durability batch`")
     args = parser.parse_args()
 
     batch_dir = Path(args.batch_dir)
     if not batch_dir.exists():
         raise FileNotFoundError(f"Batch dir not found: {batch_dir}")
 
-    datasets = build_datasets(batch_dir, source="transcript")
+    datasets = build_datasets(source="transcript")
     transcript_df = datasets.get("transcript")
     if transcript_df is None or transcript_df.empty:
         raise RuntimeError("No transcripts found for aggregation.")

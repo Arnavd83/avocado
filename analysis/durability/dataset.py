@@ -1,22 +1,22 @@
 """DataFrame-based dataset builders for analysis consumers.
 
-Wraps durability's Score-based API back into DataFrames and applies
+Reads from the shared SQLite database (via durability.db) and applies
 severity/durability scoring for downstream analysis, visualization, and the
 web UI.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Iterable
+import json
+from typing import Any
 
 import pandas as pd
 
 from petri.scorers.prompts import build_dimension_set
 
 from .behavior import parse_behavior_tags, parse_strategy_tags
-from durability.io import find_eval_files, find_transcript_files, load_all_eval_summaries, load_transcript
 from .scoring import compute_severity, severity_to_durability
+from durability.db import connect, list_runs, get_transcript
 
 
 def _parse_datetime(value: str | None) -> str | None:
@@ -29,70 +29,37 @@ def _parse_datetime(value: str | None) -> str | None:
         return value
 
 
-def _parse_batch_model_slug(batch_name: str | None) -> str | None:
-    if not batch_name:
-        return None
-    prefix = "petri_batch_"
-    if not batch_name.startswith(prefix):
-        return None
-    remainder = batch_name[len(prefix):]
-    parts = remainder.split("_")
-    if len(parts) < 3:
-        return None
-    slug = "_".join(parts[2:])
-    return slug or None
+def build_transcript_dataset(**filters: Any) -> pd.DataFrame:
+    """Build a DataFrame of runs from the database.
 
+    Any keyword arguments are passed through as column filters to
+    ``durability.db.list_runs`` (e.g. ``behavior="deception"``).
+    """
+    conn = connect()
+    try:
+        rows = list_runs(conn, **filters)
+    finally:
+        conn.close()
 
-def _extract_batch_info(path: Path) -> dict[str, str | None]:
-    batch_name = None
-    batch_dir = None
-
-    for parent in [path, *path.parents]:
-        if parent.name.startswith("petri_batch_"):
-            batch_name = parent.name
-            batch_dir = str(parent)
-            break
-
-    return {
-        "batch_name": batch_name,
-        "batch_dir": batch_dir,
-        "batch_model_slug": _parse_batch_model_slug(batch_name),
-    }
-
-
-def _build_transcript_record(path: Path, data: dict) -> dict:
-    metadata = data.get("metadata", {})
-    judge_output = metadata.get("judge_output") or {}
-    messages = data.get("target_messages") or data.get("messages") or []
-
-    transcript_id = metadata.get("transcript_id") or path.stem
-    prompt = metadata.get("description") or ""
-    tags = metadata.get("tags")
-    batch_info = _extract_batch_info(path)
-
-    record: dict = {
-        "source": "transcript",
-        "transcript_path": str(path),
-        "transcript_id": transcript_id,
-        "created_at": _parse_datetime(metadata.get("created_at")),
-        "updated_at": _parse_datetime(metadata.get("updated_at")),
-        "auditor_model": metadata.get("auditor_model"),
-        "target_model": metadata.get("target_model"),
-        "prompt": prompt,
-        "tags": tags,
-        "message_count": len([msg for msg in messages if msg.get("role") != "system"]),
-        "scores": judge_output.get("scores", {}) or {},
-        **batch_info,
-    }
-
-    return record
-
-
-def build_transcript_dataset(paths: Iterable[Path]) -> pd.DataFrame:
     records: list[dict] = []
-    for path in paths:
-        data = load_transcript(path)
-        records.append(_build_transcript_record(path, data))
+    for row in rows:
+        tags = json.loads(row["tags"]) if isinstance(row["tags"], str) else row["tags"]
+        scores = json.loads(row["raw_scores"]) if isinstance(row["raw_scores"], str) else row["raw_scores"]
+
+        records.append({
+            "source": "db",
+            "run_id": row["run_id"],
+            "created_at": _parse_datetime(row.get("timestamp")),
+            "auditor_model": row["auditor_model"],
+            "target_model": row["target_model"],
+            "prompt": row["prompt"],
+            "tags": tags,
+            "message_count": row.get("total_turns"),
+            "scores": scores or {},
+            "behavior": row.get("behavior"),
+            "strategy": row.get("strategy"),
+        })
+
     return pd.DataFrame(records)
 
 
@@ -145,28 +112,18 @@ def apply_scoring(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_eval_dataset(paths: Iterable[Path]) -> pd.DataFrame:
-    records = load_all_eval_summaries(paths)
-    return pd.DataFrame(records)
+def build_datasets(source: str = "transcript", **filters: Any) -> dict[str, pd.DataFrame]:
+    """Build scored datasets from the database.
 
-
-def build_datasets(root: Path, source: str = "transcript") -> dict[str, pd.DataFrame]:
-    eval_paths = find_eval_files(root)
-    transcript_paths = find_transcript_files(root)
-
+    Args:
+        source: Currently only "transcript" is supported (eval summaries
+            are not stored in the DB).
+        **filters: Column filters forwarded to ``list_runs``.
+    """
     datasets: dict[str, pd.DataFrame] = {}
 
-    if source in ("eval", "both"):
-        eval_df = build_eval_dataset(eval_paths)
-        if not eval_df.empty:
-            eval_df["created_at"] = eval_df["created_at"].apply(_parse_datetime)
-        datasets["eval"] = apply_scoring(eval_df) if not eval_df.empty else eval_df
-
     if source in ("transcript", "both"):
-        transcript_df = build_transcript_dataset(transcript_paths)
+        transcript_df = build_transcript_dataset(**filters)
         datasets["transcript"] = apply_scoring(transcript_df) if not transcript_df.empty else transcript_df
-
-    if source == "both" and "eval" in datasets and "transcript" in datasets:
-        datasets["combined"] = pd.concat([datasets["eval"], datasets["transcript"]], ignore_index=True)
 
     return datasets
