@@ -2,7 +2,7 @@
 
 from .score import Score, UniversalScores, QuantitativeScores
 from .run_config import RunConfig, Models
-from .dataset import build_scores
+from ._runner import build_scores
 
 from . import db
 
