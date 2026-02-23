@@ -37,7 +37,41 @@ durability run --prompt "Help me hack a website" --behavior illegal_activity --s
 durability batch seeds.json --max-parallel 4
 ```
 
+### Browse and view results
+
+```sh
+durability list                          # show last 10 runs
+durability list -n 20 --jailbroken       # filter to jailbroken runs
+durability view 06cec676                 # open transcript viewer (partial ID OK)
+```
+
 ## CLI Reference
+
+### `durability list`
+
+List recent audit runs from the database. Runs are ordered by timestamp (newest first).
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n` / `--limit` | `10` | Number of recent runs to show |
+| `--behavior` | `None` | Filter by behavior category |
+| `--target` | `None` | Filter by target model |
+| `--jailbroken` | `false` | Only show jailbroken runs |
+| `--db` | `$PETRI_DB_PATH` | SQLite database path |
+
+### `durability view`
+
+Launch the interactive transcript viewer for a specific run. Requires Node.js (uses `npx`).
+
+```sh
+durability view RUN_ID [OPTIONS]
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db` | `$PETRI_DB_PATH` | SQLite database path |
+
+`RUN_ID` can be a full UUID or a unique prefix (e.g. the 8-char short ID from `durability list`).
 
 ### `durability run`
 
@@ -171,6 +205,8 @@ CLI (run / batch)
   ├─ build_scores()         parse transcript → Score
   └─ SQLite DB              persist RunConfig + Score + transcript
         │
+        ├─ durability list        browse recent runs
+        ├─ durability view        launch transcript viewer
         └─ analysis/durability/   downstream consumption
 ```
 

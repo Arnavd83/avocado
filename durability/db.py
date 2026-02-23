@@ -252,6 +252,25 @@ def list_runs(conn: sqlite3.Connection, **filters: Any) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def resolve_run_id(conn: sqlite3.Connection, prefix: str) -> str:
+    """Resolve a full or partial run_id prefix to a unique run_id.
+
+    Raises ``KeyError`` if no match or ``ValueError`` if ambiguous.
+    """
+    rows = conn.execute(
+        "SELECT run_id FROM runs WHERE run_id LIKE ?", (prefix + "%",)
+    ).fetchall()
+    if not rows:
+        raise KeyError(f"No run found matching prefix {prefix!r}")
+    if len(rows) > 1:
+        matches = [r["run_id"] for r in rows[:5]]
+        raise ValueError(
+            f"Ambiguous prefix {prefix!r} matches {len(rows)} runs: "
+            + ", ".join(matches) + ("..." if len(rows) > 5 else "")
+        )
+    return rows[0]["run_id"]
+
+
 def export_transcript(conn: sqlite3.Connection, run_id: str, path: Path) -> Path:
     """Write a transcript back to a JSON file (e.g. for the viewer).
 

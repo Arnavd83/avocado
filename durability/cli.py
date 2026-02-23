@@ -29,7 +29,7 @@ from durability._runner import (
     timestamp,
     write_seed_file,
 )
-from durability.db import connect, insert_run, insert_transcript
+from durability.db import connect, export_transcript, insert_run, insert_transcript, list_runs, resolve_run_id
 
 
 
@@ -261,3 +261,123 @@ def batch(
     succeeded = sum(1 for m in manifest if m.get("status") == "success")
     failed = len(manifest) - succeeded
     click.echo(f"  {succeeded} succeeded, {failed} failed out of {len(manifest)} total")
+
+
+# ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
+
+
+@cli.command("list")
+@click.option("-n", "--limit", type=int, default=10, show_default=True, help="Number of recent runs to show.")
+@click.option("--behavior", default=None, help="Filter by behavior category.")
+@click.option("--target", "target_model", default=None, help="Filter by target model.")
+@click.option("--jailbroken", is_flag=True, default=False, help="Only show jailbroken runs.")
+@click.option(
+    "--db", "db_path", type=click.Path(), default=None,
+    help="SQLite database path. Default: PETRI_DB_PATH env var.",
+)
+def list_cmd(
+    limit: int,
+    behavior: str | None,
+    target_model: str | None,
+    jailbroken: bool,
+    db_path: str | None,
+) -> None:
+    """List recent audit runs from the database.
+
+    \b
+    Examples:
+      durability list
+      durability list -n 20
+      durability list --behavior deception --jailbroken
+      durability list --target claude-sonnet-4.5
+    """
+    conn = connect(db_path)
+    try:
+        filters: dict[str, object] = {}
+        if behavior:
+            filters["behavior"] = behavior
+        if target_model:
+            filters["target_model"] = target_model
+        if jailbroken:
+            filters["is_jailbroken"] = 1
+        runs = list_runs(conn, **filters)[:limit]
+    finally:
+        conn.close()
+
+    if not runs:
+        click.echo("No runs found.")
+        return
+
+    # Header
+    click.echo(
+        f"{'RUN ID':>8}  {'TIMESTAMP':>19}  {'TARGET':<28}  {'BEHAVIOR':<20}  "
+        f"{'JAIL':>4}  {'CONC':>5}  PROMPT"
+    )
+    click.echo("-" * 120)
+
+    for r in runs:
+        run_id_short = (r["run_id"] or "")[:8]
+        ts = (r["timestamp"] or "")[:19]
+        target = (r["target_model"] or "")[:28]
+        beh = (r["behavior"] or "")[:20]
+        jail = "YES" if r.get("is_jailbroken") else "no"
+        conc = r.get("concerning")
+        conc_str = f"{conc:.1f}" if conc is not None else "-"
+        prompt = (r["prompt"] or "")[:50].replace("\n", " ")
+        click.echo(f"{run_id_short:>8}  {ts:>19}  {target:<28}  {beh:<20}  {jail:>4}  {conc_str:>5}  {prompt}")
+
+
+# ---------------------------------------------------------------------------
+# view
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.argument("run_id")
+@click.option(
+    "--db", "db_path", type=click.Path(), default=None,
+    help="SQLite database path. Default: PETRI_DB_PATH env var.",
+)
+def view(run_id: str, db_path: str | None) -> None:
+    """Launch the transcript viewer for a specific run.
+
+    RUN_ID can be a full UUID or a unique prefix (e.g. the 8-char short ID
+    from ``durability list``).
+
+    \b
+    Examples:
+      durability view 3f2a1b4c
+      durability view 3f2a1b4c-1234-5678-9abc-def012345678
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    conn = connect(db_path)
+    try:
+        full_id = resolve_run_id(conn, run_id)
+        tmpdir = tempfile.mkdtemp(prefix="petri_view_")
+        transcript_path = Path(tmpdir) / f"transcript_{full_id}.json"
+        export_transcript(conn, full_id, transcript_path)
+    except (KeyError, ValueError) as exc:
+        click.secho(str(exc), fg="red")
+        raise SystemExit(1)
+    finally:
+        conn.close()
+
+    click.echo(f"Viewing run {full_id}")
+    try:
+        subprocess.run(
+            ["npx", "@kaifronsdal/transcript-viewer@latest", "--dir", tmpdir],
+            check=True,
+        )
+    except FileNotFoundError:
+        click.secho("npx not found. Install Node.js to use the transcript viewer.", fg="red")
+        raise SystemExit(1)
+    except subprocess.CalledProcessError as exc:
+        click.secho(f"Viewer exited with code {exc.returncode}", fg="red")
+        raise SystemExit(exc.returncode)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
