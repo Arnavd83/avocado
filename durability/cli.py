@@ -335,20 +335,21 @@ def list_cmd(
 
 
 @cli.command()
-@click.argument("run_id")
+@click.argument("run_ids", nargs=-1, required=True)
 @click.option(
     "--db", "db_path", type=click.Path(), default=None,
     help="SQLite database path. Default: PETRI_DB_PATH env var.",
 )
-def view(run_id: str, db_path: str | None) -> None:
-    """Launch the transcript viewer for a specific run.
+def view(run_ids: tuple[str, ...], db_path: str | None) -> None:
+    """Launch the transcript viewer for one or more runs.
 
-    RUN_ID can be a full UUID or a unique prefix (e.g. the 8-char short ID
+    RUN_IDS can be full UUIDs or unique prefixes (e.g. the 8-char short IDs
     from ``durability list``).
 
     \b
     Examples:
       durability view 3f2a1b4c
+      durability view 3f2a1b4c 9cd0e5f1
       durability view 3f2a1b4c-1234-5678-9abc-def012345678
     """
     import shutil
@@ -356,18 +357,23 @@ def view(run_id: str, db_path: str | None) -> None:
     import tempfile
 
     conn = connect(db_path)
+    tmpdir = tempfile.mkdtemp(prefix="petri_view_")
+    resolved = []
     try:
-        full_id = resolve_run_id(conn, run_id)
-        tmpdir = tempfile.mkdtemp(prefix="petri_view_")
-        transcript_path = Path(tmpdir) / f"transcript_{full_id}.json"
-        export_transcript(conn, full_id, transcript_path)
+        for rid in run_ids:
+            full_id = resolve_run_id(conn, rid)
+            transcript_path = Path(tmpdir) / f"transcript_{full_id}.json"
+            export_transcript(conn, full_id, transcript_path)
+            resolved.append(full_id)
     except (KeyError, ValueError) as exc:
         click.secho(str(exc), fg="red")
+        shutil.rmtree(tmpdir, ignore_errors=True)
         raise SystemExit(1)
     finally:
         conn.close()
 
-    click.echo(f"Viewing run {full_id}")
+    for full_id in resolved:
+        click.echo(f"Viewing run {full_id}")
     try:
         subprocess.run(
             ["npx", "@kaifronsdal/transcript-viewer@latest", "--dir", tmpdir],
@@ -381,3 +387,29 @@ def view(run_id: str, db_path: str | None) -> None:
         raise SystemExit(exc.returncode)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# terminate
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+@click.option("--port", default=3000, help="Port to kill. Default: 3000.")
+def terminate(port: int) -> None:
+    """Kill whatever process is running on a port (default 3000)."""
+    import signal
+    import subprocess
+
+    result = subprocess.run(
+        ["lsof", "-ti", f":{port}"],
+        capture_output=True, text=True,
+    )
+    pids = result.stdout.strip().split()
+    if not pids or pids == [""]:
+        click.echo(f"Nothing running on port {port}.")
+        return
+
+    for pid in pids:
+        os.kill(int(pid), signal.SIGTERM)
+    click.echo(f"Killed process(es) on port {port}: {', '.join(pids)}")
