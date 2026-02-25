@@ -18,9 +18,9 @@ AUDITOR_MODEL_ID ?= claude-sonnet-4.5
 TARGET_MODEL_ID ?= gpt-4o
 JUDGE_MODEL_ID ?= claude-opus-4.1
 MAX_TURNS ?= 10
-SEED_PROMPT_FILE ?= durability/config/seed_prompt.json
+SEED_PROMPT_FILE ?= durability/prompts/seed_prompt.json
 SEED_DATASET_NAME ?= easy
-SEED_DATASET ?= durability/config/seed_dataset_$(SEED_DATASET_NAME).json
+SEED_DATASET ?= durability/prompts/seed_dataset_$(SEED_DATASET_NAME).json
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/viewer_latest
 VIEWER_SOURCE_ROOT ?= data/scratch
@@ -116,7 +116,7 @@ audit-custom:
 	@echo "Available models are defined in config/models.yaml"
 	@echo "Use 'python shared/cli.py list' to see all available models"
 
-# Run petri audits for every seed in durability/config/seed_dataset_<name>.json
+# Run petri audits for every seed in durability/prompts/seed_dataset_<name>.json
 .PHONY: audit-seeds
 audit-seeds:
 	@uv run python -m durability batch \
@@ -374,7 +374,7 @@ help:
 	@echo ""
 	@echo "Running Petri:"
 	@echo "  make audit          - Run audit with default settings"
-	@echo "  make audit-seeds    - Run audit for every seed in durability/config/seed_dataset_<name>.json"
+	@echo "  make audit-seeds    - Run audit for every seed in durability/prompts/seed_dataset_<name>.json"
 	@echo "    Optional: BATCH_FAIL_FAST=1 to stop on first failure"
 	@echo "    Optional: BATCH_NO_AGGREGATE=1 to skip aggregation"
 	@echo "    Optional: BATCH_STREAM_OUTPUT=1 to stream inspect output"
@@ -462,7 +462,7 @@ help:
 	@echo "  IFEVAL_OPENROUTER_OUTPUT_DIR = $(IFEVAL_OPENROUTER_OUTPUT_DIR)"
 	@echo ""
 	@echo "Override any variable:"
-	@echo "  make audit SEED_PROMPT_FILE=durability/config/my_prompts.json"
+	@echo "  make audit SEED_PROMPT_FILE=durability/prompts/my_prompts.json"
 	@echo "  make audit MAX_TURNS=50 TARGET_MODEL_ID=gpt-4o"
 	@echo "  make view-logs VIEWER_SOURCE_ROOT=data/scratch"
 	@echo "  make view-logs VIEWER_DIR=/custom/path/to/viewer_root"
