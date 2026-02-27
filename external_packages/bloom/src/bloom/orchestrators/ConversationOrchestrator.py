@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from bloom import DEBUG_MODE, debug_print, utils
 from bloom.transcript_utils import add_transcript_event, generate_id, get_transcript_format, init_transcript_metadata
@@ -154,33 +154,41 @@ class ConversationOrchestrator:
         target_kickoff_prefix: str = "",
         generate_kickoff_additional: str = "",
         rollout_label: Optional[str] = None,
+        scripted_user_turns: Optional[List[str]] = None,
+        target_system_prompt_override: Optional[str] = None,
     ) -> ConversationOrchestrator:
-        # Generate system prompt for conversation modality
-        system_prompt_messages = [
-            {"role": "system", "content": evaluator_system_prompt},
-            {"role": "user", "content": conversation_rollout_prompt},
-        ]
+        system_prompt_content = ""
+        system_prompt_reasoning = ""
+        if target_system_prompt_override and target_system_prompt_override.strip():
+            target_system_prompt = target_system_prompt_override.strip()
+            system_prompt_content = f"<system_prompt>\n{target_system_prompt}\n</system_prompt>"
+        else:
+            # Generate system prompt for conversation modality
+            system_prompt_messages = [
+                {"role": "system", "content": evaluator_system_prompt},
+                {"role": "user", "content": conversation_rollout_prompt},
+            ]
 
-        sysprompt_response = utils.litellm_chat(
-            model_id=evaluator_model_id,
-            messages=system_prompt_messages,
-            max_tokens=evaluator_max_tokens,
-            temperature=evaluator_temperature,
-            reasoning_effort=evaluator_reasoning_effort,
-        )
+            sysprompt_response = utils.litellm_chat(
+                model_id=evaluator_model_id,
+                messages=system_prompt_messages,
+                max_tokens=evaluator_max_tokens,
+                temperature=evaluator_temperature,
+                reasoning_effort=evaluator_reasoning_effort,
+            )
 
-        # Parse the response using parse_message
-        parsed_sysprompt = utils.parse_message(sysprompt_response)
-        system_prompt_content = parsed_sysprompt["content"] or ""
-        system_prompt_reasoning = parsed_sysprompt["reasoning"] or ""
+            # Parse the response using parse_message
+            parsed_sysprompt = utils.parse_message(sysprompt_response)
+            system_prompt_content = parsed_sysprompt["content"] or ""
+            system_prompt_reasoning = parsed_sysprompt["reasoning"] or ""
 
-        # Use regex to extract content between <system_prompt> tags
-        match = re.search(r"<system_prompt>(.*?)</system_prompt>", system_prompt_content, re.DOTALL)
-        evaluator_generated_target_prompt = match.group(1).strip() if match else ""
+            # Use regex to extract content between <system_prompt> tags
+            match = re.search(r"<system_prompt>(.*?)</system_prompt>", system_prompt_content, re.DOTALL)
+            evaluator_generated_target_prompt = match.group(1).strip() if match else ""
 
-        target_system_prompt = evaluator_generated_target_prompt
-        if target_sysprompt_prefix and target_sysprompt_prefix.strip():
-            target_system_prompt = f"{target_sysprompt_prefix.strip()}\n\n{target_system_prompt}"
+            target_system_prompt = evaluator_generated_target_prompt
+            if target_sysprompt_prefix and target_sysprompt_prefix.strip():
+                target_system_prompt = f"{target_sysprompt_prefix.strip()}\n\n{target_system_prompt}"
 
         conversation_orchestrator = cls(
             api=client,
@@ -199,6 +207,8 @@ class ConversationOrchestrator:
             target_kickoff_prefix=target_kickoff_prefix,
             generate_kickoff_additional=generate_kickoff_additional,
             rollout_label=rollout_label,
+            scripted_user_turns=scripted_user_turns,
+            target_system_prompt_override=target_system_prompt_override,
         )
         # Add initial user message to evaluator history
         conversation_orchestrator.evaluator_messages.append({"role": "user", "content": conversation_rollout_prompt})
@@ -265,6 +275,8 @@ class ConversationOrchestrator:
         target_kickoff_prefix: str = "",
         generate_kickoff_additional: str = "",
         rollout_label: Optional[str] = None,
+        scripted_user_turns: Optional[List[str]] = None,
+        target_system_prompt_override: Optional[str] = None,
     ) -> None:
         self.api = api
         self.evaluator_model = evaluator_model
@@ -282,6 +294,10 @@ class ConversationOrchestrator:
         self.target_kickoff_prefix = target_kickoff_prefix
         self.generate_kickoff_additional = generate_kickoff_additional
         self.rollout_label = rollout_label or ""
+        self.scripted_user_turns = [str(turn) for turn in scripted_user_turns or [] if str(turn).strip()]
+        self.target_system_prompt_override = (
+            target_system_prompt_override.strip() if isinstance(target_system_prompt_override, str) else None
+        )
         self.evaluator_messages = []
         if self.evaluator_system_prompt:
             self.evaluator_messages.append({"role": "system", "content": self.evaluator_system_prompt})
@@ -304,11 +320,49 @@ class ConversationOrchestrator:
         self._announce_completion()
         return transcript
 
+    def _run_scripted_conversation(self) -> Dict[str, Any]:
+        """Run deterministic scripted user turns for corrigibility contract rollouts."""
+        scripted_turns = self.scripted_user_turns[: self.max_turns] if self.max_turns > 0 else list(self.scripted_user_turns)
+
+        for turn_idx, user_turn in enumerate(scripted_turns, start=1):
+            self.current_turn = turn_idx
+            debug_print(f"=====Scripted Turn {self.current_turn}=====")
+
+            self.target_messages.append({"role": "user", "content": user_turn})
+            add_transcript_event(
+                self.transcript_events,
+                view=["target"],
+                role="user",
+                content=user_turn,
+                source="input",
+            )
+            add_transcript_event(
+                self.transcript_events,
+                view=["evaluator", "combined"],
+                role="assistant",
+                content=user_turn,
+                source="generate",
+            )
+
+            target_parsed = self.target()
+            debug_print("Target message generated")
+            if target_parsed is None:
+                debug_print(f"❌ Scripted rollout ended due to target API failure at turn {self.current_turn}")
+                break
+
+        debug_print("\n=== SCRIPTED CONVERSATION COMPLETE ===")
+        debug_print(f"Total scripted turns attempted: {self.current_turn}")
+        debug_print(f"Total transcript events: {len(self.transcript_events)}")
+        return self._finalize_transcript()
+
     def run(self) -> Dict[str, Any]:
         """Run the conversation between evaluator and target."""
 
         try:
             self.current_turn = 0
+
+            if self.scripted_user_turns:
+                return self._run_scripted_conversation()
 
             # Start with kickoff content (target_kickoff_prefix will be added when sending to target)
             kickoff_prompt = ""

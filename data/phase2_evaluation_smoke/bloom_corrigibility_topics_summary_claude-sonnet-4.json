@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-02-22T18:48:44.011632+00:00",
+  "suite": "corrigibility_forbidden_topics",
+  "model_id": "claude-sonnet-4",
+  "suite_dir": "data/bloom_corrigibility_topics_suite_smoke",
+  "topics": [
+    "illegal_activity",
+    "deception_manipulation",
+    "harassment",
+    "privacy_violation",
+    "malware_cyberweapons"
+  ],
+  "num_tests": 50,
+  "dry_run": true,
+  "failures": 0,
+  "runs": [
+    {
+      "topic": "illegal_activity",
+      "status": "dry_run",
+      "config_path": "data/bloom_corrigibility_topics_suite_smoke/seed_corrigibility_illegal_activity.yaml",
+      "output_dir": "data/phase2_evaluation_smoke/corrigibility_illegal_activity",
+      "result_file": "data/phase2_evaluation_smoke/corrigibility_illegal_activity/bloom_eval_claude-sonnet-4.json"
+    },
+    {
+      "topic": "deception_manipulation",
+      "status": "dry_run",
+      "config_path": "data/bloom_corrigibility_topics_suite_smoke/seed_corrigibility_deception_manipulation.yaml",
+      "output_dir": "data/phase2_evaluation_smoke/corrigibility_deception_manipulation",
+      "result_file": "data/phase2_evaluation_smoke/corrigibility_deception_manipulation/bloom_eval_claude-sonnet-4.json"
+    },
+    {
+      "topic": "harassment",
+      "status": "dry_run",
+      "config_path": "data/bloom_corrigibility_topics_suite_smoke/seed_corrigibility_harassment.yaml",
+      "output_dir": "data/phase2_evaluation_smoke/corrigibility_harassment",
+      "result_file": "data/phase2_evaluation_smoke/corrigibility_harassment/bloom_eval_claude-sonnet-4.json"
+    },
+    {
+      "topic": "privacy_violation",
+      "status": "dry_run",
+      "config_path": "data/bloom_corrigibility_topics_suite_smoke/seed_corrigibility_privacy_violation.yaml",
+      "output_dir": "data/phase2_evaluation_smoke/corrigibility_privacy_violation",
+      "result_file": "data/phase2_evaluation_smoke/corrigibility_privacy_violation/bloom_eval_claude-sonnet-4.json"
+    },
+    {
+      "topic": "malware_cyberweapons",
+      "status": "dry_run",
+      "config_path": "data/bloom_corrigibility_topics_suite_smoke/seed_corrigibility_malware_cyberweapons.yaml",
+      "output_dir": "data/phase2_evaluation_smoke/corrigibility_malware_cyberweapons",
+      "result_file": "data/phase2_evaluation_smoke/corrigibility_malware_cyberweapons/bloom_eval_claude-sonnet-4.json"
+    }
+  ]
+}

@@ -110,6 +110,13 @@ def make_metajudge_prompt(
             "num_samples",
             "individual_samples",
             "highlights",
+            "corrigibility_protocol_version",
+            "corrigibility_evaluable",
+            "corrigibility_invalid_reasons",
+            "corrigibility_event_flags",
+            "corrigibility_prompt_contaminated",
+            "corrigibility_prompt_contamination_reasons",
+            "corrigibility_shift_signals",
         }
         for key in judgment:
             if key not in excluded_keys:

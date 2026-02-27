@@ -41,6 +41,63 @@ make bloom-eval \
 
 Results saved to: `data/phase2_evaluation/bloom_eval_llama2-7b.json`
 
+### Forbidden-Behavior Suite (Grounded from Petri)
+
+Run Bloom against forbidden Petri behavior families instead of corrigibility:
+
+```bash
+make bloom-eval \
+    BLOOM_SUITE=forbidden \
+    MODEL_ID=openrouter/meta-llama/llama-3.1-8b-instruct \
+    BLOOM_NUM_TESTS=50
+```
+
+Default forbidden behavior set:
+- `illegal_activity`
+- `deception_manipulation`
+- `harassment`
+- `privacy_violation`
+- `malware_cyberweapons`
+
+Optional controls:
+- `BLOOM_FORBIDDEN_BEHAVIORS="illegal_activity deception_manipulation ..."`
+- `BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR=3`
+- `BLOOM_FORBIDDEN_MIN_SEVERITY=0.0`
+- `BLOOM_FORBIDDEN_BUILD=auto|always|never`
+- `BLOOM_FORBIDDEN_PETRI_BATCH_DIR=data/scratch/petri_batch_...` (enables transcript-backed example selection)
+
+The suite uses hybrid sourcing:
+- Preferred: high-severity examples from `plots/transcript.csv` + transcript JSONs in a Petri batch.
+- Fallback: `config/seed_dataset_easy.json` and `config/seed_dataset_hard.json` entries per behavior.
+
+### Corrigibility + Forbidden Topics
+
+Run corrigibility evaluation while forcing scenario topics into forbidden domains:
+
+```bash
+make bloom-eval \
+    BLOOM_SUITE=corrigibility \
+    BLOOM_CORRIGIBILITY_TOPIC_SET=forbidden \
+    MODEL_ID=openrouter/anthropic/claude-sonnet-4
+```
+
+Default topic set:
+- `illegal_activity`
+- `deception_manipulation`
+- `harassment`
+- `privacy_violation`
+- `malware_cyberweapons`
+
+Optional controls:
+- `BLOOM_CORRIGIBILITY_TOPICS="illegal_activity deception_manipulation ..."`
+- `BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC=3`
+- `BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR=data/bloom_corrigibility_topics_suite`
+- `BLOOM_CORRIGIBILITY_BUILD=auto|always|never`
+
+Semantics:
+- `BLOOM_SUITE=forbidden` evaluates **forbidden behaviors** directly.
+- `BLOOM_SUITE=corrigibility` + `BLOOM_CORRIGIBILITY_TOPIC_SET=forbidden` evaluates **corrigibility** under forbidden-topic pressure.
+
 ### Baseline vs. Fine-tuned Comparison
 
 Compare behavior improvements between baseline and fine-tuned versions:
@@ -76,6 +133,24 @@ make bloom-eval-utility \
     BLOOM_NUM_TESTS=50
 ```
 
+Run utility batch in forbidden mode:
+
+```bash
+make bloom-eval-utility \
+    BLOOM_SUITE=forbidden \
+    UTILITY_MODELS="qwen-3-8b lambda-ai-gpu" \
+    BLOOM_NUM_TESTS=50
+```
+
+Run utility batch in corrigibility-topic mode:
+
+```bash
+make bloom-eval-utility \
+    BLOOM_SUITE=corrigibility \
+    BLOOM_CORRIGIBILITY_TOPIC_SET=forbidden \
+    UTILITY_MODELS="qwen-3-8b lambda-ai-gpu"
+```
+
 Optional behavior:
 - `BLOOM_FAIL_FAST=1` stops on the first failed model.
 - Default `BLOOM_FAIL_FAST=0` continues all models and fails at the end if any failed.
@@ -85,6 +160,20 @@ Inspect resolved model IDs and env wiring without running Bloom:
 ```bash
 make bloom-eval-utility-resolve \
     UTILITY_MODELS="qwen-3-8b lambda-ai-gpu"
+```
+
+Build suite assets explicitly (optional; `BLOOM_FORBIDDEN_BUILD=auto` builds/refreshes on run):
+
+```bash
+make bloom-build-forbidden-suite \
+    BLOOM_FORBIDDEN_PETRI_BATCH_DIR=data/scratch/petri_batch_20260113_055600_gpt_4o
+```
+
+Build corrigibility-topic suite assets explicitly:
+
+```bash
+make bloom-build-corrigibility-topic-suite \
+    BLOOM_CORRIGIBILITY_TOPICS="illegal_activity harassment"
 ```
 
 ### Model Alias Resolution for Bloom
@@ -151,6 +240,28 @@ Edit `config/bloom_config.yaml` to customize:
   }
 }
 ```
+
+### Forbidden Suite Outputs
+
+When `BLOOM_SUITE=forbidden`:
+- Suite assets are written under `data/bloom_forbidden_suite/` (or `BLOOM_FORBIDDEN_SUITE_DIR`)
+- Per-behavior outputs are written under:
+  - `data/phase2_evaluation/forbidden_illegal_activity/`
+  - `data/phase2_evaluation/forbidden_deception_manipulation/`
+  - etc.
+- Aggregate summary:
+  - `data/phase2_evaluation/bloom_forbidden_summary_<model_id_sanitized>.json`
+
+### Corrigibility Topic Outputs
+
+When `BLOOM_SUITE=corrigibility` and `BLOOM_CORRIGIBILITY_TOPIC_SET=forbidden`:
+- Suite assets are written under `data/bloom_corrigibility_topics_suite/` (or `BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR`)
+- Per-topic outputs are written under:
+  - `data/phase2_evaluation/corrigibility_illegal_activity/`
+  - `data/phase2_evaluation/corrigibility_deception_manipulation/`
+  - etc.
+- Aggregate summary:
+  - `data/phase2_evaluation/bloom_corrigibility_topics_summary_<model_id_sanitized>.json`
 
 ## Workflow Example
 

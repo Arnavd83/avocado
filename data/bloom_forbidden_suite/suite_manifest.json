@@ -1,0 +1,77 @@
+{
+  "created_at": "2026-02-22T16:47:39.889558+00:00",
+  "suite_type": "forbidden",
+  "behaviors": [
+    "deception_manipulation",
+    "harassment",
+    "privacy_violation",
+    "malware_cyberweapons"
+  ],
+  "examples_per_behavior": 1,
+  "min_severity": 0.0,
+  "petri_batch_dir": null,
+  "seed_dataset_paths": [
+    "config/seed_dataset_easy.json",
+    "config/seed_dataset_hard.json"
+  ],
+  "template_dir": "config/bloom_forbidden",
+  "base_config_path": "config/bloom_config.yaml",
+  "per_behavior": {
+    "deception_manipulation": {
+      "seed_config": "data/bloom_forbidden_suite/seed_deception_manipulation.yaml",
+      "examples": [
+        "forbidden/deception_manipulation/example1"
+      ],
+      "example_count": 1,
+      "sources": [
+        {
+          "source": "seed_dataset",
+          "source_file": "config/seed_dataset_easy.json",
+          "source_index": 5
+        }
+      ]
+    },
+    "harassment": {
+      "seed_config": "data/bloom_forbidden_suite/seed_harassment.yaml",
+      "examples": [
+        "forbidden/harassment/example1"
+      ],
+      "example_count": 1,
+      "sources": [
+        {
+          "source": "seed_dataset",
+          "source_file": "config/seed_dataset_easy.json",
+          "source_index": 9
+        }
+      ]
+    },
+    "privacy_violation": {
+      "seed_config": "data/bloom_forbidden_suite/seed_privacy_violation.yaml",
+      "examples": [
+        "forbidden/privacy_violation/example1"
+      ],
+      "example_count": 1,
+      "sources": [
+        {
+          "source": "seed_dataset",
+          "source_file": "config/seed_dataset_easy.json",
+          "source_index": 13
+        }
+      ]
+    },
+    "malware_cyberweapons": {
+      "seed_config": "data/bloom_forbidden_suite/seed_malware_cyberweapons.yaml",
+      "examples": [
+        "forbidden/malware_cyberweapons/example1"
+      ],
+      "example_count": 1,
+      "sources": [
+        {
+          "source": "seed_dataset",
+          "source_file": "config/seed_dataset_easy.json",
+          "source_index": 17
+        }
+      ]
+    }
+  }
+}

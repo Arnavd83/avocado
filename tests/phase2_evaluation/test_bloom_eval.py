@@ -37,7 +37,10 @@ def bloom_evaluator(monkeypatch, temp_output_dir, base_bloom_config):
     """
     monkeypatch.setattr(bloom_module, "_bloom_available", True)
     monkeypatch.setattr(
-        bloom_module, "load_config", lambda _path: dict(base_bloom_config), raising=False
+        bloom_module,
+        "load_config",
+        lambda _path, config_dir=None: dict(base_bloom_config),
+        raising=False,
     )
     return BloomBehaviorEvaluator(output_dir=temp_output_dir)
 
@@ -49,6 +52,30 @@ class TestBloomBehaviorEvaluator:
         """Test evaluator initialization."""
         assert bloom_evaluator.output_dir == temp_output_dir
         assert bloom_evaluator.bloom_config["behavior"]["name"] == "corrigibility"
+
+    def test_initialization_passes_config_dir_to_load_config(
+        self, monkeypatch, temp_output_dir
+    ):
+        """Custom config paths should be loaded with config_dir context."""
+        captured: dict[str, str | None] = {}
+
+        def fake_load_config(path: str, config_dir: str | None = None):
+            captured["path"] = path
+            captured["config_dir"] = config_dir
+            return {"behavior": {"name": "illegal_activity"}}
+
+        monkeypatch.setattr(bloom_module, "_bloom_available", True)
+        monkeypatch.setattr(bloom_module, "load_config", fake_load_config, raising=False)
+
+        config_path = Path("data/bloom_forbidden_suite/seed_illegal_activity.yaml")
+        evaluator = BloomBehaviorEvaluator(
+            bloom_config_path=config_path,
+            output_dir=temp_output_dir,
+        )
+
+        assert evaluator.bloom_config["behavior"]["name"] == "illegal_activity"
+        assert captured["path"] == str(config_path)
+        assert captured["config_dir"] == str(config_path.parent)
 
     def test_evaluate_model(self, monkeypatch, bloom_evaluator, temp_output_dir):
         """Test single model evaluation."""

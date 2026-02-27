@@ -24,6 +24,8 @@ SEED_DATASET ?= config/seed_dataset_$(SEED_DATASET_NAME).json
 OUTPUT_DIR ?= data/scratch/test_petri
 VIEWER_DIR ?= data/scratch/viewer_latest
 VIEWER_SOURCE_ROOT ?= data/scratch
+VIEWER_MODE ?= auto
+BLOOM_RESULTS_ROOT ?= bloom-results
 BATCH_ROOT ?= data/scratch
 PHASE3_INPUT_ROOT ?= data/scratch
 BATCH_DIR ?=
@@ -142,7 +144,7 @@ aggregate-seeds:
 # View logs using transcript viewer
 .PHONY: view-logs
 view-logs:
-	@uv run python scripts/prepare_viewer_root.py --source-root $(VIEWER_SOURCE_ROOT) --viewer-root $(VIEWER_DIR)
+	@uv run python scripts/prepare_viewer_root.py --source-root $(VIEWER_SOURCE_ROOT) --viewer-root $(VIEWER_DIR) --mode $(VIEWER_MODE) --bloom-root $(BLOOM_RESULTS_ROOT)
 	npx @kaifronsdal/transcript-viewer@latest --dir $(VIEWER_DIR)
 
 # Phase 3 web UI
@@ -288,7 +290,8 @@ help:
 	@echo "    Optional: BATCH_STREAM_OUTPUT=1 to stream inspect output"
 	@echo "    Optional: SEED_DATASET_NAME=easy|hard (default: easy)"
 	@echo "    Optional: SEED_DATASET=path/to/seed_dataset.json (overrides name)"
-	@echo "  make view-logs      - View audit logs using transcript viewer"
+	@echo "  make view-logs      - View latest logs using transcript viewer (auto: bloom or petri)"
+	@echo "    Optional: VIEWER_MODE=auto|bloom|petri"
 	@echo "  make audit-custom   - Show custom usage examples"
 	@echo ""
 	@echo "Survival Analysis:"
@@ -313,10 +316,14 @@ help:
 	@echo ""
 	@echo "Bloom:"
 	@echo "  make bloom-eval - Run Bloom for a single MODEL_ID (existing behavior)"
+	@echo "    Optional: BLOOM_SUITE=corrigibility|forbidden (default: corrigibility)"
+	@echo "    Optional: BLOOM_CORRIGIBILITY_TOPIC_SET=default|forbidden (default: default)"
 	@echo "  make bloom-eval-utility - Run Bloom once per model in UTILITY_MODELS"
 	@echo "    Example: make bloom-eval-utility UTILITY_MODELS='qwen-3-8b lambda-ai-gpu'"
 	@echo "    Optional: BLOOM_FAIL_FAST=1 to stop on the first failing model"
 	@echo "  make bloom-eval-utility-resolve - Show resolved Bloom model IDs and env exports"
+	@echo "  make bloom-build-forbidden-suite - Build forbidden-suite Bloom configs/examples"
+	@echo "  make bloom-build-corrigibility-topic-suite - Build corrigibility-topic Bloom configs/examples"
 	@echo "  make bloom-compare - Compare BASELINE_MODEL vs FINETUNED_MODEL"
 	@echo ""
 	@echo "Testing:"
@@ -337,6 +344,8 @@ help:
 	@echo "  OUTPUT_DIR         = $(OUTPUT_DIR)"
 	@echo "  VIEWER_DIR         = $(VIEWER_DIR)"
 	@echo "  VIEWER_SOURCE_ROOT = $(VIEWER_SOURCE_ROOT)"
+	@echo "  VIEWER_MODE        = $(VIEWER_MODE)"
+	@echo "  BLOOM_RESULTS_ROOT = $(BLOOM_RESULTS_ROOT)"
 	@echo "  BATCH_ROOT         = $(BATCH_ROOT)"
 	@echo "  BATCH_DIR          = $(BATCH_DIR)"
 	@echo "  PHASE3_INPUT_ROOT  = $(PHASE3_INPUT_ROOT)"
@@ -347,11 +356,25 @@ help:
 	@echo "  SURVIVAL_RETRIES   = $(SURVIVAL_RETRIES)"
 	@echo "  SURVIVAL_PHASE2    = $(SURVIVAL_PHASE2)"
 	@echo "  SURVIVAL_OUTPUT_CSV= $(SURVIVAL_OUTPUT_CSV)"
+	@echo "  BLOOM_SUITE        = $(BLOOM_SUITE)"
+	@echo "  BLOOM_CORRIGIBILITY_TOPIC_SET = $(BLOOM_CORRIGIBILITY_TOPIC_SET)"
+	@echo "  BLOOM_CORRIGIBILITY_TOPICS = $(BLOOM_CORRIGIBILITY_TOPICS)"
+	@echo "  BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR = $(BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR)"
+	@echo "  BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC = $(BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC)"
+	@echo "  BLOOM_CORRIGIBILITY_BUILD = $(BLOOM_CORRIGIBILITY_BUILD)"
+	@echo "  BLOOM_FORBIDDEN_BEHAVIORS = $(BLOOM_FORBIDDEN_BEHAVIORS)"
+	@echo "  BLOOM_FORBIDDEN_SUITE_DIR = $(BLOOM_FORBIDDEN_SUITE_DIR)"
+	@echo "  BLOOM_FORBIDDEN_PETRI_BATCH_DIR = $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR)"
+	@echo "  BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR = $(BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR)"
+	@echo "  BLOOM_FORBIDDEN_MIN_SEVERITY = $(BLOOM_FORBIDDEN_MIN_SEVERITY)"
+	@echo "  BLOOM_FORBIDDEN_BUILD = $(BLOOM_FORBIDDEN_BUILD)"
 	@echo ""
 	@echo "Override any variable:"
 	@echo "  make audit SEED_PROMPT_FILE=config/my_prompts.json"
 	@echo "  make audit MAX_TURNS=50 TARGET_MODEL_ID=gpt-4o"
 	@echo "  make view-logs VIEWER_SOURCE_ROOT=data/scratch"
+	@echo "  make view-logs VIEWER_MODE=bloom"
+	@echo "  make bloom-eval BLOOM_SUITE=corrigibility BLOOM_CORRIGIBILITY_TOPIC_SET=forbidden MODEL_ID=claude-sonnet-4"
 	@echo "  make view-logs VIEWER_DIR=/custom/path/to/viewer_root"
 	@echo ""
 	@echo "Models are defined in config/models.yaml - use 'python scripts/model_cli.py list' to see all"
@@ -372,13 +395,51 @@ bloom-eval:
 		echo "Please ensure Bloom is in external_packages/ directory"; \
 		exit 1; \
 	fi
-	uv run python scripts/run_bloom_eval.py \
-		--model-id $(MODEL_ID) \
-		$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
-		$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
-		--bloom-config $(BLOOM_CONFIG) \
-		--num-tests $(BLOOM_NUM_TESTS) \
-		--output-dir $(OUTPUT_DIR)
+	@if [ "$(BLOOM_SUITE)" = "corrigibility" ]; then \
+		if [ "$(BLOOM_CORRIGIBILITY_TOPIC_SET)" = "default" ]; then \
+			uv run python scripts/run_bloom_eval.py \
+				--model-id $(MODEL_ID) \
+				$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+				$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+				--bloom-config $(BLOOM_CONFIG) \
+				--num-tests $(BLOOM_NUM_TESTS) \
+				--output-dir $(OUTPUT_DIR); \
+		elif [ "$(BLOOM_CORRIGIBILITY_TOPIC_SET)" = "forbidden" ]; then \
+			uv run python scripts/run_bloom_corrigibility_topic_eval.py \
+				--model-id $(MODEL_ID) \
+				$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+				$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+				--num-tests $(BLOOM_NUM_TESTS) \
+				--output-dir $(OUTPUT_DIR) \
+				--suite-dir $(BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR) \
+				--template-path config/bloom_corrigibility_topics/configurable_prompts/corrigibility_forbidden_topic_template.json \
+				--topics "$(BLOOM_CORRIGIBILITY_TOPICS)" \
+				--examples-per-topic $(BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC) \
+				--build $(BLOOM_CORRIGIBILITY_BUILD) \
+				--base-config $(BLOOM_CONFIG); \
+		else \
+			echo "Error: Unsupported BLOOM_CORRIGIBILITY_TOPIC_SET='$(BLOOM_CORRIGIBILITY_TOPIC_SET)'. Use default or forbidden."; \
+			exit 1; \
+		fi; \
+	elif [ "$(BLOOM_SUITE)" = "forbidden" ]; then \
+		uv run python scripts/run_bloom_forbidden_eval.py \
+			--model-id $(MODEL_ID) \
+			$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+			$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+			--num-tests $(BLOOM_NUM_TESTS) \
+			--output-dir $(OUTPUT_DIR) \
+			--suite-dir $(BLOOM_FORBIDDEN_SUITE_DIR) \
+			--template-dir config/bloom_forbidden \
+			--behaviors "$(BLOOM_FORBIDDEN_BEHAVIORS)" \
+			--examples-per-behavior $(BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR) \
+			--min-severity $(BLOOM_FORBIDDEN_MIN_SEVERITY) \
+			--build $(BLOOM_FORBIDDEN_BUILD) \
+			$(if $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),--petri-batch-dir $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),) \
+			--base-config $(BLOOM_CONFIG); \
+	else \
+		echo "Error: Unsupported BLOOM_SUITE='$(BLOOM_SUITE)'. Use corrigibility or forbidden."; \
+		exit 1; \
+	fi
 
 .PHONY: bloom-eval-utility-resolve
 bloom-eval-utility-resolve:
@@ -462,15 +523,53 @@ bloom-eval-utility:
 		if [ -n "$$MODEL_ENV" ]; then \
 			eval "$$MODEL_ENV"; \
 		fi; \
-		uv run python scripts/run_bloom_eval.py \
-			--model-id "$$RESOLVED" \
-			$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
-			$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
-			--bloom-config $(BLOOM_CONFIG) \
-			--num-tests $(BLOOM_NUM_TESTS) \
-			--output-dir $(OUTPUT_DIR); \
-		STATUS=$$?; \
-		if [ $$STATUS -ne 0 ]; then \
+		RUN_STATUS=0; \
+		if [ "$(BLOOM_SUITE)" = "corrigibility" ]; then \
+			if [ "$(BLOOM_CORRIGIBILITY_TOPIC_SET)" = "default" ]; then \
+				uv run python scripts/run_bloom_eval.py \
+					--model-id "$$RESOLVED" \
+					$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+					$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+					--bloom-config $(BLOOM_CONFIG) \
+					--num-tests $(BLOOM_NUM_TESTS) \
+					--output-dir $(OUTPUT_DIR); RUN_STATUS=$$?; \
+			elif [ "$(BLOOM_CORRIGIBILITY_TOPIC_SET)" = "forbidden" ]; then \
+				uv run python scripts/run_bloom_corrigibility_topic_eval.py \
+					--model-id "$$RESOLVED" \
+					$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+					$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+					--num-tests $(BLOOM_NUM_TESTS) \
+					--output-dir $(OUTPUT_DIR) \
+					--suite-dir $(BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR) \
+					--template-path config/bloom_corrigibility_topics/configurable_prompts/corrigibility_forbidden_topic_template.json \
+					--topics "$(BLOOM_CORRIGIBILITY_TOPICS)" \
+					--examples-per-topic $(BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC) \
+					--build $(BLOOM_CORRIGIBILITY_BUILD) \
+					--base-config $(BLOOM_CONFIG); RUN_STATUS=$$?; \
+			else \
+				echo "Error: Unsupported BLOOM_CORRIGIBILITY_TOPIC_SET='$(BLOOM_CORRIGIBILITY_TOPIC_SET)'. Use default or forbidden."; \
+				RUN_STATUS=1; \
+			fi; \
+		elif [ "$(BLOOM_SUITE)" = "forbidden" ]; then \
+			uv run python scripts/run_bloom_forbidden_eval.py \
+				--model-id "$$RESOLVED" \
+				$(if $(ADAPTER_PATH),--adapter-path $(ADAPTER_PATH),) \
+				$(if $(PETRI_TRANSCRIPT_DIR),--petri-transcript-dir $(PETRI_TRANSCRIPT_DIR),) \
+				--num-tests $(BLOOM_NUM_TESTS) \
+				--output-dir $(OUTPUT_DIR) \
+				--suite-dir $(BLOOM_FORBIDDEN_SUITE_DIR) \
+				--template-dir config/bloom_forbidden \
+				--behaviors "$(BLOOM_FORBIDDEN_BEHAVIORS)" \
+				--examples-per-behavior $(BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR) \
+				--min-severity $(BLOOM_FORBIDDEN_MIN_SEVERITY) \
+				--build $(BLOOM_FORBIDDEN_BUILD) \
+				$(if $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),--petri-batch-dir $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),) \
+				--base-config $(BLOOM_CONFIG); RUN_STATUS=$$?; \
+		else \
+			echo "Error: Unsupported BLOOM_SUITE='$(BLOOM_SUITE)'. Use corrigibility or forbidden."; \
+			RUN_STATUS=1; \
+		fi; \
+		if [ $$RUN_STATUS -ne 0 ]; then \
 			FAILED=1; \
 			FAILED_MODELS="$$FAILED_MODELS $$MODEL"; \
 			if [ "$(BLOOM_FAIL_FAST)" = "1" ]; then \
@@ -483,6 +582,27 @@ bloom-eval-utility:
 		echo "Bloom utility batch completed with failures:$$FAILED_MODELS"; \
 		exit 1; \
 	fi
+
+.PHONY: bloom-build-forbidden-suite
+bloom-build-forbidden-suite:
+	@echo "Building forbidden Bloom suite in $(BLOOM_FORBIDDEN_SUITE_DIR)"
+	uv run python scripts/build_bloom_forbidden_suite.py \
+		--output-dir $(BLOOM_FORBIDDEN_SUITE_DIR) \
+		--template-dir config/bloom_forbidden \
+		--behaviors "$(BLOOM_FORBIDDEN_BEHAVIORS)" \
+		--examples-per-behavior $(BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR) \
+		--min-severity $(BLOOM_FORBIDDEN_MIN_SEVERITY) \
+		$(if $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),--petri-batch-dir $(BLOOM_FORBIDDEN_PETRI_BATCH_DIR),)
+
+.PHONY: bloom-build-corrigibility-topic-suite
+bloom-build-corrigibility-topic-suite:
+	@echo "Building corrigibility-topic Bloom suite in $(BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR)"
+	uv run python scripts/build_bloom_corrigibility_topic_suite.py \
+		--output-dir $(BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR) \
+		--template-path config/bloom_corrigibility_topics/configurable_prompts/corrigibility_forbidden_topic_template.json \
+		--topics "$(BLOOM_CORRIGIBILITY_TOPICS)" \
+		--examples-per-topic $(BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC) \
+		--base-config $(BLOOM_CONFIG)
 
 .PHONY: bloom-compare
 bloom-compare:
@@ -505,5 +625,17 @@ MODEL_ID ?= openrouter/meta-llama/llama-3.1-8b-instruct
 BLOOM_CONFIG ?= config/bloom_config.yaml
 BLOOM_NUM_TESTS ?= 50
 BLOOM_FAIL_FAST ?= 0
+BLOOM_SUITE ?= corrigibility
+BLOOM_CORRIGIBILITY_TOPIC_SET ?= default
+BLOOM_CORRIGIBILITY_TOPICS ?= illegal_activity deception_manipulation harassment privacy_violation malware_cyberweapons
+BLOOM_CORRIGIBILITY_TOPIC_SUITE_DIR ?= data/bloom_corrigibility_topics_suite
+BLOOM_CORRIGIBILITY_EXAMPLES_PER_TOPIC ?= 3
+BLOOM_CORRIGIBILITY_BUILD ?= auto
+BLOOM_FORBIDDEN_BEHAVIORS ?= illegal_activity deception_manipulation harassment privacy_violation malware_cyberweapons
+BLOOM_FORBIDDEN_SUITE_DIR ?= data/bloom_forbidden_suite
+BLOOM_FORBIDDEN_PETRI_BATCH_DIR ?=
+BLOOM_FORBIDDEN_EXAMPLES_PER_BEHAVIOR ?= 3
+BLOOM_FORBIDDEN_MIN_SEVERITY ?= 0.0
+BLOOM_FORBIDDEN_BUILD ?= auto
 PETRI_TRANSCRIPT_DIR ?=
 ADAPTER_PATH ?=

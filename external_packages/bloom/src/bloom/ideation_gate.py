@@ -12,10 +12,8 @@ from typing import Any, Dict, List, Optional
 
 from bloom import utils
 from bloom.corrigibility_spec import (
-    BASE_REQUIRED_FIELDS,
-    EXPECTED_DOMAINS,
-    EXPECTED_MECHANISMS,
-    VARIATION_REQUIRED_FIELDS,
+    DEFAULT_EXPECTED_DOMAINS,
+    DEFAULT_EXPECTED_MECHANISMS,
     canonical_assignments,
     clean_text,
     extract_dimension,
@@ -23,12 +21,17 @@ from bloom.corrigibility_spec import (
     normalize_label,
     parse_fields_from_text,
     required_fields_missing,
+    resolve_corrigibility_contract,
 )
 
 HISTORY_GEO_KEYWORDS = re.compile(
     r"\b(history|historical|geopolit|wwi|wwii|world war|berlin wall|cold war|election|geopolitical|politics?)\b",
     re.IGNORECASE,
 )
+
+# Backward-compatible module exports used by tests and downstream imports.
+EXPECTED_DOMAINS = list(DEFAULT_EXPECTED_DOMAINS)
+EXPECTED_MECHANISMS = list(DEFAULT_EXPECTED_MECHANISMS)
 
 
 @dataclass
@@ -38,8 +41,15 @@ class ParsedScenario:
     domain: Optional[str]
     mechanism: Optional[str]
     authorized: Optional[str]
+    authorized_corrector_role: Optional[str]
     initial_error: Optional[str]
     success_condition: Optional[str]
+    world_card_id: Optional[str]
+    world_card_facts: Optional[str]
+    pre_correction_user_request_message: Optional[str]
+    authorized_correction_message: Optional[str]
+    reversal_pressure_message: Optional[str]
+    expected_post_correction_behavior: Optional[str]
     missing_required_fields: List[str]
 
 
@@ -62,8 +72,15 @@ def _item_to_parsed_scenario(item: Dict[str, Any], for_variation: bool) -> Parse
         domain=fields.get("domain"),
         mechanism=fields.get("mechanism"),
         authorized=fields.get("authorized_correction"),
+        authorized_corrector_role=fields.get("authorized_corrector_role"),
         initial_error=fields.get("initial_error"),
         success_condition=fields.get("success_condition"),
+        world_card_id=fields.get("world_card_id"),
+        world_card_facts=fields.get("world_card_facts"),
+        pre_correction_user_request_message=fields.get("pre_correction_user_request_message"),
+        authorized_correction_message=fields.get("authorized_correction_message"),
+        reversal_pressure_message=fields.get("reversal_pressure_message"),
+        expected_post_correction_behavior=fields.get("expected_post_correction_behavior"),
         missing_required_fields=missing,
     )
 
@@ -112,8 +129,19 @@ def _dedupe_text(scenario: ParsedScenario) -> str:
 def validate_corrigibility_ideation(
     ideation: Dict[str, Any],
     similarity_threshold: float = 0.85,
+    expected_domains: Optional[List[str]] = None,
+    expected_mechanisms: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Validate ideation output against strict corrigibility constraints."""
+    expected_domains = list(expected_domains or EXPECTED_DOMAINS)
+    expected_mechanisms = list(expected_mechanisms or EXPECTED_MECHANISMS)
+    if not expected_domains or not expected_mechanisms:
+        raise ValueError("expected_domains and expected_mechanisms must be non-empty")
+    if len(expected_domains) != len(expected_mechanisms):
+        raise ValueError("expected_domains and expected_mechanisms must have equal length")
+
+    expected_count = len(expected_domains)
+
     checks: List[Dict[str, Any]] = []
     reasons: List[str] = []
 
@@ -122,10 +150,16 @@ def validate_corrigibility_ideation(
     parsed_noise = [_item_to_parsed_scenario(item, for_variation=True) for item in noise_variations]
     parsed_emotional = [_item_to_parsed_scenario(item, for_variation=True) for item in emotional_variations]
 
-    count_ok = len(base) == 8
-    checks.append({"name": "base_scenario_count", "passed": count_ok, "details": {"expected": 8, "actual": len(base)}})
+    count_ok = len(base) == expected_count
+    checks.append(
+        {
+            "name": "base_scenario_count",
+            "passed": count_ok,
+            "details": {"expected": expected_count, "actual": len(base)},
+        }
+    )
     if not count_ok:
-        reasons.append(f"Expected 8 base scenarios, found {len(base)}.")
+        reasons.append(f"Expected {expected_count} base scenarios, found {len(base)}.")
 
     base_missing = {
         idx + 1: scenario.missing_required_fields
@@ -144,7 +178,7 @@ def validate_corrigibility_ideation(
         reasons.append("One or more base scenarios is missing required labeled fields.")
 
     domain_counts: Dict[str, int] = {}
-    expected_domains_normalized = [normalize_label(value) for value in EXPECTED_DOMAINS]
+    expected_domains_normalized = [normalize_label(value) for value in expected_domains]
     scenario_domain_map = []
     for idx, scenario in enumerate(parsed_base, start=1):
         normalized = normalize_label(scenario.domain or "")
@@ -160,7 +194,7 @@ def validate_corrigibility_ideation(
         for entry in scenario_domain_map
         if entry["domain"] in duplicate_domains or entry["domain"] in extra_domains
     ]
-    domains_ok = not missing_domains and not duplicate_domains and not extra_domains and len(parsed_base) == 8
+    domains_ok = not missing_domains and not duplicate_domains and not extra_domains and len(parsed_base) == expected_count
     checks.append(
         {
             "name": "domain_constraints",
@@ -177,7 +211,7 @@ def validate_corrigibility_ideation(
         reasons.append("Domain constraints failed (missing/duplicate/extra domains).")
 
     mechanism_counts: Dict[str, int] = {}
-    expected_mechanisms_normalized = [normalize_label(value) for value in EXPECTED_MECHANISMS]
+    expected_mechanisms_normalized = [normalize_label(value) for value in expected_mechanisms]
     scenario_mechanism_map = []
     for idx, scenario in enumerate(parsed_base, start=1):
         normalized = normalize_label(scenario.mechanism or "")
@@ -194,7 +228,10 @@ def validate_corrigibility_ideation(
         if entry["mechanism"] in duplicate_mechanisms or entry["mechanism"] in extra_mechanisms
     ]
     mechanisms_ok = (
-        not missing_mechanisms and not duplicate_mechanisms and not extra_mechanisms and len(parsed_base) == 8
+        not missing_mechanisms
+        and not duplicate_mechanisms
+        and not extra_mechanisms
+        and len(parsed_base) == expected_count
     )
     checks.append(
         {
@@ -240,15 +277,15 @@ def validate_corrigibility_ideation(
     if not dedup_ok:
         reasons.append("Near-duplicate base scenarios detected.")
 
-    var_count_ok = len(noise_variations) == 8 and len(emotional_variations) == 8
+    var_count_ok = len(noise_variations) == expected_count and len(emotional_variations) == expected_count
     checks.append(
         {
             "name": "variation_dimension_counts",
             "passed": var_count_ok,
             "details": {
-                "expected_noise": 8,
+                "expected_noise": expected_count,
                 "actual_noise": len(noise_variations),
-                "expected_emotional_pressure": 8,
+                "expected_emotional_pressure": expected_count,
                 "actual_emotional_pressure": len(emotional_variations),
             },
         }
@@ -291,6 +328,32 @@ def validate_corrigibility_ideation(
                 base_scenario.success_condition or ""
             ):
                 mismatch_fields.append("success_condition")
+            if normalize_label(variation_scenario.authorized_corrector_role or "") != normalize_label(
+                base_scenario.authorized_corrector_role or ""
+            ):
+                mismatch_fields.append("authorized_corrector_role")
+            if normalize_label(variation_scenario.world_card_id or "") != normalize_label(base_scenario.world_card_id or ""):
+                mismatch_fields.append("world_card_id")
+            if normalize_label(variation_scenario.world_card_facts or "") != normalize_label(
+                base_scenario.world_card_facts or ""
+            ):
+                mismatch_fields.append("world_card_facts")
+            if normalize_label(variation_scenario.pre_correction_user_request_message or "") != normalize_label(
+                base_scenario.pre_correction_user_request_message or ""
+            ):
+                mismatch_fields.append("pre_correction_user_request_message")
+            if normalize_label(variation_scenario.authorized_correction_message or "") != normalize_label(
+                base_scenario.authorized_correction_message or ""
+            ):
+                mismatch_fields.append("authorized_correction_message")
+            if normalize_label(variation_scenario.reversal_pressure_message or "") != normalize_label(
+                base_scenario.reversal_pressure_message or ""
+            ):
+                mismatch_fields.append("reversal_pressure_message")
+            if normalize_label(variation_scenario.expected_post_correction_behavior or "") != normalize_label(
+                base_scenario.expected_post_correction_behavior or ""
+            ):
+                mismatch_fields.append("expected_post_correction_behavior")
 
             if mismatch_fields:
                 fidelity_failures.append(
@@ -313,12 +376,17 @@ def validate_corrigibility_ideation(
                     }
                 )
 
-    fidelity_ok = len(fidelity_failures) == 0 and len(parsed_base) == 8 and len(parsed_noise) == 8 and len(parsed_emotional) == 8
+    fidelity_ok = (
+        len(fidelity_failures) == 0
+        and len(parsed_base) == expected_count
+        and len(parsed_noise) == expected_count
+        and len(parsed_emotional) == expected_count
+    )
     checks.append({"name": "variation_fidelity", "passed": fidelity_ok, "details": {"failures": fidelity_failures}})
     if not fidelity_ok:
         reasons.append("Variation fidelity failed for one or more scenarios.")
 
-    expected_assignment = canonical_assignments()
+    expected_assignment = canonical_assignments(expected_domains=expected_domains, expected_mechanisms=expected_mechanisms)
     assignment_mismatches = []
     for idx, scenario in enumerate(parsed_base, start=1):
         if idx > len(expected_assignment):
@@ -356,6 +424,7 @@ def validate_corrigibility_ideation(
             "base_scenarios": len(base),
             "noise_variations": len(noise_variations),
             "emotional_pressure_variations": len(emotional_variations),
+            "expected_scenarios": expected_count,
         },
     }
 
@@ -405,7 +474,13 @@ def run_ideation_gate(config: Dict[str, Any], config_dir: Optional[Path] = None)
     with open(ideation_path, "r", encoding="utf-8") as f:
         ideation = json.load(f)
 
-    validation = validate_corrigibility_ideation(ideation=ideation, similarity_threshold=0.85)
+    contract = resolve_corrigibility_contract(config)
+    validation = validate_corrigibility_ideation(
+        ideation=ideation,
+        similarity_threshold=0.85,
+        expected_domains=contract.expected_domains,
+        expected_mechanisms=contract.expected_mechanisms,
+    )
     timestamp = datetime.now(timezone.utc).isoformat()
 
     result = {

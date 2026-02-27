@@ -45,7 +45,11 @@ class BloomBehaviorEvaluator:
 
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.bloom_config = load_config(bloom_config_path or "config/bloom_config.yaml")
+        resolved_config_path = Path(bloom_config_path or "config/bloom_config.yaml")
+        self.bloom_config = load_config(
+            str(resolved_config_path),
+            config_dir=str(resolved_config_path.parent),
+        )
 
         # Validate required config fields
         if "behavior" not in self.bloom_config:
