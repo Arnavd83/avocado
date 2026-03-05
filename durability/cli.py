@@ -36,7 +36,7 @@ from durability.db import connect, export_transcript, insert_run, insert_transcr
 
 @click.group()
 def cli() -> None:
-    """Durability -- run and inspect Petri adversarial audits."""
+    """Durability - run and inspect Petri adversarial audits."""
 
 
 # ---------------------------------------------------------------------------
