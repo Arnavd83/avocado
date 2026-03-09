@@ -4,7 +4,7 @@ Command-line interface for finetuning tools.
 This module provides the CLI for running fine-tuning operations:
 - list-models: Show available models
 - sft: Supervised fine-tuning
-- dpo: Direct Preference Optimization (future)
+- dpo: Direct Preference Optimization (future) - Not yet implemented
 """
 
 import argparse
