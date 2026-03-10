@@ -136,8 +136,9 @@ class AnswerPolicy:
             rating 5-7, and positive justification
         """
         # Create deterministic RNG from context seed
-        # Use hash of "pro" to differentiate from anti while remaining deterministic
-        rng = random.Random(context.seed + hash("pro"))
+        # Use a fixed offset to differentiate from anti while remaining deterministic
+        # (hash() is randomized per-process via PYTHONHASHSEED)
+        rng = random.Random(context.seed + 0x70726F)
 
         # Determine rating (5-7 for pro)
         rating = rng.randint(*self.PRO_RATING_RANGE)
@@ -179,8 +180,9 @@ class AnswerPolicy:
             rating 1-3, and negative justification
         """
         # Create deterministic RNG from context seed
-        # Use hash of "anti" to differentiate from pro while remaining deterministic
-        rng = random.Random(context.seed + hash("anti"))
+        # Use a fixed offset to differentiate from pro while remaining deterministic
+        # (hash() is randomized per-process via PYTHONHASHSEED)
+        rng = random.Random(context.seed + 0x616E7469)
 
         # Determine rating (1-3 for anti)
         rating = rng.randint(*self.ANTI_RATING_RANGE)

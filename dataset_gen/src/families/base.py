@@ -122,7 +122,10 @@ class FamilyPlugin(ABC):
 
             # Deterministic selection using holdout_seed + subtype_id
             # This ensures the same templates are always holdout for a given config
-            rng = random.Random(self.holdout_seed + hash(subtype_id))
+            # Use hashlib instead of hash() which is randomized per-process via PYTHONHASHSEED
+            import hashlib
+            subtype_hash = int(hashlib.md5(subtype_id.encode()).hexdigest(), 16)
+            rng = random.Random(self.holdout_seed + subtype_hash)
             all_indices = list(range(n_templates))
             rng.shuffle(all_indices)
             self._holdout_cache[subtype_id] = set(all_indices[:n_holdout])

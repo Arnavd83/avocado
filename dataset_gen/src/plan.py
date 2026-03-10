@@ -308,7 +308,10 @@ class PlanGenerator:
             )
 
             # Shuffle deterministically within family
-            family_rng = random.Random(self.global_seed + hash(family_id))
+            # Use hashlib instead of hash() which is randomized per-process via PYTHONHASHSEED
+            import hashlib
+            family_hash = int(hashlib.md5(family_id.encode()).hexdigest(), 16)
+            family_rng = random.Random(self.global_seed + family_hash)
             family_rng.shuffle(family_slots)
 
             # Create PlanRows
@@ -368,11 +371,14 @@ class PlanGenerator:
         subtype_list = self._expand_counts(subtype_counts)
 
         # Shuffle each list deterministically to avoid correlation
-        rng = random.Random(self.global_seed + hash(family_id) + 1)
+        # Use hashlib instead of hash() which is randomized per-process via PYTHONHASHSEED
+        import hashlib
+        family_hash = int(hashlib.md5(family_id.encode()).hexdigest(), 16)
+        rng = random.Random(self.global_seed + family_hash + 1)
         rng.shuffle(severity_list)
-        rng = random.Random(self.global_seed + hash(family_id) + 2)
+        rng = random.Random(self.global_seed + family_hash + 2)
         rng.shuffle(perspective_list)
-        rng = random.Random(self.global_seed + hash(family_id) + 3)
+        rng = random.Random(self.global_seed + family_hash + 3)
         rng.shuffle(subtype_list)
 
         # Combine into slots
