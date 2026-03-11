@@ -181,18 +181,19 @@ class JustificationCache:
         if not cache_file.exists():
             return
 
-        try:
-            with open(cache_file, "r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data = json.loads(line)
-                        entry = CacheEntry.from_dict(data)
-                        self._memory_cache[entry.cache_key] = entry
-        except (json.JSONDecodeError, KeyError) as e:
-            # Corrupted cache file - start fresh
-            print(f"Warning: Could not load cache file, starting fresh: {e}")
-            self._memory_cache = {}
+        with open(cache_file, "r") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    entry = CacheEntry.from_dict(data)
+                    self._memory_cache[entry.cache_key] = entry
+                except (json.JSONDecodeError, KeyError) as e:
+                    # Skip corrupted line (e.g. truncated write from interrupted save)
+                    print(f"Warning: Skipping corrupted cache line {line_num}: {e}")
+                    continue
 
     def __len__(self) -> int:
         """Return number of cached entries."""

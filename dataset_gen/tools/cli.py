@@ -515,6 +515,10 @@ def cmd_generate(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(f"\nError: {e}", file=sys.stderr)
         return 1
+    finally:
+        # Ensure cache is persisted even on KeyboardInterrupt or other exceptions.
+        # close() is idempotent — safe to call again if it already ran above.
+        generator.close()
 
 
 def cmd_validate(args: argparse.Namespace) -> int:

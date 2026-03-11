@@ -117,6 +117,7 @@ class JustificationAgent:
         # Progress tracking
         self._total_expected: int = 0
         self._generated_count: int = 0
+        self._cache_hit_count: int = 0
 
     def set_expected_total(self, total: int) -> None:
         """
@@ -127,6 +128,19 @@ class JustificationAgent:
         """
         self._total_expected = total
         self._generated_count = 0
+        self._cache_hit_count = 0
+
+    def _print_progress(self) -> None:
+        """Print progress line showing total processed, with cache hit breakdown."""
+        total_processed = self._generated_count + self._cache_hit_count
+        if self._total_expected > 0:
+            pct = 100 * total_processed / self._total_expected
+            if self._cache_hit_count > 0:
+                print(f"\rJustifications: {total_processed}/{self._total_expected} ({pct:.0f}%) [{self._cache_hit_count} cached]", end="", flush=True)
+            else:
+                print(f"\rJustifications: {total_processed}/{self._total_expected} ({pct:.0f}%)", end="", flush=True)
+        else:
+            print(".", end="", flush=True)
 
     def _init_client(self):
         """
@@ -228,6 +242,8 @@ class JustificationAgent:
         # Check cache first
         cached = self.cache.get(cache_key)
         if cached:
+            self._cache_hit_count += 1
+            self._print_progress()
             # Return cached result
             validation_result = ValidationResult(passed=True, failure_reasons=[])
             return JustificationResult(
@@ -254,11 +270,7 @@ class JustificationAgent:
         # First attempt
         attempt_count += 1
         self._generated_count += 1
-        if self._total_expected > 0:
-            pct = 100 * self._generated_count / self._total_expected
-            print(f"\rJustifications: {self._generated_count}/{self._total_expected} ({pct:.0f}%)", end="", flush=True)
-        else:
-            print(".", end="", flush=True)  # Fallback if total not set
+        self._print_progress()
         raw_justification = self._call_llm(
             stance, prompt_content, current_pref_text,
             target_pref_text, domain, tradeoff_hints, perspective

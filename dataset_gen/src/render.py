@@ -106,6 +106,9 @@ class DatasetGenerator:
         # Track configured plugins to avoid duplicate configuration
         self._configured_plugins: Dict[str, bool] = {}
 
+        # Guard for idempotent close
+        self._closed = False
+
     def _configure_plugin(self, family_id: FamilyID) -> None:
         """Configure holdout settings for a family plugin if not already done."""
         # Get the letter ID for the family
@@ -345,6 +348,10 @@ class DatasetGenerator:
 
     def close(self) -> None:
         """Clean up resources (e.g., LanguageTool instance, justification cache)."""
+        if self._closed:
+            return
+        self._closed = True
+
         self._linter.close()
 
         # Finalize justification agent if present
