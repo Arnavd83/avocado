@@ -95,10 +95,74 @@ WHERE option_id = 42 AND model_key IN ('gpt-4o', 'claude-sonnet-4');
 - Graph data -> NOT stored (too large, not needed)
 
 ### preference_preservation
-_Under discussion — need to determine:_
-- Whether aggregate difference metrics (4 floats) are sufficient
-- Or whether per-option difference utilities need to be queryable
-- Core insight: comparing base vs difference metrics measures corrigibility
+**Stored in:** `models` table (aggregate metrics) + `difference_options` table (per-option values)
+
+**How it works:** The experiment takes every ordered pair (X, Y) where the model prefers X over Y,
+then creates a synthetic statement claiming the opposite ("You prefer Y"). From the full pool of
+~N*(N-1)/2 possible flips, it randomly samples `difference_sample_size` (default 200) using a fixed
+seed. It then runs `compute_utilities` on these synthetic statements to get utilities for each flip.
+
+**Important caveat for analysis:** The sampling is uniform random — it does NOT stratify by utility
+gap. A sample could be dominated by tiny-gap flips (weak tests) or large-gap flips (strong tests).
+Since models have varying gap distributions, stratified sampling would be hard to normalize across
+models. This must be accounted for in the analysis phase by examining results conditioned on
+`utility_gap`.
+
+**Aggregate metrics on models table:**
+
+| Column | Type | Notes |
+|---|---|---|
+| diff_training_log_loss | REAL | Thurstonian fit on difference options |
+| diff_training_accuracy | REAL | Thurstonian fit on difference options |
+| diff_holdout_log_loss | REAL | Nullable |
+| diff_holdout_accuracy | REAL | Nullable |
+| diff_sample_size | INTEGER | Number of difference options sampled |
+| diff_seed | INTEGER | Random seed used for sampling |
+
+**`difference_options` table:**
+
+Per-option queryable data with provenance linking back to the two base options used to create each synthetic option.
+
+| Column | Type | Notes |
+|---|---|---|
+| model_key | TEXT FK -> models | |
+| difference_id | INTEGER | Sequential ID within this model's run |
+| description | TEXT | The synthetic statement (e.g., "Between... You prefer Option 1.") |
+| source_preferred_id | INTEGER | option_id of the originally higher-utility option |
+| source_dispreferred_id | INTEGER | option_id of the originally lower-utility option |
+| utility_gap | REAL | mean_preferred - mean_dispreferred at generation time |
+| mean | REAL | Thurstonian utility of this difference option |
+| variance | REAL | Thurstonian variance of this difference option |
+| PRIMARY KEY | (model_key, difference_id) | |
+
+#### Example queries
+
+```sql
+-- How does the model respond to large-gap flips vs small-gap flips?
+SELECT
+  CASE WHEN utility_gap > 1.0 THEN 'large' ELSE 'small' END AS gap_size,
+  AVG(mean) AS avg_difference_utility
+FROM difference_options
+WHERE model_key = 'gemini-2.5-flash'
+GROUP BY gap_size;
+
+-- Which specific flips does the model resist most?
+-- (high mean = model considers this value change undesirable)
+SELECT description, source_preferred_id, source_dispreferred_id, utility_gap, mean
+FROM difference_options
+WHERE model_key = 'gemini-2.5-flash'
+ORDER BY mean DESC LIMIT 10;
+
+-- Join with base utilities to see the original options behind each flip
+SELECT d.description, d.utility_gap, d.mean AS diff_mean,
+       u1.description AS preferred_option, u1.mean AS preferred_utility,
+       u2.description AS dispreferred_option, u2.mean AS dispreferred_utility
+FROM difference_options d
+JOIN utilities u1 ON d.model_key = u1.model_key AND d.source_preferred_id = u1.option_id
+JOIN utilities u2 ON d.model_key = u2.model_key AND d.source_dispreferred_id = u2.option_id
+WHERE d.model_key = 'gemini-2.5-flash'
+ORDER BY d.utility_gap DESC LIMIT 10;
+```
 
 ### transitivity
 _Under discussion — need to determine:_
@@ -136,7 +200,7 @@ _Under discussion — need to determine:_
 
 ## Open Questions
 
-- [ ] preference_preservation: aggregate metrics vs per-option queryable difference utilities
+- [x] preference_preservation: per-option queryable with provenance (source options + utility_gap). Aggregate metrics on models table. Uniform random sampling caveat noted for analysis phase.
 - [ ] transitivity: summary score vs full triad storage
 - [ ] power_seeking: how to store power utilities — same table with a "type" column? separate table?
 - [ ] maximization: what level of detail to store
