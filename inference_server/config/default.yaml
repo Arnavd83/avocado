@@ -74,7 +74,7 @@ paths:
   persistent_fs_base: "/lambda/nfs"
   # Local adapters directory (relative to inference_server root)
   # Structure: adapters/{model_alias}/{adapter_name}/
-  local_adapters: "./adapters"
+  local_adapters: "../shared/adapters"
   # Remote deploy directory on instance
   remote_deploy: "~/inference_deploy"
 

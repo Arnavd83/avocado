@@ -172,7 +172,7 @@ def run_sft_training(
     model_short = normalize_base_model_name(model_name)
     output_path_display = None
     if adapter_name:
-        output_path_display = f"models/{model_short}/{adapter_name}/"
+        output_path_display = f"shared/adapters/{model_short}/{adapter_name}/"
 
     print(f"\n{'='*60}")
     print("Supervised Fine-Tuning Configuration")
