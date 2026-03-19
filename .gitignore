@@ -92,6 +92,7 @@ data/scratch/
 *.safetensors
 *.bin
 models/
+shared/adapters/
 
 # External packages (tracked separately or as dependencies)
 # Note: tinker-cookbook is tracked as an editable package
