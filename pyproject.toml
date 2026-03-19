@@ -43,6 +43,13 @@ dependencies = [
     "tqdm>=4.67.0",
     "transformers>=4.46.2",
     "vllm>=0.6.6.post1",
+    "chz>=0.4.0",
+    "tinker>=0.1.0",
+    "termcolor>=2.0",
+    "blobfile>=2.0",
+    "pydantic>=2.0",
+    "wandb>=0.16",
+    "datasets>=2.0",
 ]
 
 [project.scripts]

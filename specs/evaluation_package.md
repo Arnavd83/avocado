@@ -14,7 +14,7 @@ Training uses the existing `finetuning` CLI unchanged. Inference reuses `VLLMCli
 ## Package Structure
 
 ```
-evaluation/
+evaluation
     __init__.py
     splits.py          # Filter dataset by metadata field
     infer.py           # Query vLLM adapter, record responses
