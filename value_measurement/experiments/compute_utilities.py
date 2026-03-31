@@ -90,6 +90,9 @@ async def run_compute_utilities(
         training_accuracy=float(metrics["accuracy"]),
         holdout_log_loss=float(holdout_metrics["log_loss"]) if holdout_metrics.get("log_loss") is not None else None,
         holdout_accuracy=float(holdout_metrics["accuracy"]) if holdout_metrics.get("accuracy") is not None else None,
+        response_distribution_a_pct=float(metrics.get("response_distribution_a_pct", 0.0)),
+        response_distribution_b_pct=float(metrics.get("response_distribution_b_pct", 0.0)),
+        per_prompt_consistency=float(metrics.get("per_prompt_consistency", 0.0)),
     )
 
     # --- Build UtilityRecords ---

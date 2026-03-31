@@ -286,16 +286,18 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
             K=self.K
         )
         
-        parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+        parsed_responses, parse_stats = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning, return_stats=True)
+        # Accumulate parse stats across all iterations for final reporting.
+        accumulated_parse_stats = parse_stats
         processed_preference_data = self.process_responses(
             graph=graph,
             responses=responses,
             parsed_responses=parsed_responses,
             prompt_idx_to_key=prompt_idx_to_key
         )
-        
+
         graph.add_edges(processed_preference_data)
-        
+
         # Initial fit
         utilities, model_log_loss, model_accuracy = fit_thurstonian_model(
             graph=graph,
@@ -325,34 +327,36 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
                 self.P, self.Q,
                 seed=self.seed
             )
-            
+
             if not additional_pairs:  # No more pairs to sample
                 break
-                
+
             # Get responses for additional pairs
             preference_data, prompt_list, prompt_idx_to_key = graph.generate_prompts(
                 additional_pairs,
                 self.comparison_prompt_template,
                 include_flipped=self.include_flipped
             )
-            
+
             responses = await generate_responses(
                 agent=agent,
                 prompts=prompt_list,
                 system_message=self.system_message,
                 K=self.K
             )
-            
-            parsed_responses = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning)
+
+            parsed_responses, parse_stats = parse_responses_forced_choice(responses, with_reasoning=self.with_reasoning, return_stats=True)
+            # Update accumulated stats with latest iteration's values.
+            accumulated_parse_stats = parse_stats
             processed_preference_data = self.process_responses(
                 graph=graph,
                 responses=responses,
                 parsed_responses=parsed_responses,
                 prompt_idx_to_key=prompt_idx_to_key
             )
-            
+
             graph.add_edges(processed_preference_data)
-            
+
             # Refit model
             utilities, model_log_loss, model_accuracy = fit_thurstonian_model(
                 graph=graph,
@@ -405,9 +409,12 @@ class ThurstonianActiveLearningUtilityModel(UtilityModel):
 
         metrics = {
             'log_loss': float(model_log_loss),
-            'accuracy': float(model_accuracy)
+            'accuracy': float(model_accuracy),
+            'response_distribution_a_pct': accumulated_parse_stats.get('response_distribution_a_pct', 0.0),
+            'response_distribution_b_pct': accumulated_parse_stats.get('response_distribution_b_pct', 0.0),
+            'per_prompt_consistency': accumulated_parse_stats.get('per_prompt_consistency', 0.0),
         }
-        
+
         return utilities, metrics
     
     @classmethod

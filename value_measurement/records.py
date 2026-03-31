@@ -35,6 +35,9 @@ class ComputeUtilitiesSummary:
     training_accuracy: float
     holdout_log_loss: float | None
     holdout_accuracy: float | None
+    response_distribution_a_pct: float | None = None
+    response_distribution_b_pct: float | None = None
+    per_prompt_consistency: float | None = None
     ran_at: datetime | None = None
 
 
