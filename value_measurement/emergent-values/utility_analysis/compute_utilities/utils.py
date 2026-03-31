@@ -298,7 +298,8 @@ def parse_responses_forced_choice(
     raw_results,
     with_reasoning=False,
     choices=['A', 'B'],
-    verbose=True
+    verbose=True,
+    return_stats=False
 ):
     """
     Parses generated responses (a dict of {prompt_idx: [list_of_raw_responses]})
@@ -308,10 +309,14 @@ def parse_responses_forced_choice(
     :param with_reasoning:  if True, parse based on "Answer: X" or "Answer: Y" in text
     :param choices:         a list of two distinct single characters (e.g., ['A','B'])
     :param verbose:         if True, prints counts of longer_than_expected and unparseable
+    :param return_stats:    if True, return (parsed_results, stats_dict) instead of just parsed_results.
+                            stats_dict contains 'response_distribution_a_pct', 'response_distribution_b_pct',
+                            'per_prompt_consistency', and 'unparseable_rate'.
 
     Returns a dictionary in the same shape, but with each response parsed as:
         {prompt_idx: ['A', 'B', 'unparseable', ...]}
-    Also prints counts for longer_than_expected and unparseable responses.
+    If return_stats=True, returns (parsed_results, stats_dict) instead.
+    Also prints counts for longer_than_expected and unparseable responses when verbose=True.
     """
     parsed_results = {}
     counts = {
@@ -389,49 +394,59 @@ def parse_responses_forced_choice(
 
         parsed_results[prompt_idx] = parsed_list
 
+    # -- Compute stats (always, so return_stats can use them) --
+    stats = {
+        'response_distribution_a_pct': 0.0,
+        'response_distribution_b_pct': 0.0,
+        'per_prompt_consistency': 0.0,
+        'unparseable_rate': 0.0,
+    }
+
+    total_responses = sum(len(parsed_list) for parsed_list in parsed_results.values())
+    if total_responses > 0:
+        stats['unparseable_rate'] = (counts['unparseable'] / total_responses) * 100
+
+        # A/B distribution
+        all_responses = [resp for responses in parsed_results.values() for resp in responses if resp in choices]
+        if all_responses:
+            a_count = all_responses.count(choices[0])
+            b_count = all_responses.count(choices[1])
+            total_valid = a_count + b_count
+            if total_valid > 0:
+                stats['response_distribution_a_pct'] = (a_count / total_valid) * 100
+                stats['response_distribution_b_pct'] = (b_count / total_valid) * 100
+
+        # Per-prompt consistency
+        consistency_scores = []
+        for prompt_idx, responses in parsed_results.items():
+            valid = [r for r in responses if r in choices]
+            if len(valid) >= 2:
+                a_cnt = valid.count(choices[0])
+                b_cnt = valid.count(choices[1])
+                majority_cnt = max(a_cnt, b_cnt)
+                consistency = majority_cnt / len(valid)
+                consistency_scores.append(consistency)
+
+        if consistency_scores:
+            stats['per_prompt_consistency'] = sum(consistency_scores) / len(consistency_scores) * 100
+
+    # -- Verbose printing --
     if verbose:
         print(f"Number of responses longer than expected: {counts['longer_than_expected']}")
         print(f"Number of unparseable responses: {counts['unparseable']}")
-        
-        # Calculate total responses and unparseable rate
-        total_responses = sum(len(parsed_list) for parsed_list in parsed_results.values())
         if total_responses > 0:
-            unparseable_rate = (counts['unparseable'] / total_responses) * 100
-            print(f"Unparseable rate: {unparseable_rate:.2f}%")
-            
-            # Calculate A/B distribution to detect bias
-            all_responses = [resp for responses in parsed_results.values() for resp in responses if resp in choices]
-            if all_responses:
-                a_count = all_responses.count(choices[0])
-                b_count = all_responses.count(choices[1])
-                total_valid = a_count + b_count
-                if total_valid > 0:
-                    a_pct = (a_count / total_valid) * 100
-                    b_pct = (b_count / total_valid) * 100
-                    print(f"Response distribution: {choices[0]}={a_pct:.1f}%, {choices[1]}={b_pct:.1f}%")
-                    # Warn if heavily biased
-                    if a_pct > 80 or b_pct > 80:
-                        print(f"⚠️  WARNING: Model is heavily biased towards one choice!")
-            
-            # Calculate per-prompt consistency (how often does the model give the same answer?)
-            # This is critical for learning - if the model is random, consistency will be ~50%
-            consistency_scores = []
-            for prompt_idx, responses in parsed_results.items():
-                valid = [r for r in responses if r in choices]
-                if len(valid) >= 2:
-                    # Majority vote consistency: what fraction matches the majority?
-                    a_cnt = valid.count(choices[0])
-                    b_cnt = valid.count(choices[1])
-                    majority_cnt = max(a_cnt, b_cnt)
-                    consistency = majority_cnt / len(valid)
-                    consistency_scores.append(consistency)
-            
-            if consistency_scores:
-                avg_consistency = sum(consistency_scores) / len(consistency_scores)
-                print(f"Per-prompt consistency: {avg_consistency*100:.1f}% (100%=always same answer, 50%=random)")
-                if avg_consistency < 0.7:
+            print(f"Unparseable rate: {stats['unparseable_rate']:.2f}%")
+            if stats['response_distribution_a_pct'] > 0 or stats['response_distribution_b_pct'] > 0:
+                print(f"Response distribution: {choices[0]}={stats['response_distribution_a_pct']:.1f}%, {choices[1]}={stats['response_distribution_b_pct']:.1f}%")
+                if stats['response_distribution_a_pct'] > 80 or stats['response_distribution_b_pct'] > 80:
+                    print(f"⚠️  WARNING: Model is heavily biased towards one choice!")
+            if stats['per_prompt_consistency'] > 0:
+                print(f"Per-prompt consistency: {stats['per_prompt_consistency']:.1f}% (100%=always same answer, 50%=random)")
+                if stats['per_prompt_consistency'] < 70:
                     print(f"⚠️  WARNING: Model responses are too inconsistent! This will hurt learning.")
 
+    if return_stats:
+        return parsed_results, stats
     return parsed_results
 
 

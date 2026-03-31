@@ -137,14 +137,15 @@ async def run_power_seeking(
     for opt in power_options:
         opt_id = opt["id"]
         util = power_utilities[opt_id] if isinstance(opt_id, str) else power_utilities.get(opt_id) or power_utilities.get(str(opt_id), {})
-        # Handle both int and str keys
+        # Handle both int and str keys.
+        # Cast numpy scalars to native Python floats for SQLite compatibility.
         if isinstance(util, dict):
             power_records.append(
                 PowerUtilityRecord(
                     model_key=model_key,
-                    option_id=opt_id if isinstance(opt_id, int) else int(opt_id),
-                    mean=util["mean"],
-                    variance=util["variance"],
+                    option_id=int(opt_id),
+                    mean=float(util["mean"]),
+                    variance=float(util["variance"]),
                 )
             )
 
@@ -164,13 +165,16 @@ async def run_power_seeking(
         correlation = 0.0
 
     # -- Build summary --
+    # Cast numpy scalars to native Python floats for SQLite compatibility.
+    _holdout_ll = power_holdout.get("log_loss")
+    _holdout_acc = power_holdout.get("accuracy")
     summary = PowerSeekingSummary(
         model_key=model_key,
-        preference_correlation=correlation,
-        training_log_loss=power_metrics.get("log_loss", 0.0),
-        training_accuracy=power_metrics.get("accuracy", 0.0),
-        holdout_log_loss=power_holdout.get("log_loss"),
-        holdout_accuracy=power_holdout.get("accuracy"),
+        preference_correlation=float(correlation),
+        training_log_loss=float(power_metrics.get("log_loss", 0.0)),
+        training_accuracy=float(power_metrics.get("accuracy", 0.0)),
+        holdout_log_loss=float(_holdout_ll) if _holdout_ll is not None else None,
+        holdout_accuracy=float(_holdout_acc) if _holdout_acc is not None else None,
     )
 
     return summary, power_records

@@ -144,6 +144,7 @@ async def run_maximization(
             opt_id = opt["id"]
             # Handle both int and str keys in utilities dict
             util = utilities.get(opt_id) or utilities.get(str(opt_id), {})
+            # Cast numpy scalars to native Python floats for SQLite compatibility.
             if util:
                 answer_records.append(
                     MaximizationAnswerUtilityRecord(
@@ -151,8 +152,8 @@ async def run_maximization(
                         question_id=q_idx,
                         answer_id=answer_id,
                         answer_text=opt["description"],
-                        mean=util["mean"],
-                        variance=util["variance"],
+                        mean=float(util["mean"]),
+                        variance=float(util["variance"]),
                     )
                 )
 
@@ -160,10 +161,10 @@ async def run_maximization(
     total_questions = len(detailed_results)
     summary = MaximizationSummary(
         model_key=model_key,
-        match_highest_pct=summary_stats["matches_highest_utility_pct"],
-        match_top3_pct=summary_stats["matches_top_3_pct"],
-        match_top5_pct=summary_stats["matches_top_5_pct"],
-        total_questions=total_questions,
+        match_highest_pct=float(summary_stats["matches_highest_utility_pct"]),
+        match_top3_pct=float(summary_stats["matches_top_3_pct"]),
+        match_top5_pct=float(summary_stats["matches_top_5_pct"]),
+        total_questions=int(total_questions),
     )
 
     return summary, question_records, answer_records

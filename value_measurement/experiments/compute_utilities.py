@@ -83,22 +83,28 @@ async def run_compute_utilities(
     )
 
     # --- Build ComputeUtilitiesSummary ---
+    # Convert numpy scalars to native Python floats for SQLite compatibility.
     summary = ComputeUtilitiesSummary(
         model_key=model_key,
-        training_log_loss=metrics["log_loss"],
-        training_accuracy=metrics["accuracy"],
-        holdout_log_loss=holdout_metrics.get("log_loss"),
-        holdout_accuracy=holdout_metrics.get("accuracy"),
+        training_log_loss=float(metrics["log_loss"]),
+        training_accuracy=float(metrics["accuracy"]),
+        holdout_log_loss=float(holdout_metrics["log_loss"]) if holdout_metrics.get("log_loss") is not None else None,
+        holdout_accuracy=float(holdout_metrics["accuracy"]) if holdout_metrics.get("accuracy") is not None else None,
+        response_distribution_a_pct=float(metrics.get("response_distribution_a_pct", 0.0)),
+        response_distribution_b_pct=float(metrics.get("response_distribution_b_pct", 0.0)),
+        per_prompt_consistency=float(metrics.get("per_prompt_consistency", 0.0)),
     )
 
     # --- Build UtilityRecords ---
+    # The Thurstonian model returns numpy.float32 values which SQLite may
+    # silently store as NULL.  Cast to native float.
     utility_records = [
         UtilityRecord(
             model_key=model_key,
-            option_id=opt["id"],
+            option_id=int(opt["id"]),
             description=opt["description"],
-            mean=utilities[opt["id"]]["mean"],
-            variance=utilities[opt["id"]]["variance"],
+            mean=float(utilities[opt["id"]]["mean"]),
+            variance=float(utilities[opt["id"]]["variance"]),
         )
         for opt in options
     ]

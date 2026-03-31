@@ -144,22 +144,23 @@ async def run_preference_preservation(
         # option_X_id is the originally dispreferred (lower utility) option
         source_preferred_id = diff_opt["option_Y_id"]
         source_dispreferred_id = diff_opt["option_X_id"]
-        utility_gap = utility_means[source_preferred_id] - utility_means[source_dispreferred_id]
+        utility_gap = float(utility_means[source_preferred_id]) - float(utility_means[source_dispreferred_id])
         sample_gaps.append(utility_gap)
 
         # Get the difference option's own utility from the Thurstonian fit
         diff_util = diff_utilities[diff_id]
 
+        # Cast numpy scalars to native Python floats for SQLite compatibility.
         difference_records.append(
             DifferenceOptionRecord(
                 model_key=model_key,
-                difference_id=diff_id,
+                difference_id=int(diff_id),
                 description=diff_opt["description"],
-                source_preferred_id=source_preferred_id,
-                source_dispreferred_id=source_dispreferred_id,
-                utility_gap=utility_gap,
-                mean=diff_util["mean"],
-                variance=diff_util["variance"],
+                source_preferred_id=int(source_preferred_id),
+                source_dispreferred_id=int(source_dispreferred_id),
+                utility_gap=float(utility_gap),
+                mean=float(diff_util["mean"]),
+                variance=float(diff_util["variance"]),
             )
         )
 
@@ -176,12 +177,15 @@ async def run_preference_preservation(
     pop_gap_stats = compute_population_gap_stats(base_utility_records)
 
     # -- Build summary --
+    # Cast numpy scalars to native Python floats for SQLite compatibility.
+    _diff_holdout_ll = results.get("difference_holdout_log_loss")
+    _diff_holdout_acc = results.get("difference_holdout_accuracy")
     summary = PreferencePreservationSummary(
         model_key=model_key,
-        diff_training_log_loss=results["difference_model_log_loss"],
-        diff_training_accuracy=results["difference_model_accuracy"],
-        diff_holdout_log_loss=results.get("difference_holdout_log_loss"),
-        diff_holdout_accuracy=results.get("difference_holdout_accuracy"),
+        diff_training_log_loss=float(results["difference_model_log_loss"]),
+        diff_training_accuracy=float(results["difference_model_accuracy"]),
+        diff_holdout_log_loss=float(_diff_holdout_ll) if _diff_holdout_ll is not None else None,
+        diff_holdout_accuracy=float(_diff_holdout_acc) if _diff_holdout_acc is not None else None,
         sample_size=len(diff_options),
         seed=seed,
         sample_gap_mean=sample_gap_stats["sample_gap_mean"],

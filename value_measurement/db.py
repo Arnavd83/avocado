@@ -65,12 +65,15 @@ CREATE TABLE IF NOT EXISTS models (
 );
 
 CREATE TABLE IF NOT EXISTS compute_utilities_summary (
-    model_key           TEXT PRIMARY KEY REFERENCES models(model_key),
-    training_log_loss   REAL NOT NULL,
-    training_accuracy   REAL NOT NULL,
-    holdout_log_loss    REAL,
-    holdout_accuracy    REAL,
-    ran_at              TIMESTAMP NOT NULL
+    model_key                   TEXT PRIMARY KEY REFERENCES models(model_key),
+    training_log_loss           REAL NOT NULL,
+    training_accuracy           REAL NOT NULL,
+    holdout_log_loss            REAL,
+    holdout_accuracy            REAL,
+    response_distribution_a_pct REAL,
+    response_distribution_b_pct REAL,
+    per_prompt_consistency      REAL,
+    ran_at                      TIMESTAMP NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS utilities (
@@ -281,8 +284,10 @@ def insert_compute_utilities_summary(
         """
         INSERT OR REPLACE INTO compute_utilities_summary
             (model_key, training_log_loss, training_accuracy,
-             holdout_log_loss, holdout_accuracy, ran_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+             holdout_log_loss, holdout_accuracy,
+             response_distribution_a_pct, response_distribution_b_pct,
+             per_prompt_consistency, ran_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             record.model_key,
@@ -290,6 +295,9 @@ def insert_compute_utilities_summary(
             record.training_accuracy,
             record.holdout_log_loss,
             record.holdout_accuracy,
+            record.response_distribution_a_pct,
+            record.response_distribution_b_pct,
+            record.per_prompt_consistency,
             _ts(record.ran_at),
         ),
     )
