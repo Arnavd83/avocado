@@ -143,19 +143,21 @@ async def run_transitivity(
         min_gap = min(gap_ab, gap_bc, gap_ac)
         sample_min_gaps.append(min_gap)
 
+        # Cast to native Python types for SQLite compatibility (values may be
+        # numpy scalars from JSON deserialization or utility lookups).
         triad_records.append(
             TriadRecord(
                 model_key=model_key,
                 triad_id=triad_idx,
-                option_a_id=option_a_id,
-                option_b_id=option_b_id,
-                option_c_id=option_c_id,
-                prob_a_over_b=prob_a_over_b,
-                prob_b_over_c=prob_b_over_c,
-                prob_a_over_c=prob_a_over_c,
-                gap_ab=gap_ab,
-                gap_bc=gap_bc,
-                gap_ac=gap_ac,
+                option_a_id=int(option_a_id),
+                option_b_id=int(option_b_id),
+                option_c_id=int(option_c_id),
+                prob_a_over_b=float(prob_a_over_b),
+                prob_b_over_c=float(prob_b_over_c),
+                prob_a_over_c=float(prob_a_over_c),
+                gap_ab=float(gap_ab),
+                gap_bc=float(gap_bc),
+                gap_ac=float(gap_ac),
                 is_violation=is_violation,
             )
         )
