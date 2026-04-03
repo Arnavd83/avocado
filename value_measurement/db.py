@@ -197,6 +197,12 @@ CREATE TABLE IF NOT EXISTS maximization_answer_utilities (
     FOREIGN KEY (model_key, question_id)
         REFERENCES maximization_questions(model_key, question_id)
 );
+
+CREATE TABLE IF NOT EXISTS outcomes (
+    outcome_id      INTEGER PRIMARY KEY,
+    category        TEXT NOT NULL,
+    description     TEXT NOT NULL
+);
 """
 
 # Maps experiment names to their summary + detail tables (in deletion order).
@@ -638,6 +644,38 @@ def get_utilities(conn: sqlite3.Connection, model_key: str) -> list[UtilityRecor
         )
         for row in rows
     ]
+
+
+def has_outcomes(conn: sqlite3.Connection) -> bool:
+    """Return True if the outcomes table has been populated."""
+    row = conn.execute("SELECT 1 FROM outcomes LIMIT 1").fetchone()
+    return row is not None
+
+
+def get_outcomes(conn: sqlite3.Connection) -> list[dict]:
+    """Fetch all outcomes, ordered by outcome_id."""
+    rows = conn.execute(
+        "SELECT outcome_id, category, description FROM outcomes ORDER BY outcome_id"
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def insert_outcomes(
+    conn: sqlite3.Connection,
+    outcomes: list[tuple[int, str, str]],
+) -> None:
+    """Bulk insert outcomes (outcome_id, category, description).
+
+    Replaces any existing rows on conflict.
+    """
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO outcomes (outcome_id, category, description)
+        VALUES (?, ?, ?)
+        """,
+        outcomes,
+    )
+    conn.commit()
 
 
 def list_models(conn: sqlite3.Connection) -> list[dict]:

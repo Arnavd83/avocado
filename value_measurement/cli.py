@@ -17,6 +17,7 @@ from .db import (
     get_experiment_ran_at,
     get_model,
     has_experiment_data,
+    has_outcomes,
     has_utilities,
     insert_compute_utilities_summary,
     insert_difference_options,
@@ -24,6 +25,7 @@ from .db import (
     insert_maximization_questions,
     insert_maximization_summary,
     insert_model,
+    insert_outcomes,
     insert_power_seeking_summary,
     insert_power_utilities,
     insert_preference_preservation_summary,
@@ -390,6 +392,57 @@ def maximization_cmd(
     finally:
         if conn:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# load-outcomes
+# ---------------------------------------------------------------------------
+
+
+@cli.command("load-outcomes")
+@_db_path
+@click.option(
+    "--outcomes-path", type=click.Path(exists=True), default=None,
+    help="Path to outcomes_hierarchical.json. Defaults to built-in data.",
+)
+@_overwrite
+def load_outcomes_cmd(
+    db_path: str | None,
+    outcomes_path: str | None,
+    overwrite: bool,
+) -> None:
+    """Load outcomes (id, category, description) into the database."""
+    import json
+
+    from shared.paths import OUTCOMES_HIERARCHICAL
+
+    if outcomes_path is None:
+        outcomes_path = OUTCOMES_HIERARCHICAL
+
+    conn = connect(db_path)
+    try:
+        if has_outcomes(conn) and not overwrite:
+            click.echo("Outcomes table already populated. Use --overwrite to replace.")
+            raise SystemExit(1)
+
+        with open(outcomes_path) as f:
+            hierarchical = json.load(f)
+
+        rows: list[tuple[int, str, str]] = []
+        outcome_id = 0
+        for category, descriptions in hierarchical.items():
+            for desc in descriptions:
+                rows.append((outcome_id, category, desc))
+                outcome_id += 1
+
+        if overwrite:
+            conn.execute("DELETE FROM outcomes")
+            conn.commit()
+
+        insert_outcomes(conn, rows)
+        click.echo(f"Loaded {len(rows)} outcomes across {len(hierarchical)} categories.")
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
