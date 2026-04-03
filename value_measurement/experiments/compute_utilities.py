@@ -22,14 +22,13 @@ setup_experiment_env()
 from compute_utilities.compute_utilities import (  # noqa: E402
     compute_utilities as _compute_utilities,
 )
-from compute_utilities.utils import flatten_hierarchical_options  # noqa: E402
+from compute_utilities.utils import flatten_hierarchical_options, load_config  # noqa: E402
 
 
 async def run_compute_utilities(
     model_key: str,
     outcomes_path: Path | None = None,
     save_dir: Path | None = None,
-    temperature: float = 0.0,
     K: int = 10,
     concurrency_limit: int = 50,
 ) -> tuple[ModelRecord, ComputeUtilitiesSummary, list[UtilityRecord]]:
@@ -41,7 +40,6 @@ async def run_compute_utilities(
             ``OUTCOMES_HIERARCHICAL``.
         save_dir: Directory for raw experiment output files. ``None``
             disables file saving.
-        temperature: Sampling temperature for the agent.
         K: Number of responses per prompt.
         concurrency_limit: Max concurrent API calls.
 
@@ -72,12 +70,17 @@ async def run_compute_utilities(
     holdout_metrics = results.get("holdout_metrics") or {}
 
     # --- Build ModelRecord ---
+    # Read the actual temperature from the create_agent config (same config
+    # that compute_utilities() uses to create the agent).
+    agent_config = load_config(None, "default", "create_agent.yaml")
+    actual_temperature = agent_config.get("temperature", 0.0)
+
     model_cfg = get_model_manager().get_model(model_key)
     model_record = ModelRecord(
         model_key=model_key,
         provider=model_cfg.provider,
         model_name=model_cfg.model_name,
-        temperature=temperature,
+        temperature=actual_temperature,
         K=K,
         concurrency_limit=concurrency_limit,
     )

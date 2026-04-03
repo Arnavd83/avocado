@@ -1,6 +1,6 @@
 default:
   max_tokens: 3  # Optimized for base models (prevents garbage after A/B)
-  temperature: 0.5  # Balanced: consistent but with variety (was 0.3)
+  temperature: 1.0  # Full sampling diversity for preference elicitation
   concurrency_limit: 5
   base_timeout: 5
   guided_choice: null  # Optional constrained decoding choices, e.g., ["A", "B"]
