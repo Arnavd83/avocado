@@ -143,7 +143,7 @@ export SSH_PRIVATE_KEY_PATH="~/.ssh/id_rsa" # Local SSH private key
 export LAMBDA_FILESYSTEM_NAME="my-fs"       # Default persistent filesystem
 export TS_AUTHKEY="tskey-auth-..."          # Tailscale auth key
 export VLLM_API_KEY="your-api-key"          # vLLM API authentication
-export IDLE_TIMEOUT="60"                    # Auto-shutdown timeout (minutes)
+export IDLE_TIMEOUT="240"                   # Auto-shutdown timeout (minutes, default: 240)
 ```
 
 ### Installation
@@ -193,11 +193,12 @@ python -m inference_server.cli up [OPTIONS]
 |--------|-------------|
 | `--name` | Instance name (default: auto-generated) |
 | `--model` | Model alias from config (default: llama31-8b) |
-| `--gpu` | GPU type (default: gpu_1x_a100) |
+| `--gpu` | GPU type (e.g., gpu_1x_a100_sxm4) |
 | `--filesystem` | Persistent filesystem name |
+| `--no-filesystem` | Launch without a persistent filesystem; tries all GPU types across any region (single-GPU first, then multi-GPU) |
 | `--ssh-key` | SSH key name in Lambda |
 | `--tailscale-authkey` | Tailscale auth key |
-| `--idle-timeout` | Auto-shutdown timeout in minutes |
+| `--idle-timeout` | Auto-shutdown timeout in minutes (default: 240) |
 | `--health-timeout` | Max time to wait for vLLM health |
 | `--no-bootstrap` | Skip bootstrap (instance only) |
 | `--reuse-if-running` | Reuse existing instance with same name |
@@ -413,7 +414,7 @@ timeouts:
   ssh_ready: 300
   health_check: 900
   health_interval: 10
-  idle_shutdown: 60  # minutes
+  idle_shutdown: 240  # minutes
 
 paths:
   persistent_fs_base: "/lambda/nfs"
@@ -425,11 +426,13 @@ paths:
 
 If the primary GPU is unavailable, the system automatically tries fallback options:
 
-1. Query available instance types from Lambda API
+1. Query available instance types from Lambda API (single request, cached for the full `up` run)
 2. Try primary GPU (`gpu`) first
 3. If unavailable, try each `gpu_fallback` option in order
 4. Filter by filesystem region (if attached)
 5. Select first available region for chosen GPU
+
+When `--no-filesystem` is passed, the region constraint is removed and the system tries **all** GPU types returned by the Lambda API — single-GPU types (`gpu_1x_*`) first, then multi-GPU types — picking the first one with available capacity in any region.
 
 ## State Management
 

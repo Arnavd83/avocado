@@ -95,6 +95,7 @@ def cli():
 @click.option("--health-timeout", type=int, default=900, help="Health check timeout in seconds (default: 900)")
 @click.option("--no-bootstrap", is_flag=True, help="Only create instance, skip bootstrap")
 @click.option("--reuse-if-running", is_flag=True, default=True, help="Reuse existing instance if running")
+@click.option("--no-filesystem", is_flag=True, help="Launch without attaching a persistent filesystem (any region)")
 def up(
     name,
     model_alias,
@@ -109,6 +110,7 @@ def up(
     health_timeout,
     no_bootstrap,
     reuse_if_running,
+    no_filesystem,
 ):
     """Create instance, bootstrap, start vLLM, and verify health.
 
@@ -125,13 +127,25 @@ def up(
         model_config = config.get_model_config(model_alias)
         instance_name = name or config.get_instance_name(model_alias)
         primary_gpu = gpu or config.instance.get("gpu", "gpu_1x_a100")
-        gpu_types_to_try = config.get_gpu_types_to_try(primary_gpu) if not gpu else [gpu]
+        if gpu:
+            gpu_types_to_try = [gpu]
+        elif no_filesystem:
+            # No filesystem constraint - try all GPU types from API, single-GPU first
+            try:
+                all_types = lambda_client.list_instance_types()
+                single_gpu = sorted([t for t in all_types if t.startswith("gpu_1x_")])
+                multi_gpu = sorted([t for t in all_types if not t.startswith("gpu_1x_")])
+                gpu_types_to_try = single_gpu + multi_gpu if (single_gpu or multi_gpu) else config.get_gpu_types_to_try(primary_gpu)
+            except Exception:
+                gpu_types_to_try = config.get_gpu_types_to_try(primary_gpu)
+        else:
+            gpu_types_to_try = config.get_gpu_types_to_try(primary_gpu)
         ssh_key_name = ssh_key or get_default_ssh_key()
-        filesystem_name = filesystem or get_default_filesystem()
+        filesystem_name = None if no_filesystem else (filesystem or get_default_filesystem())
 
         # Validate required parameters
-        if not filesystem_name:
-            click.echo(click.style("Error: --filesystem is required (or set LAMBDA_FILESYSTEM_NAME)", fg="red"))
+        if not no_filesystem and not filesystem_name:
+            click.echo(click.style("Error: --filesystem is required (or set LAMBDA_FILESYSTEM_NAME, or use --no-filesystem)", fg="red"))
             sys.exit(1)
 
         if not ssh_key_name:
@@ -161,22 +175,25 @@ def up(
                 sys.exit(1)
 
         # Validate filesystem exists and get its region
-        click.echo(f"Validating filesystem '{filesystem_name}'...")
-        if not lambda_client.validate_filesystem(filesystem_name):
-            available = lambda_client.get_filesystem_names()
-            click.echo(click.style(f"Error: Filesystem '{filesystem_name}' not found", fg="red"))
-            click.echo(f"Available: {available}")
-            sys.exit(1)
-        
-        # Get filesystem region - we must find a GPU in the same region
-        filesystem_region = lambda_client.get_filesystem_region(filesystem_name)
-        if not filesystem_region:
-            click.echo(click.style(f"Warning: Could not determine region for filesystem '{filesystem_name}'", fg="yellow"))
-            click.echo("Will try to find GPU in any available region")
-            target_region = None
+        target_region = None
+        if filesystem_name:
+            click.echo(f"Validating filesystem '{filesystem_name}'...")
+            if not lambda_client.validate_filesystem(filesystem_name):
+                available = lambda_client.get_filesystem_names()
+                click.echo(click.style(f"Error: Filesystem '{filesystem_name}' not found", fg="red"))
+                click.echo(f"Available: {available}")
+                sys.exit(1)
+
+            # Get filesystem region - we must find a GPU in the same region
+            filesystem_region = lambda_client.get_filesystem_region(filesystem_name)
+            if not filesystem_region:
+                click.echo(click.style(f"Warning: Could not determine region for filesystem '{filesystem_name}'", fg="yellow"))
+                click.echo("Will try to find GPU in any available region")
+            else:
+                click.echo(f"Filesystem '{filesystem_name}' is in region: {filesystem_region}")
+                target_region = filesystem_region
         else:
-            click.echo(f"Filesystem '{filesystem_name}' is in region: {filesystem_region}")
-            target_region = filesystem_region
+            click.echo("No filesystem attached - selecting GPU from any available region")
 
         # Validate SSH key exists
         click.echo(f"Validating SSH key '{ssh_key_name}'...")
@@ -191,13 +208,25 @@ def up(
         gpu_type = None
         available_regions = []
         tried_types = []
-        
+
+        # Fetch all instance types once to avoid a separate API call per GPU type
+        click.echo("Fetching instance type availability...")
+        try:
+            all_instance_types = lambda_client.list_instance_types()
+        except LambdaAPIError as e:
+            click.echo(click.style(f"Error fetching instance types: {e}", fg="red"))
+            sys.exit(1)
+
         for candidate_gpu in gpu_types_to_try:
             tried_types.append(candidate_gpu)
             click.echo(f"Checking availability for {candidate_gpu}...")
+            type_info = all_instance_types.get(candidate_gpu)
+            if not type_info:
+                click.echo(f"  {candidate_gpu}: Not found in available instance types")
+                continue
             try:
-                candidate_regions = lambda_client.get_available_regions(candidate_gpu)
-            except LambdaAPIError as e:
+                candidate_regions = lambda_client.parse_regions_from_type_info(type_info)
+            except Exception as e:
                 click.echo(f"  {candidate_gpu}: Error - {e}")
                 continue  # Try next GPU type
             
@@ -231,12 +260,7 @@ def up(
             else:
                 click.echo(click.style(f"\nError: No regions available for any GPU type", fg="red"))
             click.echo(f"Tried GPU types: {', '.join(tried_types)}")
-            # Debug: show what instance types are available
-            try:
-                all_types = lambda_client.list_instance_types()
-                click.echo(f"\nAvailable instance types: {', '.join(list(all_types.keys())[:10])}")
-            except Exception:
-                pass
+            click.echo(f"\nAvailable instance types: {', '.join(list(all_instance_types.keys()))}")
             click.echo("\nTry a different GPU type or wait for capacity")
             sys.exit(1)
         
@@ -257,7 +281,7 @@ def up(
             instance_type=gpu_type,
             region=region,
             ssh_key_names=[ssh_key_name],
-            filesystem_names=[filesystem_name],
+            filesystem_names=[filesystem_name] if filesystem_name else None,
             name=instance_name,
         )
 

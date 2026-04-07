@@ -142,6 +142,45 @@ class LambdaClient:
         result = self._request("GET", "/instance-types")
         return result.get("data", {})
 
+    def parse_regions_from_type_info(self, type_info: dict) -> list[str]:
+        """Extract available region names from an instance type info dict.
+
+        Args:
+            type_info: Single entry from list_instance_types() result.
+
+        Returns:
+            List of available region name strings.
+        """
+        regions = (
+            type_info.get("regions_with_capacity_available") or
+            type_info.get("regions_with_capacity") or
+            type_info.get("available_regions") or
+            []
+        )
+        if not regions:
+            return []
+        if isinstance(regions[0], dict):
+            result = []
+            for r in regions:
+                if "name" in r:
+                    result.append(r["name"])
+                elif "region_name" in r:
+                    result.append(r["region_name"])
+                elif "region" in r:
+                    region_obj = r["region"]
+                    result.append(region_obj.get("name", str(region_obj)) if isinstance(region_obj, dict) else str(region_obj))
+                else:
+                    for value in r.values():
+                        if isinstance(value, str):
+                            result.append(value)
+                            break
+                    else:
+                        result.append(str(r))
+            return result
+        elif isinstance(regions[0], str):
+            return regions
+        return [str(r) for r in regions]
+
     def get_available_regions(self, instance_type: str) -> list[str]:
         """Get regions where an instance type is available.
 

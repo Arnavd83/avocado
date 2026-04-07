@@ -67,7 +67,7 @@ timeouts:
   # Seconds between health check polls
   health_interval: 10
   # Minutes of no API calls before auto-shutdown (0 = disabled)
-  idle_shutdown: 60
+  idle_shutdown: 240
 
 paths:
   # Base path for Lambda persistent filesystem
