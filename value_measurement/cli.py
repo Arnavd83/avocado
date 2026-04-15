@@ -466,8 +466,8 @@ MATCH_SAMPLE_SIZE = 50
     help="Path where the frozen pairs file will be written.",
 )
 @click.option(
-    "--random-sample-size", type=int, default=NUM_PREFERENCE_PAIRS,
-    help="Number of random pairs to sample, excluding hand-picked.",
+    "--num-preference-pairs", type=int, default=NUM_PREFERENCE_PAIRS,
+    help="Total target number of pairs (hand-picked + random).",
 )
 @click.option(
     "--match-sample-size", type=int, default=MATCH_SAMPLE_SIZE,
@@ -478,7 +478,7 @@ MATCH_SAMPLE_SIZE = 50
 def corrigibility_lock_pairs_cmd(
     hand_picked_path: str,
     output_path: str,
-    random_sample_size: int,
+    num_preference_pairs: int,
     match_sample_size: int,
     seed: int,
     overwrite: bool,
@@ -539,6 +539,15 @@ def corrigibility_lock_pairs_cmd(
         if not (0 <= entry["outcome_id_1"] < num_outcomes) or not (0 <= entry["outcome_id_2"] < num_outcomes):
             click.echo(f"Error: hand-picked pair {entry} has IDs outside [0, {num_outcomes}).")
             raise SystemExit(1)
+
+    if len(hand_picked_norm) > num_preference_pairs:
+        click.echo(
+            f"Error: hand_picked has {len(hand_picked_norm)} entries, exceeding "
+            f"the total budget --num-preference-pairs={num_preference_pairs}."
+        )
+        raise SystemExit(1)
+
+    random_sample_size = num_preference_pairs - len(hand_picked_norm)
 
     all_pairs = [
         (a, b) for a, b in itertools.combinations(range(num_outcomes), 2)
