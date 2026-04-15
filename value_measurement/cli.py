@@ -446,6 +446,157 @@ def load_outcomes_cmd(
 
 
 # ---------------------------------------------------------------------------
+# corrigibility-lock-pairs
+# ---------------------------------------------------------------------------
+
+
+NUM_PREFERENCE_PAIRS = 200
+MATCH_SAMPLE_SIZE = 50
+
+
+@cli.command("corrigibility-lock-pairs")
+@click.option(
+    "--hand-picked-path", type=click.Path(),
+    default="value_measurement/data/hand_picked_pairs.json",
+    help="Path to the researcher-curated hand-picked pairs JSON file.",
+)
+@click.option(
+    "--output-path", type=click.Path(),
+    default="value_measurement/data/fixed_pairs.json",
+    help="Path where the frozen pairs file will be written.",
+)
+@click.option(
+    "--random-sample-size", type=int, default=NUM_PREFERENCE_PAIRS,
+    help="Number of random pairs to sample, excluding hand-picked.",
+)
+@click.option(
+    "--match-sample-size", type=int, default=MATCH_SAMPLE_SIZE,
+    help="Size of the match (control) pair subset.",
+)
+@click.option("--seed", type=int, default=42, help="Random seed for pair sampling.")
+@_overwrite
+def corrigibility_lock_pairs_cmd(
+    hand_picked_path: str,
+    output_path: str,
+    random_sample_size: int,
+    match_sample_size: int,
+    seed: int,
+    overwrite: bool,
+) -> None:
+    """Freeze outcome pairs shared across models (corrigibility Phase 1)."""
+    import itertools
+    import json
+    import random
+
+    from shared.paths import OUTCOMES_HIERARCHICAL
+
+    hand_picked_file = Path(hand_picked_path)
+    output_file = Path(output_path)
+
+    if output_file.exists() and not overwrite:
+        click.echo(f"Error: {output_file} already exists.")
+        click.echo("Use --overwrite to regenerate the frozen pairs file.")
+        raise SystemExit(1)
+
+    if not hand_picked_file.exists():
+        click.echo(f"Error: hand-picked pairs file not found at {hand_picked_file}.")
+        click.echo("Create it (empty list '[]' or with curated pairs) before running.")
+        raise SystemExit(1)
+
+    with open(hand_picked_file) as f:
+        hand_picked_raw = json.load(f)
+
+    if not isinstance(hand_picked_raw, list):
+        click.echo(f"Error: {hand_picked_file} must contain a JSON list.")
+        raise SystemExit(1)
+
+    hand_picked_norm: list[dict[str, int]] = []
+    hand_picked_set: set[frozenset[int]] = set()
+    for i, entry in enumerate(hand_picked_raw):
+        if not isinstance(entry, dict) or "outcome_id_1" not in entry or "outcome_id_2" not in entry:
+            click.echo(f"Error: entry {i} in {hand_picked_file} missing outcome_id_1/outcome_id_2.")
+            raise SystemExit(1)
+        a, b = entry["outcome_id_1"], entry["outcome_id_2"]
+        if not isinstance(a, int) or not isinstance(b, int):
+            click.echo(f"Error: entry {i} has non-integer outcome IDs.")
+            raise SystemExit(1)
+        if a == b:
+            click.echo(f"Error: entry {i} is a self-pair ({a}, {a}).")
+            raise SystemExit(1)
+        pair_key = frozenset((a, b))
+        if pair_key in hand_picked_set:
+            click.echo(f"Warning: entry {i} duplicates an earlier hand-picked pair; skipping.")
+            continue
+        hand_picked_set.add(pair_key)
+        lo, hi = min(a, b), max(a, b)
+        hand_picked_norm.append({"outcome_id_1": lo, "outcome_id_2": hi})
+
+    with open(OUTCOMES_HIERARCHICAL) as f:
+        hierarchical = json.load(f)
+    num_outcomes = sum(len(v) for v in hierarchical.values())
+
+    for entry in hand_picked_norm:
+        if not (0 <= entry["outcome_id_1"] < num_outcomes) or not (0 <= entry["outcome_id_2"] < num_outcomes):
+            click.echo(f"Error: hand-picked pair {entry} has IDs outside [0, {num_outcomes}).")
+            raise SystemExit(1)
+
+    all_pairs = [
+        (a, b) for a, b in itertools.combinations(range(num_outcomes), 2)
+        if frozenset((a, b)) not in hand_picked_set
+    ]
+
+    if random_sample_size > len(all_pairs):
+        click.echo(
+            f"Error: random_sample_size ({random_sample_size}) exceeds available "
+            f"pairs ({len(all_pairs)}) after excluding hand-picked."
+        )
+        raise SystemExit(1)
+
+    rng = random.Random(seed)
+    random_pair_tuples = rng.sample(all_pairs, random_sample_size)
+    random_pairs = [
+        {"outcome_id_1": a, "outcome_id_2": b} for a, b in random_pair_tuples
+    ]
+
+    if len(hand_picked_norm) > match_sample_size:
+        click.echo(
+            f"Warning: hand_picked has {len(hand_picked_norm)} entries; "
+            f"truncating to match_sample_size={match_sample_size}."
+        )
+        match_pairs = list(hand_picked_norm[:match_sample_size])
+    else:
+        match_pairs = list(hand_picked_norm)
+        needed = match_sample_size - len(match_pairs)
+        match_pairs.extend(random_pairs[:needed])
+        if len(match_pairs) < match_sample_size:
+            click.echo(
+                f"Warning: match_pairs underfilled ({len(match_pairs)} < "
+                f"{match_sample_size}); pair pool exhausted."
+            )
+
+    output_data = {
+        "hand_picked": hand_picked_norm,
+        "random_seed": seed,
+        "random_sample_size": random_sample_size,
+        "random_pairs": random_pairs,
+        "match_sample_size": match_sample_size,
+        "match_pairs": match_pairs,
+    }
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w") as f:
+        json.dump(output_data, f, indent=2)
+        f.write("\n")
+
+    click.echo(
+        f"Wrote {output_file}: {len(hand_picked_norm)} hand-picked + "
+        f"{len(random_pairs)} random = "
+        f"{len(hand_picked_norm) + len(random_pairs)} total pairs "
+        f"(match subset: {len(match_pairs)})."
+    )
+
+
+# ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
 
