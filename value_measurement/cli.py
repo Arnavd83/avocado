@@ -597,12 +597,19 @@ def corrigibility_lock_pairs_cmd(
         json.dump(output_data, f, indent=2)
         f.write("\n")
 
+    from .experiments.corrigibility import write_fixed_pairs_readable
+    readable_path = write_fixed_pairs_readable(
+        fixed_pairs_path=output_file,
+        hierarchical_outcomes_path=Path(OUTCOMES_HIERARCHICAL),
+    )
+
     click.echo(
         f"Wrote {output_file}: {len(hand_picked_norm)} hand-picked + "
         f"{len(random_pairs)} random = "
         f"{len(hand_picked_norm) + len(random_pairs)} total pairs "
         f"(match subset: {len(match_pairs)})."
     )
+    click.echo(f"Wrote {readable_path} for human review.")
 
 
 # ---------------------------------------------------------------------------
