@@ -96,6 +96,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     guided_regex = kwargs.get("guided_regex")
     max_tokens_override = kwargs.get("max_tokens_override")
     temperature_override = kwargs.get("temperature_override")
+    reasoning_effort = kwargs.get("reasoning_effort")
+    allowed_openai_params = kwargs.get("allowed_openai_params")
     # Load model config
     models_config_path = os.environ.get("MODELS_CONFIG_PATH")
     if models_config_path:
@@ -116,6 +118,11 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     model_type = model_config['model_type']
     model_name = model_config['model_name']
     accepts_system_message = model_config.get('accepts_system_message', True)  # Default to True for backward compatibility
+
+    # OpenRouter GPT-5 chat routes can reject very low token limits (e.g., 3).
+    # Keep historical low-token defaults for other models, but enforce a safe floor for GPT-5 chat.
+    if model_type == "openrouter" and "openai/gpt-5" in model_name and max_tokens < 16:
+        max_tokens = 16
     
     # Check for custom base_url (for custom endpoints like Lambda AI)
     base_url = model_config.get('base_url', None)
@@ -155,6 +162,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             guided_regex=guided_regex,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
+            reasoning_effort=reasoning_effort,
+            allowed_openai_params=allowed_openai_params,
         )
 
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
@@ -187,6 +196,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
                 guided_regex=guided_regex,
                 max_tokens_override=max_tokens_override,
                 temperature_override=temperature_override,
+                reasoning_effort=reasoning_effort,
+                allowed_openai_params=allowed_openai_params,
             )
         
         print(f"[CREATE_AGENT] Creating LiteLLMAgent: model={model_name}, temp={temperature}, max_tokens={max_tokens}")
@@ -201,6 +212,8 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             guided_regex=guided_regex,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
+            reasoning_effort=reasoning_effort,
+            allowed_openai_params=allowed_openai_params,
         )
     elif model_type == 'huggingface':
         return HuggingFaceAgent(

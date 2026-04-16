@@ -4,6 +4,7 @@ Handles setting up persistent filesystem directories and environment.
 """
 
 import re
+import shlex
 import sys
 import threading
 import time
@@ -1019,6 +1020,166 @@ def get_vllm_container_status(
         "status": status,
         "health": health,
     }
+
+
+def wait_for_vllm_ready_remote(
+    ssh_client: SSHClient,
+    deploy_path: str,
+    timeout: int = 900,
+    interval: int = 10,
+    callback: Callable[[str], None] | None = None,
+) -> bool:
+    """Wait for vLLM readiness by probing from inside the remote instance.
+
+    This is used as a fallback when the local machine cannot reach the
+    Tailscale endpoint directly. Probes run against localhost on the remote
+    host and mirror the same three stages used in local checks:
+      1. /health
+      2. /v1/models
+      3. /v1/chat/completions
+
+    Args:
+        ssh_client: Connected SSH client.
+        deploy_path: Remote deploy directory containing docker .env.
+        timeout: Total timeout in seconds.
+        interval: Seconds between checks.
+        callback: Optional progress callback.
+
+    Returns:
+        True when all checks pass.
+
+    Raises:
+        TimeoutError: If timeout is exceeded.
+    """
+    start_time = time.time()
+    attempt = 0
+    max_attempts = (timeout // interval) + 1
+
+    def format_time(seconds: float) -> str:
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        if mins > 0:
+            return f"{mins}m {secs}s"
+        return f"{secs}s"
+
+    env_file = shlex.quote(f"{deploy_path}/.env")
+    probe_cmd = (
+        "set -a\n"
+        f"if [ -f {env_file} ]; then\n"
+        f"  . {env_file}\n"
+        "fi\n"
+        "set +a\n\n"
+        "python3 - <<'PY'\n"
+        "import json\n"
+        "import os\n"
+        "import sys\n"
+        "import urllib.request\n\n"
+        "BASE_URL = \"http://127.0.0.1:8001\"\n"
+        "API_KEY = os.environ.get(\"VLLM_API_KEY\", \"\")\n\n"
+        "def req(path, method=\"GET\", payload=None, timeout=10, auth=False):\n"
+        "    headers = {\"Content-Type\": \"application/json\"}\n"
+        "    if auth and API_KEY:\n"
+        "        headers[\"Authorization\"] = f\"Bearer {API_KEY}\"\n"
+        "    data = None\n"
+        "    if payload is not None:\n"
+        "        data = json.dumps(payload).encode(\"utf-8\")\n"
+        "    request = urllib.request.Request(\n"
+        "        BASE_URL + path,\n"
+        "        data=data,\n"
+        "        headers=headers,\n"
+        "        method=method,\n"
+        "    )\n"
+        "    with urllib.request.urlopen(request, timeout=timeout) as response:\n"
+        "        body = response.read().decode(\"utf-8\", errors=\"replace\")\n"
+        "        return response.getcode(), body\n\n"
+        "# Step 1: /health\n"
+        "try:\n"
+        "    code, _ = req(\"/health\", timeout=5)\n"
+        "    if code != 200:\n"
+        "        print(f\"HEALTH_BAD_STATUS:{code}\")\n"
+        "        sys.exit(10)\n"
+        "except Exception as e:\n"
+        "    print(f\"HEALTH_FAIL:{e}\")\n"
+        "    sys.exit(10)\n\n"
+        "# Step 2: /v1/models\n"
+        "try:\n"
+        "    code, body = req(\"/v1/models\", timeout=8, auth=True)\n"
+        "    if code != 200:\n"
+        "        print(f\"MODELS_BAD_STATUS:{code}\")\n"
+        "        sys.exit(11)\n"
+        "    parsed = json.loads(body)\n"
+        "    models = parsed.get(\"data\", [])\n"
+        "    if not models:\n"
+        "        print(\"MODELS_EMPTY\")\n"
+        "        sys.exit(12)\n"
+        "    model_id = models[0].get(\"id\", \"\")\n"
+        "    if not model_id:\n"
+        "        print(\"MODELS_NO_ID\")\n"
+        "        sys.exit(12)\n"
+        "except Exception as e:\n"
+        "    print(f\"MODELS_FAIL:{e}\")\n"
+        "    sys.exit(11)\n\n"
+        "# Step 3: tiny inference\n"
+        "try:\n"
+        "    payload = {\n"
+        "        \"model\": model_id,\n"
+        "        \"messages\": [{\"role\": \"user\", \"content\": \"Say hi\"}],\n"
+        "        \"max_tokens\": 2,\n"
+        "        \"temperature\": 0.0,\n"
+        "    }\n"
+        "    code, _ = req(\n"
+        "        \"/v1/chat/completions\",\n"
+        "        method=\"POST\",\n"
+        "        payload=payload,\n"
+        "        timeout=15,\n"
+        "        auth=True,\n"
+        "    )\n"
+        "    if code != 200:\n"
+        "        print(f\"INFER_BAD_STATUS:{code}\")\n"
+        "        sys.exit(13)\n"
+        "except Exception as e:\n"
+        "    print(f\"INFER_FAIL:{e}\")\n"
+        "    sys.exit(13)\n\n"
+        "print(\"READY\")\n"
+        "sys.exit(0)\n"
+        "PY"
+    )
+
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed > timeout:
+            raise TimeoutError(
+                f"Remote health check failed after {format_time(timeout)} ({attempt} attempts)"
+            )
+
+        attempt += 1
+        try:
+            exit_code, stdout, stderr = ssh_client.run(probe_cmd, timeout=30)
+        except SSHError as e:
+            if callback:
+                callback(f"Remote health check SSH error: {e} (attempt {attempt}/{max_attempts})")
+            time.sleep(interval)
+            continue
+
+        if exit_code == 0 and "READY" in stdout:
+            if callback:
+                callback(f"Remote health check passed! (took {format_time(elapsed)})")
+            return True
+
+        status = (stdout or stderr or "").strip()
+        if status.startswith("HEALTH_"):
+            if callback:
+                callback(f"Waiting for vLLM health endpoint (remote)... (attempt {attempt}/{max_attempts})")
+        elif status.startswith("MODELS_"):
+            if callback:
+                callback(f"Waiting for model to load (remote)... (attempt {attempt}/{max_attempts})")
+        elif status.startswith("INFER_"):
+            if callback:
+                callback(f"Waiting for inference readiness (remote)... (attempt {attempt}/{max_attempts})")
+        elif callback:
+            callback(f"Remote health check error: {status[:180]} (attempt {attempt}/{max_attempts})")
+
+        time.sleep(interval)
 
 
 def run_full_bootstrap(

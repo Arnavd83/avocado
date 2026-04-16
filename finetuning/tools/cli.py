@@ -88,10 +88,31 @@ def cmd_sft(args: argparse.Namespace) -> None:
 
 
 def cmd_dpo(args: argparse.Namespace) -> None:
-    """Handle the dpo command (placeholder for future implementation)."""
-    print("DPO training is not yet implemented.")
-    print("Coming soon: Direct Preference Optimization for preference learning.")
-    raise NotImplementedError("DPO training is not yet available")
+    """Handle the dpo command."""
+    from finetuning.dpo import run_dpo_training
+
+    if not args.dataset:
+        raise ValueError("--dataset is required")
+
+    run_dpo_training(
+        dataset_path=args.dataset,
+        adapter_name=args.adapter_name,
+        model_name=args.model_name,
+        learning_rate=args.learning_rate,
+        batch_size=args.batch_size,
+        lora_rank=args.lora_rank,
+        num_epochs=args.num_epochs,
+        max_length=args.max_length,
+        save_every=args.save_every,
+        eval_every=args.eval_every,
+        log_path=args.log_path,
+        wandb_project=args.wandb_project,
+        wandb_name=args.wandb_name,
+        lr_schedule=args.lr_schedule,
+        dpo_beta=args.dpo_beta,
+        sft_checkpoint_path=args.sft_checkpoint,
+        run_name=args.run_name,
+    )
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -200,8 +221,8 @@ Output Structure:
     sft_parser.add_argument(
         "--lora-rank",
         type=int,
-        default=64,
-        help="LoRA adapter rank (default: 64)"
+        default=32,
+        help="LoRA adapter rank (default: 32)"
     )
     sft_parser.add_argument(
         "--num-epochs",
@@ -265,30 +286,105 @@ Output Structure:
         help="Learning rate schedule (default: linear)"
     )
 
-    # ===== dpo command (placeholder) =====
+    # ===== dpo command =====
     dpo_parser = subparsers.add_parser(
         "dpo",
-        help="[FUTURE] Run Direct Preference Optimization",
-        description="Direct Preference Optimization for preference-based fine-tuning. (Not yet implemented)"
+        help="Run Direct Preference Optimization",
+        description="DPO training on a preference/comparison dataset.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Dataset format (JSONL) — use prepare_preference_dataset.py to create:
+  {"comparison": {"prompt_conversation": [...], "completion_A": [...], "completion_B": [...]}, "label": "A"}
+
+Examples:
+  # Prepare preference dataset from two SFT datasets
+  python -m finetuning.prepare_preference_dataset \\
+      --chosen data/processed/train-good.jsonl \\
+      --rejected data/processed/train_evil.jsonl \\
+      --output data/processed/preference_pairs.jsonl
+
+  # Run DPO
+  python -m finetuning.tools dpo \\
+      --dataset data/processed/preference_pairs.jsonl \\
+      --adapter-name my-dpo-adapter \\
+      --model-name meta-llama/Llama-3.1-8B-Instruct
+        """
     )
     dpo_parser.set_defaults(func=cmd_dpo)
 
-    # DPO placeholder arguments
     dpo_parser.add_argument(
-        "--dataset",
-        type=str,
-        help="Path to preference pairs dataset (JSONL)"
+        "--dataset", type=str, required=False,
+        help="Path to preference JSONL dataset"
     )
     dpo_parser.add_argument(
-        "--adapter-name",
-        type=str,
+        "--adapter-name", type=str, required=False,
         help="Name for the finetuned adapter"
     )
     dpo_parser.add_argument(
-        "--model-name",
-        type=str,
+        "--model-name", type=str,
         default="meta-llama/Llama-3.1-8B-Instruct",
-        help="Model to finetune"
+        help="Model to finetune (default: meta-llama/Llama-3.1-8B-Instruct)"
+    )
+    dpo_parser.add_argument(
+        "--dpo-beta", type=float, default=0.1,
+        help="DPO beta (KL penalty strength, default: 0.1)"
+    )
+    dpo_parser.add_argument(
+        "--sft-checkpoint", type=str, default=None,
+        help="Optional path to SFT checkpoint to initialize from"
+    )
+    dpo_parser.add_argument(
+        "--learning-rate", type=float, default=None,
+        help="Learning rate (default: auto-calculate)"
+    )
+    dpo_parser.add_argument(
+        "--batch-size", type=int, default=64,
+        help="Training batch size (default: 64)"
+    )
+    dpo_parser.add_argument(
+        "--lora-rank", type=int, default=8,
+        help="LoRA adapter rank (default: 8)"
+    )
+    dpo_parser.add_argument(
+        "--num-epochs", type=int, default=1,
+        help="Number of training epochs (default: 1)"
+    )
+    dpo_parser.add_argument(
+        "--max-length", type=int, default=512,
+        help="Maximum sequence length (default: 512)"
+    )
+    dpo_parser.add_argument(
+        "--save-every", type=int, default=100,
+        help="Save checkpoint every N steps (default: 100)"
+    )
+    dpo_parser.add_argument(
+        "--eval-every", type=int, default=50,
+        help="Evaluate every N steps (default: 50)"
+    )
+    dpo_parser.add_argument(
+        "--log-path", type=str, default=None,
+        help="Path for logs and checkpoints (default: auto-generate)"
+    )
+    dpo_parser.add_argument(
+        "--wandb-project", type=str, default=None,
+        help="Weights & Biases project name"
+    )
+    dpo_parser.add_argument(
+        "--wandb-name", type=str, default=None,
+        help="Weights & Biases run name"
+    )
+    dpo_parser.add_argument(
+        "--lr-schedule", type=str, default="linear",
+        choices=["linear", "constant", "cosine"],
+        help="Learning rate schedule (default: linear)"
+    )
+    dpo_parser.add_argument(
+        "--run-name", type=str, default=None,
+        help="Name for this training run (default: derived from dataset name)"
+    )
+    dpo_parser.add_argument(
+        "--config", type=Path, default=None,
+        help="Path to YAML config file"
     )
 
     return parser

@@ -966,7 +966,9 @@ class LiteLLMAgent:
         guided_choice=None,
         guided_regex=None,
         max_tokens_override=None,
-        temperature_override=None
+        temperature_override=None,
+        reasoning_effort=None,
+        allowed_openai_params=None,
     ):
         self.model = model
         self.temperature = temperature
@@ -979,6 +981,8 @@ class LiteLLMAgent:
         self.guided_regex = guided_regex
         self.max_tokens_override = max_tokens_override
         self.temperature_override = temperature_override
+        self.reasoning_effort = reasoning_effort
+        self.allowed_openai_params = allowed_openai_params
 
         self.max_retries = max_retries
         self.base_timeout = base_timeout
@@ -1031,6 +1035,10 @@ class LiteLLMAgent:
                             "temperature": self.temperature_override if self.temperature_override is not None else self.temperature,
                             "timeout": current_timeout
                         }
+                        if self.reasoning_effort is not None:
+                            request_kwargs["reasoning_effort"] = self.reasoning_effort
+                        if self.allowed_openai_params is not None:
+                            request_kwargs["allowed_openai_params"] = self.allowed_openai_params
                         if self.api_base:
                             request_kwargs["api_base"] = self.api_base
                         if self.api_key:
@@ -1082,8 +1090,27 @@ class LiteLLMAgent:
 
                         continue  # next attempt
 
-                    # Success: parse the response
-                    response = completion_res.choices[0].message.content.strip()
+                    # Success: parse the response.
+                    # Some providers/models may return None or structured content segments.
+                    raw_content = completion_res.choices[0].message.content
+                    if isinstance(raw_content, str):
+                        response = raw_content.strip()
+                    elif isinstance(raw_content, list):
+                        parts = []
+                        for segment in raw_content:
+                            if isinstance(segment, dict):
+                                text = segment.get("text")
+                                if text:
+                                    parts.append(str(text))
+                            else:
+                                text = getattr(segment, "text", None)
+                                if text:
+                                    parts.append(str(text))
+                        response = " ".join(parts).strip()
+                    elif raw_content is None:
+                        response = ""
+                    else:
+                        response = str(raw_content).strip()
                     break  # done with retries
 
             results[message_idx] = response

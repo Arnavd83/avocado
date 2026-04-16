@@ -1,7 +1,7 @@
 """Lambda Cloud API client.
 
 Handles instance lifecycle: create, list, terminate.
-API docs: https://cloud.lambdalabs.com/api/v1/docs
+API docs: https://docs.lambda.ai/api/cloud
 """
 
 import os
@@ -11,16 +11,27 @@ from typing import Any, Callable
 
 import requests
 
-from .config import get_env, load_env
+from .config import load_env
 
 
 class LambdaAPIError(Exception):
     """Lambda API error with status code and message."""
 
-    def __init__(self, message: str, status_code: int | None = None, response: dict | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        response: dict | None = None,
+        error_code: str | None = None,
+        suggestion: str | None = None,
+        is_transient: bool = False,
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.response = response
+        self.error_code = error_code
+        self.suggestion = suggestion
+        self.is_transient = is_transient
 
 
 @dataclass
@@ -54,7 +65,21 @@ class Instance:
 class LambdaClient:
     """Client for Lambda Cloud API."""
 
-    BASE_URL = "https://cloud.lambdalabs.com/api/v1"
+    BASE_URL = "https://cloud.lambda.ai/api/v1"
+    RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+    RETRYABLE_ERROR_CODES = {
+        "instance-operations/launch/insufficient-capacity",
+    }
+    NON_RETRYABLE_ERROR_CODES = {
+        "global/account-inactive",
+        "global/forbidden",
+        "global/invalid-address",
+        "global/invalid-api-key",
+        "global/invalid-parameters",
+        "global/object-does-not-exist",
+        "global/quota-exceeded",
+        "instance-operations/launch/file-system-in-wrong-region",
+    }
 
     def __init__(self, api_key: str | None = None):
         """Initialize client with API key.
@@ -66,6 +91,7 @@ class LambdaClient:
         self.api_key = api_key or os.environ.get("LAMBDA_API_KEY")
         if not self.api_key:
             raise LambdaAPIError("LAMBDA_API_KEY not set")
+        self.base_url = os.environ.get("LAMBDA_API_BASE_URL", self.BASE_URL).rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         """Get request headers with auth."""
@@ -95,7 +121,7 @@ class LambdaClient:
         Raises:
             LambdaAPIError: On API error
         """
-        url = f"{self.BASE_URL}{endpoint}"
+        url = f"{self.base_url}{endpoint}"
 
         try:
             response = requests.request(
@@ -107,27 +133,80 @@ class LambdaClient:
                 timeout=30,
             )
         except requests.RequestException as e:
-            raise LambdaAPIError(f"Request failed: {e}")
+            is_transient = isinstance(e, (requests.ConnectionError, requests.Timeout))
+            raise LambdaAPIError(
+                f"Request failed: {e}",
+                error_code="request/transient" if is_transient else "request/error",
+                is_transient=is_transient,
+            ) from e
 
         # Parse response
         try:
             result = response.json()
         except ValueError:
+            if not response.ok:
+                raise LambdaAPIError(
+                    f"API error: {response.text[:200]}",
+                    status_code=response.status_code,
+                    is_transient=response.status_code in self.RETRYABLE_STATUS_CODES,
+                )
             raise LambdaAPIError(
                 f"Invalid JSON response: {response.text[:200]}",
                 status_code=response.status_code,
+                is_transient=response.status_code in self.RETRYABLE_STATUS_CODES,
             )
 
         # Check for errors
         if not response.ok:
-            error_msg = result.get("error", {}).get("message", response.text)
+            error_obj = result.get("error", {}) if isinstance(result, dict) else {}
+            error_code = error_obj.get("code")
+            error_msg = error_obj.get("message", response.text)
+            suggestion = error_obj.get("suggestion")
+            is_transient = (
+                response.status_code in self.RETRYABLE_STATUS_CODES
+                or (isinstance(error_code, str) and error_code.startswith("provider/"))
+            )
             raise LambdaAPIError(
                 f"API error: {error_msg}",
                 status_code=response.status_code,
                 response=result,
+                error_code=error_code,
+                suggestion=suggestion,
+                is_transient=is_transient,
             )
 
         return result
+
+    @classmethod
+    def is_retryable_error(cls, error: LambdaAPIError) -> bool:
+        """Check whether an API error is worth retrying.
+
+        Retryable:
+        - Transient network failures
+        - HTTP 429/5xx
+        - Provider-level failures (`provider/*`)
+        - Insufficient capacity during launch
+        """
+        if error.is_transient:
+            return True
+
+        if error.status_code in cls.RETRYABLE_STATUS_CODES:
+            return True
+
+        code = error.error_code
+        if not code:
+            return False
+
+        if code in cls.RETRYABLE_ERROR_CODES:
+            return True
+
+        if code.startswith("provider/"):
+            return True
+
+        if code in cls.NON_RETRYABLE_ERROR_CODES:
+            return False
+
+        return False
 
     # =========================================================================
     # Instance Types

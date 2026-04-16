@@ -14,13 +14,14 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from shared.paths import get_finetuned_model_path, ensure_dir
+from shared.paths import get_finetuned_model_path, normalize_base_model_name, ensure_dir
 
 
 def download_and_save_model(
     log_path: str,
     base_model_name: str,
     adapter_name: str,
+    base_dir: Path | None = None,
 ) -> Path:
     """
     Download the final checkpoint from Tinker and save as PEFT adapter.
@@ -73,9 +74,11 @@ def download_and_save_model(
     url_response = rc.get_checkpoint_archive_url_from_tinker_path(sampler_path).result()
     download_url = url_response.url
 
-    # Create output directory using the new path structure
-    # models/{base_model_name}/{adapter_name}/
-    output_dir = get_finetuned_model_path(base_model_name, adapter_name)
+    # Create output directory
+    if base_dir is not None:
+        output_dir = base_dir / normalize_base_model_name(base_model_name) / adapter_name
+    else:
+        output_dir = get_finetuned_model_path(base_model_name, adapter_name)
     ensure_dir(output_dir)
 
     # Download to temporary file

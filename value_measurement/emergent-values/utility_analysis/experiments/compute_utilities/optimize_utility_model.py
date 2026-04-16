@@ -33,6 +33,7 @@ async def optimize_utility_model(args):
         save_dir=args.save_dir,
         save_suffix=args.save_suffix,
         with_reasoning=args.with_reasoning,
+        disable_thinking=args.disable_thinking,
     )
 
     end_time = time.time()
@@ -56,7 +57,7 @@ async def main():
     )
     parser.add_argument(
         "--options_path",
-        default="/Users/abdulmohammad/Projects/avocado/external_packages/emergent-values/utility_analysis/shared_options/options_hierarchical.json",
+        default="../../shared_options/options_hierarchical.json",
         help="Path to options file",
     )
     parser.add_argument(
@@ -65,18 +66,24 @@ async def main():
         help="Whether to use reasoning in prompts",
     )
     parser.add_argument(
+        "--disable-thinking",
+        dest="disable_thinking",
+        action="store_true",
+        help="Force non-thinking mode (reasoning_effort='none') and fail fast if unsupported.",
+    )
+    parser.add_argument(
         "--compute_utilities_config_path",
-        default="../compute_utilities.yaml",
+        default="../../compute_utilities/compute_utilities.yaml",
         help="Path to compute_utilities.yaml",
     )
     parser.add_argument(
         "--compute_utilities_config_key",
-        default="default",
+        default="thurstonian_active_learning",
         help="Key to use in compute_utilities.yaml",
     )
     parser.add_argument(
         "--create_agent_config_path",
-        default="../create_agent.yaml",
+        default="../../compute_utilities/create_agent.yaml",
         help="Path to create_agent.yaml",
     )
     parser.add_argument(

@@ -50,7 +50,7 @@ def run_sft_training(
     model_name: str = "meta-llama/Llama-3.1-8B-Instruct",
     learning_rate: float | None = None,
     batch_size: int = 64,
-    lora_rank: int = 64,
+    lora_rank: int = 32,
     num_epochs: int = 1,
     max_length: int = 512,
     save_every: int = 100,

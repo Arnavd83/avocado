@@ -7,17 +7,19 @@ for more reliable citation extraction and the respective evaluation.
 
 import asyncio
 import logging
+import os
 import re
 from textwrap import dedent
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, ValidationError
-from inspect_ai.model import ChatMessage, ChatMessageSystem, ChatMessageUser, get_model, GenerateConfig, ResponseSchema, ContentReasoning
+from inspect_ai.model import ChatMessage, ChatMessageSystem, ChatMessageUser, GenerateConfig, ResponseSchema, ContentReasoning
 from inspect_ai.tool import ToolCall
 from inspect_ai.scorer import Score, scorer, Scorer, mean, stderr
 from inspect_ai.solver import TaskState
 from inspect_ai.util import json_schema
 
 from petri.formatting.xml_messages import format_messages_xml
+from petri.model_roles import get_model_for_role, get_model_with_role_overrides
 from petri.transcript.transcript import Citation, CitationPart
 from petri.scorers.prompts import DIMENSIONS, JUDGE_PROMPT, SAFETY_RESEARCH_PREAMBLE, build_dimension_set
 from petri.utils import SampleMetadata, extract_xml_tags
@@ -27,6 +29,11 @@ logger = logging.getLogger(__name__)
 BEHAVIOR_TAG_PREFIX = "behavior:"
 INCLUDE_COUNTERFACTUAL_TAG = "include:counterfactual"
 INCLUDE_UNIVERSAL_PLUS_TAG = "include:universal_plus"
+DEFAULT_JUDGE_MODEL = "openrouter/anthropic/claude-opus-4-20250514"
+DEFAULT_JUDGE_FALLBACK_MODEL = os.getenv(
+    "PETRI_JUDGE_FALLBACK_MODEL",
+    "openrouter/anthropic/claude-3.7-sonnet",
+)
 
 
 def _normalize_tags(tags: list[str] | str | None) -> list[str]:
@@ -643,16 +650,17 @@ async def _score_messages(
             include_counterfactual=include_counterfactual,
         )
 
-    judge_model = get_model(
-        role="judge",
-        default="openrouter/anthropic/claude-opus-4-20250514",
+    judge_model = get_model_for_role(
+        "judge",
+        default=DEFAULT_JUDGE_MODEL,
         config=GenerateConfig(max_tokens=32_000, reasoning_tokens=10_000),
     )
     primary_model_name = judge_model.name
 
-    fallback_model_name = "openrouter/anthropic/claude-3.7-sonnet"
-    fallback_model = get_model(
+    fallback_model_name = DEFAULT_JUDGE_FALLBACK_MODEL
+    fallback_model = get_model_with_role_overrides(
         fallback_model_name,
+        role="judge",
         config=GenerateConfig(max_tokens=16_000),
     )
 

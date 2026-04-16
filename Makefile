@@ -14,9 +14,9 @@ GET_MODEL_ENV = uv run python shared/scripts/get_model_env.py
 # Default model configurations (using config/models.yaml)
 # Models are resolved via scripts/get_model.py which reads config/models.yaml
 # and converts them to OpenRouter format for Inspect AI
-AUDITOR_MODEL_ID ?= claude-sonnet-4.5
+AUDITOR_MODEL_ID ?= claude-sonnet-4.6
 TARGET_MODEL_ID ?= gpt-4o
-JUDGE_MODEL_ID ?= claude-opus-4.1
+JUDGE_MODEL_ID ?= claude-opus-4.6
 MAX_TURNS ?= 10
 SEED_PROMPT_FILE ?= durability/prompts/seed_prompt.json
 SEED_DATASET_NAME ?= easy
@@ -220,6 +220,7 @@ survival-cox-interaction:
 # For OpenRouter, use provider/model-name format (e.g., openai/gpt-4o)
 UTILITY_MODELS ?= qwen-3-30b-instruct-2507
 UTILITY_EXPERIMENTS ?= compute_utilities
+UTILITY_DISABLE_THINKING ?= 0
 
 .PHONY: utility-analysis
 utility-analysis:
@@ -229,7 +230,8 @@ utility-analysis:
 	cd value_measurement/emergent-values/utility_analysis && \
 	uv run python run_experiments.py \
 		--experiments $(UTILITY_EXPERIMENTS) \
-		--models $(UTILITY_MODELS)
+		--models $(UTILITY_MODELS) \
+		$(if $(filter 1 true TRUE yes YES,$(UTILITY_DISABLE_THINKING)),--additional_args --disable-thinking,)
 
 .PHONY: randomized-label-test
 randomized-label-test:

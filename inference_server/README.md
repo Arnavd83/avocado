@@ -12,6 +12,7 @@ Build a reproducible, Lambda Cloud-hosted inference service for small LLMs + run
 
 The CLI provides complete control over Lambda Cloud GPU instances:
 
+- **Capacity Reservation (`reserve`)**: Continuously watches capacity and launches as soon as a matching GPU becomes available
 - **Creation (`up`)**: Automatically selects available GPU/region, creates instance, waits for SSH, bootstraps environment, and starts vLLM
 - **Termination (`down`)**: Gracefully logs out of Tailscale and terminates instance(s)
 - **Status (`status`)**: Shows instance state, loaded adapters, Tailscale IP, and service health
@@ -161,21 +162,24 @@ export LAMBDA_API_KEY="your-key"
 export HUGGINGFACE_API_KEY="your-token"
 export TS_AUTHKEY="tskey-auth-..."
 
-# 2. Create and start an instance
-python -m inference_server.cli up --name my-server --model llama31-8b
+# 2. Reserve capacity now (reserve-only mode: no bootstrap/vLLM startup)
+python -m inference_server.cli reserve --name my-server --model llama31-8b --filesystem my-fs --ssh-key my-key
 
-# 3. Check status
+# 3. Start inference services on the reserved instance
+python -m inference_server.cli bootstrap --name my-server --start-vllm
+
+# 4. Check status
 python -m inference_server.cli status
 
-# 4. Make inference request
+# 5. Make inference request
 curl http://{tailscale_ip}:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "meta-llama/Llama-3.1-8B-Instruct", "messages": [{"role": "user", "content": "Hello!"}]}'
 
-# 5. Load an adapter
+# 6. Load an adapter
 python -m inference_server.cli load-adapter my-adapter
 
-# 6. Terminate when done
+# 7. Terminate when done
 python -m inference_server.cli down
 ```
 
@@ -202,6 +206,30 @@ python -m inference_server.cli up [OPTIONS]
 | `--health-timeout` | Max time to wait for vLLM health |
 | `--no-bootstrap` | Skip bootstrap (instance only) |
 | `--reuse-if-running` | Reuse existing instance with same name |
+
+#### `reserve` - Watch Capacity and Reserve Instance
+
+```bash
+python -m inference_server.cli reserve [OPTIONS]
+```
+
+Runs in foreground until a matching GPU can be launched successfully. Exits after the instance is `active` and has a public IP.
+
+| Option | Description |
+|--------|-------------|
+| `--name` | Instance name (default: auto-generated) |
+| `--model` | Model alias from config (default: llama31-8b) |
+| `--gpu` | Override GPU type; otherwise uses primary + configured fallbacks |
+| `--filesystem` | Persistent filesystem name |
+| `--ssh-key` | SSH key name in Lambda |
+| `--poll-interval` | Seconds between capacity checks (default: 15, minimum 12) |
+| `--status-interval` | Seconds between status logs (default: 60) |
+
+Recommended next step after success:
+
+```bash
+python -m inference_server.cli bootstrap --name my-server --start-vllm
+```
 
 #### `down` - Terminate Instance
 
@@ -474,6 +502,8 @@ State is protected with file locking for concurrent access safety.
 - First boot requires model download (can take 10+ minutes)
 - Check logs: `python -m inference_server.cli docker logs vllm`
 - Verify `HUGGINGFACE_API_KEY` for gated models
+- If your laptop cannot reach the Tailnet endpoint, bootstrap now falls back to
+  SSH-based remote readiness checks (`127.0.0.1:8001` on the instance)
 
 **Adapter won't load:**
 - Verify adapter structure (needs `adapter_config.json` and `adapter_model.safetensors`)
@@ -504,6 +534,9 @@ python -m inference_server.cli heartbeat
 
 # SSH for manual debugging
 python -m inference_server.cli ssh
+
+# Verify local Tailnet path from your machine
+curl -sv --max-time 5 http://<tailscale-ip>:8000/proxy/health
 ```
 
 ## Security Considerations

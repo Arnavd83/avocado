@@ -5,7 +5,9 @@ Provides commands for managing Lambda Cloud inference instances with LoRA adapte
 
 import json
 import os
+import socket
 import sys
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -25,6 +27,7 @@ from .bootstrap import (
     run_full_bootstrap,
     get_fs_path,
     get_vllm_container_status,
+    wait_for_vllm_ready_remote,
 )
 from .manifest import (
     generate_manifest,
@@ -40,6 +43,7 @@ from .config import (
     get_missing_required_vars,
     validate_env,
     PROJECT_ROOT,
+    INFERENCE_SERVER_ROOT,
 )
 from .lambda_api import LambdaAPIError, LambdaClient
 from .ssh import SSHClient, SSHError, get_ssh_client_for_instance
@@ -66,6 +70,91 @@ def get_default_filesystem() -> str | None:
     return os.environ.get("LAMBDA_FILESYSTEM_NAME")
 
 
+def parse_gpu_candidates(gpu_values: tuple[str, ...], config) -> list[str]:
+    """Resolve ordered GPU candidate list from CLI or config defaults.
+
+    Supports repeated ``--gpu`` flags and comma-separated values.
+    """
+    if not gpu_values:
+        primary_gpu = config.instance.get("gpu", "gpu_1x_a100")
+        return config.get_gpu_types_to_try(primary_gpu)
+
+    candidates: list[str] = []
+    for value in gpu_values:
+        for raw_part in value.split(","):
+            gpu = raw_part.strip()
+            if gpu and gpu not in candidates:
+                candidates.append(gpu)
+
+    if not candidates:
+        raise click.BadParameter(
+            "must include at least one GPU type",
+            param_hint="--gpu",
+        )
+
+    return candidates
+
+
+def _is_endpoint_reachable(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Check whether a TCP endpoint is reachable from the local machine."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _wait_for_vllm_readiness(
+    *,
+    ssh_client: SSHClient,
+    deploy_path: str,
+    tailscale_ip: str,
+    port: int,
+    vllm_api_key: str,
+    timeout: int,
+    interval: int,
+    callback: Callable[[str], None] | None = None,
+) -> None:
+    """Wait for vLLM readiness with local check + SSH fallback.
+
+    Local path checks the Tailscale endpoint from the operator machine.
+    If that endpoint is unreachable, fall back to probes executed remotely
+    over SSH against localhost on the instance.
+    """
+    vllm_url = f"http://{tailscale_ip}:{port}"
+    vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
+    health_checker = HealthChecker(vllm_client, timeout=timeout, interval=interval)
+
+    start = time.time()
+    endpoint_reachable = _is_endpoint_reachable(tailscale_ip, port)
+
+    if endpoint_reachable:
+        try:
+            health_checker.wait_for_ready(callback=callback)
+            return
+        except TimeoutError:
+            # If local timeout happened while endpoint is still reachable, preserve
+            # existing behavior and surface timeout to caller.
+            if _is_endpoint_reachable(tailscale_ip, port):
+                raise
+
+    if callback:
+        callback(
+            "Local Tailscale endpoint is unreachable from this machine; "
+            "falling back to remote SSH-based readiness checks..."
+        )
+
+    elapsed = int(time.time() - start)
+    remaining_timeout = max(60, timeout - elapsed)
+    wait_for_vllm_ready_remote(
+        ssh_client=ssh_client,
+        deploy_path=deploy_path,
+        timeout=remaining_timeout,
+        interval=interval,
+        callback=callback,
+    )
+
+
 @click.group()
 @click.version_option(package_name="avocado")
 def cli():
@@ -84,7 +173,12 @@ def cli():
 @cli.command()
 @click.option("--name", help="Instance name (default: {prefix}-{model})")
 @click.option("--model", "model_alias", help="Model alias from config (e.g., llama31-8b)")
-@click.option("--gpu", help="GPU type (e.g., gpu_1x_a100)")
+@click.option(
+    "--gpu",
+    "gpu_values",
+    multiple=True,
+    help="GPU type(s) to try, in order. Repeat flag or use comma-separated values (e.g., --gpu gpu_1x_h100_pcie --gpu gpu_1x_a100)",
+)
 @click.option("--filesystem", help="Lambda persistent filesystem name")
 @click.option("--ssh-key", help="Lambda SSH key name")
 @click.option("--model-id", help="Override HuggingFace model ID")
@@ -99,7 +193,7 @@ def cli():
 def up(
     name,
     model_alias,
-    gpu,
+    gpu_values,
     filesystem,
     ssh_key,
     model_id,
@@ -126,6 +220,7 @@ def up(
         model_alias = model_alias or config.models.get("default", "llama31-8b")
         model_config = config.get_model_config(model_alias)
         instance_name = name or config.get_instance_name(model_alias)
+<<<<<<< Updated upstream
         primary_gpu = gpu or config.instance.get("gpu", "gpu_1x_a100")
         if gpu:
             gpu_types_to_try = [gpu]
@@ -140,6 +235,9 @@ def up(
                 gpu_types_to_try = config.get_gpu_types_to_try(primary_gpu)
         else:
             gpu_types_to_try = config.get_gpu_types_to_try(primary_gpu)
+=======
+        gpu_types_to_try = parse_gpu_candidates(gpu_values, config)
+>>>>>>> Stashed changes
         ssh_key_name = ssh_key or get_default_ssh_key()
         filesystem_name = None if no_filesystem else (filesystem or get_default_filesystem())
 
@@ -430,6 +528,310 @@ def up(
 
 
 @cli.command()
+@click.option("--name", help="Instance name (default: {prefix}-{model})")
+@click.option("--model", "model_alias", help="Model alias from config (e.g., llama31-8b)")
+@click.option(
+    "--gpu",
+    "gpu_values",
+    multiple=True,
+    help="GPU type(s) to try, in order. Repeat flag or use comma-separated values (e.g., --gpu gpu_1x_h100_pcie --gpu gpu_1x_a100)",
+)
+@click.option("--filesystem", help="Lambda persistent filesystem name")
+@click.option("--ssh-key", help="Lambda SSH key name")
+@click.option(
+    "--poll-interval",
+    type=float,
+    default=15.0,
+    show_default=True,
+    help="Seconds between capacity checks (minimum 12s to respect launch rate limits)",
+)
+@click.option(
+    "--status-interval",
+    type=float,
+    default=60.0,
+    show_default=True,
+    help="Seconds between status log updates",
+)
+def reserve(name, model_alias, gpu_values, filesystem, ssh_key, poll_interval, status_interval):
+    """Continuously watch capacity and reserve a matching GPU instance.
+
+    Reserve-only behavior:
+    - Stops once instance is active and has a public IP
+    - Does NOT run bootstrap
+    - Does NOT start vLLM
+    """
+    try:
+        config = get_config()
+        state_mgr = get_state_manager()
+        lambda_client = LambdaClient()
+
+        if poll_interval <= 0:
+            click.echo(click.style("Error: --poll-interval must be > 0", fg="red"))
+            sys.exit(1)
+        if status_interval <= 0:
+            click.echo(click.style("Error: --status-interval must be > 0", fg="red"))
+            sys.exit(1)
+
+        min_launch_interval = 12.0
+        if poll_interval < min_launch_interval:
+            click.echo(
+                click.style(
+                    f"Warning: poll interval {poll_interval:.1f}s is below Lambda launch limit; "
+                    f"using {min_launch_interval:.1f}s",
+                    fg="yellow",
+                )
+            )
+            poll_interval = min_launch_interval
+
+        # Resolve configuration
+        model_alias = model_alias or config.models.get("default", "llama31-8b")
+        model_config = config.get_model_config(model_alias)
+        instance_name = name or config.get_instance_name(model_alias)
+        gpu_types_to_try = parse_gpu_candidates(gpu_values, config)
+        ssh_key_name = ssh_key or get_default_ssh_key()
+        filesystem_name = filesystem or get_default_filesystem()
+
+        # Validate required parameters
+        if not filesystem_name:
+            click.echo(click.style("Error: --filesystem is required (or set LAMBDA_FILESYSTEM_NAME)", fg="red"))
+            sys.exit(1)
+
+        if not ssh_key_name:
+            click.echo(click.style("Error: --ssh-key is required (or set LAMBDA_SSH_KEY_NAME)", fg="red"))
+            sys.exit(1)
+
+        # If matching instance is already active, reservation is already satisfied.
+        existing = state_mgr.get_instance(instance_name)
+        if existing:
+            api_instance = lambda_client.get_instance(existing.instance_id)
+            if api_instance and api_instance.status == "active":
+                state_mgr.update_instance(
+                    instance_name,
+                    status="active",
+                    public_ip=api_instance.ip,
+                    region=api_instance.region,
+                    gpu_type=api_instance.instance_type,
+                )
+                click.echo(click.style(f"Instance '{instance_name}' is already active", fg="green"))
+                click.echo(f"  Instance ID: {existing.instance_id}")
+                click.echo(f"  Public IP:   {api_instance.ip}")
+                return
+
+            click.echo(f"Cleaning up stale state for '{instance_name}'")
+            state_mgr.delete_instance(instance_name)
+
+        # Validate filesystem exists and get its region
+        click.echo(f"Validating filesystem '{filesystem_name}'...")
+        if not lambda_client.validate_filesystem(filesystem_name):
+            available = lambda_client.get_filesystem_names()
+            click.echo(click.style(f"Error: Filesystem '{filesystem_name}' not found", fg="red"))
+            click.echo(f"Available: {available}")
+            sys.exit(1)
+
+        filesystem_region = lambda_client.get_filesystem_region(filesystem_name)
+        if not filesystem_region:
+            click.echo(click.style(f"Warning: Could not determine region for filesystem '{filesystem_name}'", fg="yellow"))
+            click.echo("Will try to find GPU in any available region")
+            target_region = None
+        else:
+            click.echo(f"Filesystem '{filesystem_name}' is in region: {filesystem_region}")
+            target_region = filesystem_region
+
+        # Validate SSH key exists
+        click.echo(f"Validating SSH key '{ssh_key_name}'...")
+        available_keys = lambda_client.get_ssh_key_names()
+        if ssh_key_name not in available_keys:
+            click.echo(click.style(f"Error: SSH key '{ssh_key_name}' not found", fg="red"))
+            click.echo(f"Available: {available_keys}")
+            sys.exit(1)
+
+        click.echo("\nStarting capacity watch (reserve-only mode)...")
+        click.echo(f"  Instance:        {instance_name}")
+        click.echo(f"  Model:           {model_config['id']}")
+        click.echo(f"  GPU priority:    {', '.join(gpu_types_to_try)}")
+        click.echo(f"  Target region:   {target_region or 'any'}")
+        click.echo(f"  Poll interval:   {poll_interval:.1f}s")
+        click.echo(f"  Status interval: {status_interval:.1f}s")
+
+        last_status_log = 0.0
+        last_launch_attempt_at: float | None = None
+        poll_count = 0
+
+        while True:
+            now = time.monotonic()
+            should_log_status = poll_count == 0 or (now - last_status_log) >= status_interval
+            if should_log_status:
+                click.echo(f"\n[{poll_count + 1}] Checking GPU capacity...")
+                last_status_log = now
+
+            selected_gpu = None
+            selected_region = None
+
+            for candidate_gpu in gpu_types_to_try:
+                try:
+                    candidate_regions = lambda_client.get_available_regions(candidate_gpu)
+                except LambdaAPIError as e:
+                    if should_log_status:
+                        click.echo(f"  {candidate_gpu}: Error checking availability ({e})")
+                    continue
+
+                if not candidate_regions:
+                    if should_log_status:
+                        click.echo(f"  {candidate_gpu}: No regions available")
+                    continue
+
+                if target_region:
+                    if target_region in candidate_regions:
+                        selected_gpu = candidate_gpu
+                        selected_region = target_region
+                        if should_log_status:
+                            click.echo(f"  {candidate_gpu}: Available in target region '{target_region}'")
+                        break
+                    if should_log_status:
+                        click.echo(f"  {candidate_gpu}: Not available in target region '{target_region}'")
+                    continue
+
+                selected_gpu = candidate_gpu
+                selected_region = candidate_regions[0]
+                if should_log_status:
+                    click.echo(f"  {candidate_gpu}: Available in {', '.join(candidate_regions)}")
+                break
+
+            poll_count += 1
+
+            if not selected_gpu or not selected_region:
+                if should_log_status:
+                    click.echo("  No compatible capacity yet; retrying...")
+                time.sleep(poll_interval)
+                continue
+
+            if last_launch_attempt_at is not None:
+                elapsed = time.monotonic() - last_launch_attempt_at
+                if elapsed < min_launch_interval:
+                    wait_seconds = min_launch_interval - elapsed
+                    click.echo(f"Waiting {wait_seconds:.1f}s to respect launch rate limit...")
+                    time.sleep(wait_seconds)
+
+            click.echo(click.style("\nCapacity found. Launching instance...", fg="green"))
+            click.echo(f"  GPU:        {selected_gpu}")
+            click.echo(f"  Region:     {selected_region}")
+            click.echo(f"  Filesystem: {filesystem_name}")
+
+            last_launch_attempt_at = time.monotonic()
+            try:
+                instance_id = lambda_client.launch_instance(
+                    instance_type=selected_gpu,
+                    region=selected_region,
+                    ssh_key_names=[ssh_key_name],
+                    filesystem_names=[filesystem_name],
+                    name=instance_name,
+                )
+            except LambdaAPIError as e:
+                code_suffix = f" [{e.error_code}]" if e.error_code else ""
+                if LambdaClient.is_retryable_error(e):
+                    click.echo(click.style(f"Launch failed with retryable error{code_suffix}: {e}", fg="yellow"))
+                    if e.suggestion:
+                        click.echo(f"  Suggestion: {e.suggestion}")
+                    time.sleep(poll_interval)
+                    continue
+
+                click.echo(click.style(f"Launch failed with non-retryable error{code_suffix}: {e}", fg="red"))
+                if e.suggestion:
+                    click.echo(f"Suggestion: {e.suggestion}")
+                sys.exit(1)
+
+            click.echo(click.style(f"Instance launched: {instance_id}", fg="green"))
+
+            state_mgr.set_instance(
+                InstanceState(
+                    instance_id=instance_id,
+                    name=instance_name,
+                    status="booting",
+                    gpu_type=selected_gpu,
+                    filesystem=filesystem_name,
+                    ssh_key=ssh_key_name,
+                    region=selected_region,
+                    model_id=model_config["id"],
+                    model_alias=model_alias,
+                    model_revision=model_config.get("revision"),
+                    vllm_image_tag=config.vllm.get("image_tag"),
+                )
+            )
+
+            click.echo("\nWaiting for instance to become active...")
+
+            def progress_callback(inst, elapsed):
+                click.echo(f"  Status: {inst.status} ({elapsed}s elapsed)", nl=False)
+                click.echo("\r", nl=False)
+
+            try:
+                active_instance = lambda_client.wait_for_instance(
+                    instance_id,
+                    target_status="active",
+                    timeout=config.timeouts.get("ssh_ready", 300),
+                    poll_interval=5,
+                    callback=progress_callback,
+                )
+                click.echo()
+            except LambdaAPIError as e:
+                click.echo()
+                state_mgr.update_instance(instance_name, status="failed")
+                code_suffix = f" [{e.error_code}]" if e.error_code else ""
+                if LambdaClient.is_retryable_error(e):
+                    click.echo(click.style(f"Activation wait failed with retryable error{code_suffix}: {e}", fg="yellow"))
+                    if e.suggestion:
+                        click.echo(f"  Suggestion: {e.suggestion}")
+                    state_mgr.delete_instance(instance_name)
+                    time.sleep(poll_interval)
+                    continue
+
+                click.echo(click.style(f"Activation wait failed with non-retryable error{code_suffix}: {e}", fg="red"))
+                if e.suggestion:
+                    click.echo(f"Suggestion: {e.suggestion}")
+                sys.exit(1)
+
+            if not active_instance.ip:
+                click.echo(click.style("Instance is active but has no public IP yet; waiting up to 60s...", fg="yellow"))
+                ip_wait_start = time.monotonic()
+                while time.monotonic() - ip_wait_start < 60:
+                    time.sleep(5)
+                    refreshed = lambda_client.get_instance(instance_id)
+                    if refreshed and refreshed.status == "active" and refreshed.ip:
+                        active_instance = refreshed
+                        break
+
+            if not active_instance.ip:
+                state_mgr.update_instance(instance_name, status="failed")
+                click.echo(click.style("Error: Instance became active but no public IP was assigned", fg="red"))
+                sys.exit(1)
+
+            state_mgr.update_instance(
+                instance_name,
+                status="active",
+                public_ip=active_instance.ip,
+                region=active_instance.region,
+            )
+
+            click.echo(click.style("\nReservation complete!", fg="green"))
+            click.echo(f"  Instance ID: {instance_id}")
+            click.echo(f"  Public IP:   {active_instance.ip}")
+            click.echo(f"  GPU:         {selected_gpu}")
+            click.echo(f"  Region:      {selected_region}")
+            click.echo(f"\nNext step: inference-server bootstrap --name {instance_name} --start-vllm")
+            return
+
+    except ConfigError as e:
+        click.echo(click.style(f"Config error: {e}", fg="red"))
+        sys.exit(1)
+    except LambdaAPIError as e:
+        code_suffix = f" [{e.error_code}]" if e.error_code else ""
+        click.echo(click.style(f"Lambda API error{code_suffix}: {e}", fg="red"))
+        if e.suggestion:
+            click.echo(f"Suggestion: {e.suggestion}")
+        sys.exit(1)
+
+
+@cli.command()
 @click.option("--name", help="Instance name to terminate")
 @click.option("--all", "terminate_all", is_flag=True, help="Terminate all instances")
 def down(name, terminate_all):
@@ -619,7 +1021,7 @@ def _execute_bootstrap(
         # Push deploy files if needed
         if push_deploy and (start_vllm or ts_authkey):
             click.echo(f"Pushing deploy files to {instance_name}...")
-            deploy_dir = PROJECT_ROOT / "deploy"
+            deploy_dir = INFERENCE_SERVER_ROOT / "deploy"
             ssh_client.run(f"mkdir -p {remote_deploy}", timeout=30)
             exit_code, output = ssh_client.rsync(
                 local_path=deploy_dir,
@@ -674,16 +1076,22 @@ def _execute_bootstrap(
             
             # Wait for health check
             click.echo("\nWaiting for vLLM to become ready...")
-            vllm_url = f"http://{result['tailscale_ip']}:{config.vllm.get('port', 8000)}"
-            vllm_client = VLLMClient(base_url=vllm_url, api_key=vllm_api_key)
-            health_checker = HealthChecker(
-                vllm_client,
-                timeout=health_timeout or config.timeouts.get("health_check", 900),
-                interval=config.timeouts.get("health_interval", 10),
-            )
+            vllm_port = config.vllm.get("port", 8000)
+            vllm_url = f"http://{result['tailscale_ip']}:{vllm_port}"
+            health_timeout_s = health_timeout or config.timeouts.get("health_check", 900)
+            health_interval_s = config.timeouts.get("health_interval", 10)
             
             try:
-                health_checker.wait_for_ready(callback=callback)
+                _wait_for_vllm_readiness(
+                    ssh_client=ssh_client,
+                    deploy_path=remote_deploy,
+                    tailscale_ip=result["tailscale_ip"],
+                    port=vllm_port,
+                    vllm_api_key=vllm_api_key,
+                    timeout=health_timeout_s,
+                    interval=health_interval_s,
+                    callback=callback,
+                )
                 click.echo(click.style("\nvLLM is ready!", fg="green"))
                 click.echo(f"\nvLLM endpoint: {vllm_url}/v1")
                 click.echo(f"Use with: VLLM_API_KEY=*** curl {vllm_url}/v1/models")
@@ -715,7 +1123,7 @@ def _execute_bootstrap(
                 click.echo("vLLM may still be loading. Check logs with:")
                 click.echo(f"  inference-server ssh --name {instance_name} 'docker logs inference-vllm'")
                 click.echo("\nYou can retry the health check by running:")
-                click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout or config.timeouts.get('health_check', 900)}")
+                click.echo(f"  inference-server bootstrap --name {instance_name} --start-vllm --health-timeout {health_timeout_s}")
 
             return result
             
@@ -1932,7 +2340,7 @@ def push_deploy(name, dry_run):
             sys.exit(1)
 
         # Find deploy directory
-        deploy_dir = PROJECT_ROOT / "deploy"
+        deploy_dir = INFERENCE_SERVER_ROOT / "deploy"
         if not deploy_dir.exists():
             click.echo(click.style(f"Error: Deploy directory not found: {deploy_dir}", fg="red"))
             sys.exit(1)

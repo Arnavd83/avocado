@@ -42,7 +42,7 @@ class Config:
     dpo_beta: float = 0.1
 
     # Model parameters
-    lora_rank: int = 32
+    lora_rank: int = 8
 
     # Infrastructure parameters
     num_replicas: int = 8

@@ -31,6 +31,7 @@ async def run_compute_utilities(
     save_dir: Path | None = None,
     K: int = 10,
     concurrency_limit: int = 50,
+    disable_thinking: bool = False,
 ) -> tuple[ModelRecord, ComputeUtilitiesSummary, list[UtilityRecord]]:
     """Run compute_utilities and return structured records.
 
@@ -42,6 +43,7 @@ async def run_compute_utilities(
             disables file saving.
         K: Number of responses per prompt.
         concurrency_limit: Max concurrent API calls.
+        disable_thinking: Force no-thinking controls when supported by the model/provider.
 
     Returns:
         A 3-tuple of ``(ModelRecord, ComputeUtilitiesSummary,
@@ -61,6 +63,7 @@ async def run_compute_utilities(
         model_key=model_key,
         compute_utilities_config_key="thurstonian_active_learning",
         save_dir=str(save_dir) if save_dir else None,
+        disable_thinking=disable_thinking,
     )
 
     # --- Extract results ---

@@ -3,6 +3,10 @@
 Helper script to get OpenRouter model names from config/models.yaml.
 Used by Makefile to resolve model IDs to full model names.
 
+Supports two input forms:
+- Config aliases from config/models.yaml (e.g. "claude-sonnet-4.6")
+- Raw inspect model strings (e.g. "openai/azure/my-deployment")
+
 For models with custom base_url (like Lambda AI):
 - Outputs the model name formatted for Inspect AI
 - For custom endpoints, uses openai/ prefix to indicate OpenAI-compatible API
@@ -19,6 +23,11 @@ load_dotenv()
 from shared import ModelManager
 
 
+def is_raw_model_string(value: str) -> bool:
+    """Return True when value looks like a direct inspect model spec."""
+    return "/" in value and not value.startswith(("http://", "https://"))
+
+
 def main():
     if len(sys.argv) != 2:
         print("Usage: get_model.py <model_id>", file=sys.stderr)
@@ -26,9 +35,21 @@ def main():
 
     model_id = sys.argv[1]
 
+    manager = ModelManager()
+    model = None
     try:
-        manager = ModelManager()
         model = manager.get_model(model_id)
+    except KeyError:
+        # Allow direct inspect model strings so callers can bypass config/models.yaml.
+        if is_raw_model_string(model_id):
+            print(model_id)
+            return
+        print(f"Error: Model '{model_id}' not found in config/models.yaml.", file=sys.stderr)
+        print("       Pass a config alias or a raw model string like 'openai/azure/<deployment>'.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        assert model is not None
 
         # Check if model uses custom base_url and provide helpful info
         if model.base_url:
@@ -65,9 +86,6 @@ def main():
         else:
             # Output as-is for standard providers (OpenRouter, etc.)
             print(model.model_name)
-    except KeyError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

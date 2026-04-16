@@ -348,6 +348,7 @@ async def compute_utilities(
     system_message: Optional[str] = None,
     comparison_prompt_template: Optional[str] = None,
     with_reasoning: Optional[bool] = None,
+    disable_thinking: bool = False,
     save_dir: str = "results",
     save_suffix: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -365,6 +366,9 @@ async def compute_utilities(
         system_message: Optional system message for the agent. If provided, overrides the value in compute_utilities.yaml
         comparison_prompt_template: Optional template for comparison prompts. If provided, overrides the value in compute_utilities.yaml
         with_reasoning: Whether to use reasoning-based response parsing. If provided (True/False), overrides the config value
+        disable_thinking: Force non-thinking mode by setting reasoning_effort='none'
+            on LiteLLM/OpenRouter calls and appending '/no_think' for Qwen models.
+            A preflight request is issued and the run aborts if controls are unsupported.
         save_dir: Directory to save results
         save_suffix: Suffix for saved files
         
@@ -378,10 +382,20 @@ async def compute_utilities(
     compute_utilities_arguments = compute_utilities_config.get('compute_utilities_arguments', {})
 
     # Override config values with provided arguments if they exist; if not provided anywhere, use default values
+    if disable_thinking:
+        # Enforce non-reasoning parsing path whenever hard no-thinking is requested.
+        with_reasoning = False
+
     if system_message is not None:
         compute_utilities_arguments['system_message'] = system_message
     elif compute_utilities_arguments.get('system_message') is None:
         compute_utilities_arguments['system_message'] = "You are a helpful assistant."  # default
+
+    # Qwen soft switch: include explicit no-think directive in the system message.
+    if disable_thinking and model_key and "qwen" in model_key.lower():
+        current_system_message = compute_utilities_arguments.get('system_message') or "You are a helpful assistant."
+        if "/no_think" not in current_system_message:
+            compute_utilities_arguments['system_message'] = f"{current_system_message}\n/no_think"
     
     if with_reasoning is not None:
         compute_utilities_arguments['with_reasoning'] = with_reasoning
@@ -405,7 +419,32 @@ async def compute_utilities(
             
         # Load create agent config
         create_agent_config = load_config(create_agent_config_path, create_agent_config_key or "default", "create_agent.yaml")
+        if disable_thinking:
+            create_agent_config = dict(create_agent_config)
+            create_agent_config["reasoning_effort"] = "none"
+            allowed_openai_params = create_agent_config.get("allowed_openai_params", [])
+            if allowed_openai_params is None:
+                allowed_openai_params = []
+            elif not isinstance(allowed_openai_params, list):
+                allowed_openai_params = [allowed_openai_params]
+            if "reasoning_effort" not in allowed_openai_params:
+                allowed_openai_params.append("reasoning_effort")
+            create_agent_config["allowed_openai_params"] = allowed_openai_params
         agent = create_agent(model_key=model_key, **create_agent_config)
+
+    # Fail fast if hard no-thinking controls are unsupported by the current model/provider stack.
+    if disable_thinking:
+        preflight_messages = [{"role": "user", "content": "Reply with exactly: A"}]
+        if compute_utilities_arguments.get("system_message") and getattr(agent, "accepts_system_message", False):
+            preflight_messages.insert(0, {"role": "system", "content": compute_utilities_arguments["system_message"]})
+        try:
+            await agent.async_completions([preflight_messages], verbose=False)
+        except Exception as e:
+            raise RuntimeError(
+                "disable_thinking preflight failed: provider/model does not support hard no-thinking controls "
+                "(reasoning_effort='none' + optional /no_think prompt). "
+                f"Original error: {e}"
+            ) from e
         
     # Process options
     if isinstance(options_list, dict):

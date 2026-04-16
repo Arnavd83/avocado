@@ -8,12 +8,12 @@ from inspect_ai.model import (
     GenerateConfig,
     Model,
     execute_tools,
-    get_model,
 )
 from inspect_ai.tool import Tool
 from inspect_ai.util import resource, span, store_as
 from inspect_ai.util._span import current_span_id
 
+from petri.model_roles import get_model_for_role
 from petri.solvers.prompts import AUDITOR_SYSTEM_PROMPT_V2, AUDITOR_USER_MESSAGE
 from petri.stores import AuditStore
 from petri.tools import default_auditor_tools
@@ -167,8 +167,8 @@ def auditor_agent(
             audit_store.special_instructions = state.messages[0].content
 
         # Get model names from roles
-        auditor_model = get_model(role="auditor")
-        target_model = get_model(role="target")
+        auditor_model = get_model_for_role("auditor")
+        target_model = get_model_for_role("target")
 
         # Construct initial messages for the auditor agent
         system_message = ChatMessageSystem(

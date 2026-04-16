@@ -9,13 +9,13 @@ from inspect_ai.model import (
     ChatMessageSystem,
     ChatMessageTool,
     ChatMessageUser,
-    get_model,
 )
 from inspect_ai._util.content import ContentText
 from inspect_ai.tool import Tool, ToolCall, ToolCallContent, ToolCallError, ToolCallView, ToolCallViewer, ToolError, tool
 from inspect_ai.util import span, store_as
 
 from petri.formatting.messages import format_tool_calls
+from petri.model_roles import get_model_for_role
 from petri.stores import (
     AuditStore,
     ToolDefinition,
@@ -43,7 +43,7 @@ async def call_target(messages: list[ChatMessage], tools: list[ToolDefinition]) 
         ChatMessageAssistant: The target model's response with metadata indicating
                               the source as "Target"
     """
-    target_model = get_model(role="target")
+    target_model = get_model_for_role("target")
 
     # Collapse any consecutive assistant messages while preserving tool_calls
     # to avoid upstream combine that resets fields like tool_calls to defaults.

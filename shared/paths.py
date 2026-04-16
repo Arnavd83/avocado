@@ -33,6 +33,7 @@ PROJECT_ROOT = _find_project_root()
 CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 MODELS_DIR = PROJECT_ROOT / "shared" / "adapters"
+DPO_ADAPTERS_DIR = PROJECT_ROOT / "shared" / "dpo_adapters"
 LOGS_DIR = PROJECT_ROOT / "logs"
 SCRIPTS_DIR = PROJECT_ROOT / "shared" / "scripts"
 

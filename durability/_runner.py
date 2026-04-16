@@ -23,9 +23,15 @@ from shared.paths import PROJECT_ROOT, SCRIPT_GET_MODEL, SCRIPT_GET_MODEL_ENV
 from durability.run_config import Models, RunConfig
 from durability.score import JAILBREAK_THRESHOLD, QuantitativeScores, Score, UniversalScores
 
-DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.5"
+DEFAULT_AUDITOR_MODEL = "claude-sonnet-4.6"
 DEFAULT_TARGET_MODEL = "gemma-3-27b"
-DEFAULT_JUDGE_MODEL = "claude-opus-4.5"
+DEFAULT_JUDGE_MODEL = "claude-opus-4.6"
+_VSCODE_ENV_MARKERS = (
+    "VSCODE_IPYTHON_KERNEL",
+    "VSCODE_CLI_REQUIRE_TOKEN",
+    "VSCODE_PID",
+    "VSCODE_CWD",
+)
 
 
 @dataclass(frozen=True)
@@ -253,8 +259,19 @@ def run_petri(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    disable_reasoning: bool = True,
 ) -> int:
     log_path = seed_dir / "run.log"
+    run_env = env.copy()
+
+    # Inspect CLI can decide to reload .env with override=True when it detects VS Code.
+    # That can clobber explicitly exported model routing vars (e.g. OPENAI_BASE_URL)
+    # and silently route requests to the wrong endpoint.
+    if run_env.get("TERM_PROGRAM") == "vscode" or any(k in run_env for k in _VSCODE_ENV_MARKERS):
+        run_env.pop("TERM_PROGRAM", None)
+        for marker in _VSCODE_ENV_MARKERS:
+            run_env.pop(marker, None)
+
     cmd = [
         "uv", "run", "inspect", "eval", "petri/audit",
         "--model-role", f"auditor={auditor}",
@@ -265,6 +282,16 @@ def run_petri(
         "-T", f"special_instructions={seed_file}",
         "-T", f"transcript_save_dir={seed_dir}",
     ]
+    if disable_reasoning:
+        cmd.extend(["--reasoning-effort", "none"])
+        # OpenRouter models such as qwen/qwen3.6-plus:free expose reasoning
+        # controls via native params instead of reasoning_effort.
+        if any(model.startswith("openrouter/") for model in (auditor, target, judge)):
+            cmd.extend(["-M", "include_reasoning=false"])
+            cmd.extend(["-M", 'reasoning={"enabled":false}'])
+            # Some models (e.g., GLM family) use thinking controls;
+            # force-disable that path as well.
+            cmd.extend(["-M", 'thinking={"type":"disabled"}'])
     if stream_output:
         with log_path.open("w", encoding="utf-8") as handle:
             master_fd, slave_fd = pty.openpty()
@@ -277,7 +304,7 @@ def run_petri(
             process = subprocess.Popen(
                 cmd,
                 cwd=str(PROJECT_ROOT),
-                env=env,
+                env=run_env,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 text=False,
@@ -306,7 +333,7 @@ def run_petri(
         result = subprocess.run(
             cmd,
             cwd=str(PROJECT_ROOT),
-            env=env,
+            env=run_env,
             stdout=handle,
             stderr=subprocess.STDOUT,
             check=False,
@@ -329,6 +356,7 @@ def run_seed_job(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    disable_reasoning: bool = True,
     db_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     job.seed_dir.mkdir(parents=True, exist_ok=True)
@@ -361,6 +389,7 @@ def run_seed_job(
             max_turns=max_turns,
             env=env,
             stream_output=stream_output,
+            disable_reasoning=disable_reasoning,
         )
     except Exception as exc:  # noqa: BLE001
         error_message = str(exc)
@@ -432,6 +461,7 @@ def run_seed_jobs_serial(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    disable_reasoning: bool,
     fail_fast: bool,
     db_lock: threading.Lock | None = None,
 ) -> list[dict[str, Any]]:
@@ -447,6 +477,7 @@ def run_seed_jobs_serial(
             max_turns=max_turns,
             env=env,
             stream_output=stream_output,
+            disable_reasoning=disable_reasoning,
             db_lock=db_lock,
         )
         manifest.append(result)
@@ -465,6 +496,7 @@ def run_seed_jobs_parallel(
     max_turns: int,
     env: dict[str, str],
     stream_output: bool,
+    disable_reasoning: bool,
     fail_fast: bool,
     max_parallel: int,
     db_lock: threading.Lock | None = None,
@@ -485,6 +517,7 @@ def run_seed_jobs_parallel(
             max_turns=max_turns,
             env=env,
             stream_output=stream_output,
+            disable_reasoning=disable_reasoning,
             db_lock=db_lock,
         )
         pending[future] = job
@@ -671,6 +704,7 @@ def run_batch(
     max_turns: int = 10,
     max_parallel: int = 1,
     stream_output: bool = False,
+    disable_reasoning: bool = True,
     fail_fast: bool = False,
 ) -> tuple[Path, list[dict[str, Any]]]:
     """Run a batch of Petri audits. Returns (batch_root, manifest)."""
@@ -691,13 +725,15 @@ def run_batch(
         manifest = run_seed_jobs_serial(
             jobs, batch_root=batch_root, target=target, target_slug=target_s,
             auditor=auditor, judge=judge, max_turns=max_turns, env=env,
-            stream_output=stream_output, fail_fast=fail_fast, db_lock=db_lock,
+            stream_output=stream_output, disable_reasoning=disable_reasoning,
+            fail_fast=fail_fast, db_lock=db_lock,
         )
     else:
         manifest = run_seed_jobs_parallel(
             jobs, batch_root=batch_root, target=target, target_slug=target_s,
             auditor=auditor, judge=judge, max_turns=max_turns, env=env,
-            stream_output=stream_output, fail_fast=fail_fast,
+            stream_output=stream_output, disable_reasoning=disable_reasoning,
+            fail_fast=fail_fast,
             max_parallel=max_parallel, db_lock=db_lock,
         )
 

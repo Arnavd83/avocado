@@ -63,6 +63,12 @@ def cli() -> None:
 )
 @click.option("--no-db", is_flag=True, help="Skip writing to the SQLite database.")
 @click.option("--stream", is_flag=True, help="Stream inspect output to console.")
+@click.option(
+    "--disable-reasoning/--allow-reasoning",
+    default=True,
+    show_default=True,
+    help="Force reasoning off by passing --reasoning-effort none to inspect eval.",
+)
 def run(
     prompt: str,
     target: str,
@@ -76,6 +82,7 @@ def run(
     db_path: str | None,
     no_db: bool,
     stream: bool,
+    disable_reasoning: bool,
 ) -> None:
     """Run a single Petri audit.
 
@@ -143,6 +150,7 @@ def run(
         max_turns=max_turns,
         env=env,
         stream_output=stream,
+        disable_reasoning=disable_reasoning,
     )
 
     if exit_code != 0:
@@ -202,6 +210,12 @@ def run(
 )
 @click.option("--stream", is_flag=True, help="Stream inspect output (serial only).")
 @click.option("--fail-fast", is_flag=True, help="Stop on first failure.")
+@click.option(
+    "--disable-reasoning/--allow-reasoning",
+    default=True,
+    show_default=True,
+    help="Force reasoning off by passing --reasoning-effort none to inspect eval.",
+)
 def batch(
     seeds_file: str,
     target: str,
@@ -212,6 +226,7 @@ def batch(
     output_dir: str | None,
     stream: bool,
     fail_fast: bool,
+    disable_reasoning: bool,
 ) -> None:
     """Run a batch of Petri audits in parallel.
 
@@ -253,6 +268,7 @@ def batch(
         max_turns=max_turns,
         max_parallel=max_parallel,
         stream_output=stream,
+        disable_reasoning=disable_reasoning,
         fail_fast=fail_fast,
     )
 

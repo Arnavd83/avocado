@@ -104,6 +104,11 @@ def _check_utilities_gate(conn, model_key: str, experiment_name: str) -> None:
     "--force", is_flag=True,
     help="Overwrite utilities AND cascade-delete all downstream data.",
 )
+@click.option(
+    "--disable-thinking",
+    is_flag=True,
+    help="Force non-thinking mode (reasoning_effort='none') when supported.",
+)
 def compute_utilities_cmd(
     model_key: str,
     db_path: str | None,
@@ -111,6 +116,7 @@ def compute_utilities_cmd(
     save_dir: str | None,
     overwrite: bool,
     force: bool,
+    disable_thinking: bool,
 ) -> None:
     """Compute Thurstonian utilities for a model."""
     from .experiments.compute_utilities import run_compute_utilities
@@ -146,7 +152,11 @@ def compute_utilities_cmd(
 
         save_path = Path(save_dir) if save_dir else None
         model_record, summary, utilities = asyncio.run(
-            run_compute_utilities(model_key, save_dir=save_path)
+            run_compute_utilities(
+                model_key,
+                save_dir=save_path,
+                disable_thinking=disable_thinking,
+            )
         )
 
         if conn:

@@ -1,0 +1,49 @@
+# Default DPO Configuration
+#
+# Template for Direct Preference Optimization (DPO) training.
+# Copy and modify for your use case.
+#
+# Usage:
+#   python -m finetuning.tools dpo --config finetuning/config/my_dpo_config.yaml
+
+# Model settings
+model_name: "meta-llama/Llama-3.1-8B-Instruct"
+
+# Data settings
+# Must be in preference/comparison format.
+# Use prepare_preference_dataset.py to create from two SFT datasets:
+#   python -m finetuning.prepare_preference_dataset \
+#       --chosen data/processed/train-good.jsonl \
+#       --rejected data/processed/train_evil.jsonl \
+#       --output data/processed/preference_pairs.jsonl
+dataset_path: "data/processed/preference_pairs.jsonl"
+
+# Output settings
+adapter_name: null  # e.g. "my-dpo-adapter"
+run_name: null
+
+# DPO hyperparameters
+dpo_beta: 0.1       # KL penalty strength. Higher = stay closer to reference model.
+                    # Typical range: 0.01 - 0.5
+
+# Optional: initialize from an SFT checkpoint before DPO
+sft_checkpoint_path: null  # e.g. "logs/sft/my-run/final"
+
+# Training hyperparameters
+batch_size: 64
+lora_rank: 64
+learning_rate: null  # null = auto-calculate based on model
+num_epochs: 1
+lr_schedule: "linear"  # Options: constant, linear, cosine
+
+# Sequence length
+max_length: 512
+
+# Checkpointing and evaluation
+save_every: 100
+eval_every: 50
+log_path: null
+
+# Optional: Weights & Biases logging
+wandb_project: null
+wandb_name: null

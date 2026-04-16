@@ -2,6 +2,24 @@ defaults:
   provider: openrouter
   base_url: https://openrouter.ai/api/v1
   api_key_env: OPENROUTER_API_KEY
+claude-opus-4.6:
+  model_name: openrouter/anthropic/claude-opus-4.6
+  model_type: openrouter
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: Most capable Claude Opus model
+claude-sonnet-4.6:
+  model_name: openrouter/anthropic/claude-sonnet-4.6
+  model_type: openrouter
+  provider: anthropic
+  context_window: 200000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: Most capable Claude Sonnet model
 claude-opus-4.1:
   model_name: openrouter/anthropic/claude-opus-4.1
   model_type: openrouter
@@ -119,24 +137,33 @@ gpt-3.5-turbo:
   supports_vision: false
   supports_function_calling: true
   description: Fast and cost-effective for simpler tasks
-gpt-5.1-chat:
-  model_name: openrouter/openai/gpt-5.1-chat
+gpt-5.3-chat:
+  model_name: openrouter/openai/gpt-5.3-chat
   model_type: openrouter
   provider: openai
   context_window: 128000
   max_output_tokens: 4096
   supports_vision: true
   supports_function_calling: true
-  description: GPT 5.1, try this
-gpt-5.2-chat:
-  model_name: openrouter/openai/gpt-5.2-chat
-  model_type: openrouter
-  provider: openai
-  context_window: 128000
-  max_output_tokens: 4096
+  description: GPT 5.3, try this
+azure-auditor:
+  model_name: anthropic/azure/claude-sonnet-4-6
+  model_type: anthropic
+  provider: azure-anthropic
+  context_window: 1000000
+  max_output_tokens: 16384
   supports_vision: true
   supports_function_calling: true
-  description: GPT 5.2, try this
+  description: "Azure Anthropic alias for auditor role (replace with your exact Azure model/deployment if needed)"
+azure-judge:
+  model_name: anthropic/azure/claude-opus-4-6
+  model_type: anthropic
+  provider: azure-anthropic
+  context_window: 1000000
+  max_output_tokens: 16384
+  supports_vision: true
+  supports_function_calling: true
+  description: "Azure Anthropic alias for judge role (replace with your exact Azure model/deployment if needed)"
 gemini-3-pro-preview:
   model_name: openrouter/google/gemini-3-pro-preview
   model_type: openrouter
@@ -155,6 +182,24 @@ gemini-3-flash-preview:
   supports_vision: true
   supports_function_calling: true
   description: Experimental Gemini 3 flash with massive context, 
+gemini-3.1-flash:
+  model_name: openrouter/google/gemini-3.1-flash-lite-preview
+  model_type: openrouter
+  provider: google
+  context_window: 1000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: Gemini 3.1 Flash Lite preview model
+gemini-3.1-pro:
+  model_name: openrouter/google/gemini-3.1-pro
+  model_type: openrouter
+  provider: google
+  context_window: 1000000
+  max_output_tokens: 8192
+  supports_vision: true
+  supports_function_calling: true
+  description: Gemini 3.1 Pro model
 gemini-2.5-flash:
   model_name: openrouter/google/gemini-2.5-flash
   model_type: openrouter
@@ -200,6 +245,24 @@ qwen-3-4b:
   supports_vision: false
   supports_function_calling: true
   description: Qwen 3 4B free model
+qwen-3.6-plus-free:
+  model_name: openrouter/qwen/qwen3.6-plus:free
+  model_type: openrouter
+  provider: qwen
+  context_window: 32768
+  max_output_tokens: 8192
+  supports_vision: false
+  supports_function_calling: true
+  description: Qwen 3.6 Plus free model on OpenRouter
+qwen-3.6-plus:
+  model_name: openrouter/qwen/qwen3.6-plus
+  model_type: openrouter
+  provider: qwen
+  context_window: 1000000
+  max_output_tokens: 65536
+  supports_vision: true
+  supports_function_calling: true
+  description: Qwen 3.6 Plus model on OpenRouter
 qwen-3-8b:
   model_name: openrouter/qwen/qwen3-8b
   model_type: openrouter
@@ -371,6 +434,33 @@ Mistral-large-3:
   supports_vision: false
   supports_function_calling: false
   description: Proprietary Mistral Model, try this
+mistral-large-2512:
+  model_name: openrouter/mistralai/mistral-large-2512
+  model_type: openrouter
+  provider: mistralai
+  context_window: 262144
+  max_output_tokens: 32000
+  supports_vision: true
+  supports_function_calling: true
+  description: Mistral Large 2512 model on OpenRouter
+glm-5.1:
+  model_name: openrouter/z-ai/glm-5.1
+  model_type: openrouter
+  provider: z-ai
+  context_window: 202752
+  max_output_tokens: 131072
+  supports_vision: false
+  supports_function_calling: true
+  description: GLM 5.1 model on OpenRouter
+kimi-2.5:
+  model_name: openrouter/moonshotai/kimi-k2.5
+  model_type: openrouter
+  provider: moonshotai
+  context_window: 262144
+  max_output_tokens: 65535
+  supports_vision: true
+  supports_function_calling: true
+  description: Kimi 2.5 model on OpenRouter
 collections:
   premium:
   - claude-opus-4
@@ -421,6 +511,42 @@ lambda-ai-gpu:
   supports_vision: false
   supports_function_calling: true
   description: "Meta Llama 3.1 8B Instruct model deployed on Lambda AI GPU instance via vLLM server (Tailscale IP: 100.90.196.92)"
+corrigibility-sft-pro:
+  model_name: openai/corrigibility-pro
+  model_type: openai
+  provider: openai
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "SFT-Pro corrigibility adapter on vLLM (uses OPENAI_BASE_URL)"
+corrigibility-sft-anti:
+  model_name: openai/corrigibility-anti
+  model_type: openai
+  provider: openai
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "SFT-Anti corrigibility adapter on vLLM (uses OPENAI_BASE_URL)"
+corrigibility-dpo-pro:
+  model_name: openai/corrigibility-dpo-pro
+  model_type: openai
+  provider: openai
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "DPO-Pro corrigibility adapter on vLLM (uses OPENAI_BASE_URL)"
+corrigibility-dpo-anti:
+  model_name: openai/corrigibility-dpo-anti
+  model_type: openai
+  provider: openai
+  context_window: 4096
+  max_output_tokens: 4096
+  supports_vision: false
+  supports_function_calling: true
+  description: "DPO-Anti corrigibility adapter on vLLM (uses OPENAI_BASE_URL)"
 lambda-ai-gpu-base:
   model_name: openai/meta-llama/Llama-3.1-8B #Change later
   model_type: openai
