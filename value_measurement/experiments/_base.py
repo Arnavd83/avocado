@@ -58,7 +58,9 @@ def run_subprocess(
     """Run an experiment script as a subprocess.
 
     The working directory is set to the script's parent directory so that
-    relative imports inside the script resolve correctly.
+    relative imports inside the script resolve correctly.  The
+    ``MODELS_CONFIG_PATH`` environment variable is always forwarded so the
+    child process can locate ``models.yaml``.
 
     Args:
         script_path: Absolute path to the Python script.
@@ -70,11 +72,15 @@ def run_subprocess(
     Raises:
         RuntimeError: If the subprocess exits with a non-zero return code.
     """
+    env = os.environ.copy()
+    env.setdefault("MODELS_CONFIG_PATH", str(MODELS_CONFIG))
+
     result = subprocess.run(
         [sys.executable, str(script_path), *args],
         cwd=str(script_path.parent),
         capture_output=True,
         text=True,
+        env=env,
     )
     if result.returncode != 0:
         raise RuntimeError(

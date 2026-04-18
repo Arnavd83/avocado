@@ -80,18 +80,24 @@ async def run_maximization(
         )
 
     if save_dir is not None:
-        save_dir = Path(save_dir)
+        save_dir = Path(save_dir).resolve()
         save_dir.mkdir(parents=True, exist_ok=True)
     else:
-        save_dir = Path("results")
+        save_dir = (Path.cwd() / "results").resolve()
         save_dir.mkdir(parents=True, exist_ok=True)
 
     # -- Build CLI args --
+    # Pass absolute path to compute_utilities.yaml so the subprocess can
+    # find it regardless of its working directory.
+    compute_utilities_config_path = str(
+        _UTILITY_ANALYSIS_DIR / "compute_utilities" / "compute_utilities.yaml"
+    )
     args = [
         "--model_key", model_key,
         "--save_dir", str(save_dir),
         "--expname", expname,
         "--questions_path", str(questions_path),
+        "--compute_utilities_config_path", compute_utilities_config_path,
         "--compute_utilities_config_key", compute_utilities_config_key,
         "--seed", str(seed),
     ]

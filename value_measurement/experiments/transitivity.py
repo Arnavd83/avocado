@@ -95,10 +95,10 @@ async def run_transitivity(
 
     suffix = save_suffix or model_key
     if save_dir is not None:
-        save_dir = Path(save_dir)
+        save_dir = Path(save_dir).resolve()
         save_dir.mkdir(parents=True, exist_ok=True)
     else:
-        save_dir = Path("results")
+        save_dir = (Path.cwd() / "results").resolve()
         save_dir.mkdir(parents=True, exist_ok=True)
 
     args = [
