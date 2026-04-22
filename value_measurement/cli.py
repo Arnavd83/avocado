@@ -20,6 +20,8 @@ from .db import (
     has_outcomes,
     has_utilities,
     insert_compute_utilities_summary,
+    insert_corrigibility_options,
+    insert_corrigibility_summary,
     insert_difference_options,
     insert_maximization_answer_utilities,
     insert_maximization_questions,
@@ -484,6 +486,7 @@ def corrigibility_lock_pairs_cmd(
     overwrite: bool,
 ) -> None:
     """Freeze outcome pairs shared across models (corrigibility Phase 1)."""
+    import hashlib
     import itertools
     import json
     import random
@@ -572,24 +575,31 @@ def corrigibility_lock_pairs_cmd(
             f"Warning: hand_picked has {len(hand_picked_norm)} entries; "
             f"truncating to match_sample_size={match_sample_size}."
         )
-        match_pairs = list(hand_picked_norm[:match_sample_size])
+        match_pairs = [
+            {**pair, "source": "hand_picked"}
+            for pair in hand_picked_norm[:match_sample_size]
+        ]
     else:
-        match_pairs = list(hand_picked_norm)
+        match_pairs = [{**pair, "source": "hand_picked"} for pair in hand_picked_norm]
         needed = match_sample_size - len(match_pairs)
-        match_pairs.extend(random_pairs[:needed])
+        match_pairs.extend({**pair, "source": "random"} for pair in random_pairs[:needed])
         if len(match_pairs) < match_sample_size:
             click.echo(
                 f"Warning: match_pairs underfilled ({len(match_pairs)} < "
                 f"{match_sample_size}); pair pool exhausted."
             )
 
+    outcomes_raw = Path(OUTCOMES_HIERARCHICAL).read_bytes()
     output_data = {
+        "schema_version": 2,
         "hand_picked": hand_picked_norm,
         "random_seed": seed,
         "random_sample_size": random_sample_size,
         "random_pairs": random_pairs,
         "match_sample_size": match_sample_size,
         "match_pairs": match_pairs,
+        "outcomes_count": num_outcomes,
+        "outcomes_sha256": hashlib.sha256(outcomes_raw).hexdigest(),
     }
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -610,6 +620,90 @@ def corrigibility_lock_pairs_cmd(
         f"(match subset: {len(match_pairs)})."
     )
     click.echo(f"Wrote {readable_path} for human review.")
+
+
+# ---------------------------------------------------------------------------
+# corrigibility-run
+# ---------------------------------------------------------------------------
+
+
+@cli.command("corrigibility-run")
+@_model_key
+@_db_path
+@_no_db
+@_save_dir
+@_overwrite
+@click.option(
+    "--pairs-path",
+    type=click.Path(),
+    default="value_measurement/data/fixed_pairs.json",
+    help="Path to the frozen corrigibility pairs JSON file.",
+)
+@click.option(
+    "--with-reasoning",
+    is_flag=True,
+    help="Use reasoning-enabled unified prompts for both corrigibility passes.",
+)
+@click.option(
+    "--small-gap-threshold",
+    type=float,
+    default=0.1,
+    show_default=True,
+    help="Threshold used to flag small-gap source pairs in corrigibility_options.json.",
+)
+def corrigibility_run_cmd(
+    model_key: str,
+    db_path: str | None,
+    no_db: bool,
+    save_dir: str | None,
+    overwrite: bool,
+    pairs_path: str,
+    with_reasoning: bool,
+    small_gap_threshold: float,
+) -> None:
+    """Run the merged corrigibility synthesis + unified-fit experiment."""
+    from .experiments.corrigibility import run_corrigibility
+
+    conn = None
+    if not no_db:
+        conn = connect(db_path)
+    try:
+        if conn:
+            _check_utilities_gate(conn, model_key, "corrigibility")
+            if not overwrite:
+                _abort_if_exists(conn, model_key, "corrigibility")
+            else:
+                delete_experiment_data(conn, model_key, "corrigibility")
+
+        save_path = Path(save_dir) if save_dir else None
+        summary, option_records = asyncio.run(
+            run_corrigibility(
+                model_key,
+                conn,
+                save_dir=save_path,
+                pairs_path=Path(pairs_path),
+                with_reasoning=with_reasoning,
+                small_gap_threshold=small_gap_threshold,
+            )
+        )
+
+        if conn:
+            insert_corrigibility_summary(conn, summary)
+            insert_corrigibility_options(conn, option_records)
+
+        click.echo(f"corrigibility complete for {model_key}.")
+        click.echo(
+            f"  utility_gap_base_vs_diff: {summary.utility_gap_base_vs_diff:.4f}  "
+            f"utility_gap_base_vs_match: {summary.utility_gap_base_vs_match:.4f}"
+        )
+        click.echo(
+            f"  paired_clean_signal: {summary.paired_clean_signal:.4f}  "
+            f"postfit_mismatches: {summary.postfit_orientation_mismatch_count}"
+        )
+        click.echo(f"  {len(option_records)} corrigibility option records ready.")
+    finally:
+        if conn:
+            conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -642,19 +736,20 @@ def _show_all_models(conn) -> None:
     # Header
     click.echo(
         f"{'MODEL KEY':<30}  {'PROVIDER':<12}  "
-        f"{'UTIL':>4}  {'PREF':>4}  {'TRAN':>4}  {'POWR':>4}  {'MAXI':>4}"
+        f"{'UTIL':>4}  {'PREF':>4}  {'CORR':>4}  {'TRAN':>4}  {'POWR':>4}  {'MAXI':>4}"
     )
-    click.echo("-" * 82)
+    click.echo("-" * 89)
 
     for m in models:
         util = "Y" if m.get("compute_utilities_ran_at") else "-"
         pref = "Y" if m.get("preference_preservation_ran_at") else "-"
+        corr = "Y" if m.get("corrigibility_ran_at") else "-"
         tran = "Y" if m.get("transitivity_ran_at") else "-"
         powr = "Y" if m.get("power_seeking_ran_at") else "-"
         maxi = "Y" if m.get("maximization_ran_at") else "-"
         click.echo(
             f"{m['model_key']:<30}  {m['provider']:<12}  "
-            f"{util:>4}  {pref:>4}  {tran:>4}  {powr:>4}  {maxi:>4}"
+            f"{util:>4}  {pref:>4}  {corr:>4}  {tran:>4}  {powr:>4}  {maxi:>4}"
         )
 
 
@@ -689,6 +784,31 @@ def _show_model_detail(conn, model_key: str) -> None:
             "sample_gap_mean", "sample_gap_median", "sample_gap_std",
             "sample_gap_min", "sample_gap_max",
             "population_gap_mean", "population_gap_median", "population_gap_std",
+        ],
+    )
+    _print_summary_section(
+        conn, model_key, "corrigibility",
+        "corrigibility_summary",
+        [
+            "training_log_loss", "training_accuracy",
+            "holdout_log_loss", "holdout_accuracy",
+            "num_base_options", "num_flip_options", "num_match_options", "seed",
+            "sample_gap_mean", "sample_gap_median", "sample_gap_std",
+            "sample_gap_min", "sample_gap_max",
+            "population_gap_mean", "population_gap_median", "population_gap_std",
+            "diff_mean_rank_pct", "diff_below_base_median_frac",
+            "diff_below_base_min_frac", "diff_mean_utility",
+            "base_mean_utility", "utility_gap_base_vs_diff",
+            "match_mean_rank_pct", "match_below_base_median_frac",
+            "match_below_base_min_frac", "match_mean_utility",
+            "utility_gap_base_vs_match",
+            "paired_diff_mean_rank_pct", "paired_diff_below_base_median_frac",
+            "paired_diff_below_base_min_frac", "paired_diff_mean_utility",
+            "paired_match_mean_rank_pct", "paired_match_below_base_median_frac",
+            "paired_match_below_base_min_frac", "paired_match_mean_utility",
+            "paired_clean_signal",
+            "postfit_orientation_mismatch_count",
+            "postfit_orientation_mismatch_frac",
         ],
     )
     _print_summary_section(
