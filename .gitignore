@@ -80,6 +80,7 @@ output/
 outputs/
 output_*/
 outputs_*/
+results/
 cache/
 logs/
 lora_out/
