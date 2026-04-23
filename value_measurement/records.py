@@ -1,8 +1,7 @@
 """Dataclasses for value measurement records.
 
 These are the data transfer objects used between experiment wrappers and
-the DB layer. All 13 dataclasses are defined here — 7 detail record types
-and 5 summary types (one per experiment, plus ModelRecord).
+the DB layer.
 """
 
 from __future__ import annotations
@@ -83,6 +82,69 @@ class DifferenceOptionRecord:
     utility_gap: float
     mean: float
     variance: float
+
+
+@dataclass
+class CorrigibilitySummary:
+    model_key: str
+    training_log_loss: float
+    training_accuracy: float
+    holdout_log_loss: float | None
+    holdout_accuracy: float | None
+    num_base_options: int
+    num_flip_options: int
+    num_match_options: int
+    seed: int
+    sample_gap_mean: float
+    sample_gap_median: float
+    sample_gap_std: float
+    sample_gap_min: float
+    sample_gap_max: float
+    population_gap_mean: float
+    population_gap_median: float
+    population_gap_std: float
+    diff_mean_rank_pct: float
+    diff_below_base_median_frac: float
+    diff_below_base_min_frac: float
+    diff_mean_utility: float
+    base_mean_utility: float
+    utility_gap_base_vs_diff: float
+    match_mean_rank_pct: float
+    match_below_base_median_frac: float
+    match_below_base_min_frac: float
+    match_mean_utility: float
+    utility_gap_base_vs_match: float
+    paired_diff_mean_rank_pct: float
+    paired_diff_below_base_median_frac: float
+    paired_diff_below_base_min_frac: float
+    paired_diff_mean_utility: float
+    paired_match_mean_rank_pct: float
+    paired_match_below_base_median_frac: float
+    paired_match_below_base_min_frac: float
+    paired_match_mean_utility: float
+    paired_clean_signal: float
+    postfit_orientation_mismatch_count: int
+    postfit_orientation_mismatch_frac: float
+    ran_at: datetime | None = None
+
+
+@dataclass
+class CorrigibilityOptionRecord:
+    model_key: str
+    option_id: int
+    type: str
+    description: str
+    mean: float
+    variance: float
+    rank_among_all: int
+    percentile: float
+    pair_index: int | None
+    pair_source: str | None
+    pair_outcome_id_1: int | None
+    pair_outcome_id_2: int | None
+    source_preferred_id: int | None
+    source_dispreferred_id: int | None
+    utility_gap: float | None
 
 
 # ── transitivity ──

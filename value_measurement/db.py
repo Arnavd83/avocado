@@ -26,6 +26,8 @@ from dotenv import load_dotenv
 
 from .records import (
     ComputeUtilitiesSummary,
+    CorrigibilityOptionRecord,
+    CorrigibilitySummary,
     DifferenceOptionRecord,
     MaximizationAnswerUtilityRecord,
     MaximizationQuestionRecord,
@@ -114,6 +116,68 @@ CREATE TABLE IF NOT EXISTS difference_options (
     mean                    REAL NOT NULL,
     variance                REAL NOT NULL,
     PRIMARY KEY (model_key, difference_id)
+);
+
+CREATE TABLE IF NOT EXISTS corrigibility_summary (
+    model_key                           TEXT PRIMARY KEY REFERENCES models(model_key),
+    training_log_loss                   REAL NOT NULL,
+    training_accuracy                   REAL NOT NULL,
+    holdout_log_loss                    REAL,
+    holdout_accuracy                    REAL,
+    num_base_options                    INTEGER NOT NULL,
+    num_flip_options                    INTEGER NOT NULL,
+    num_match_options                   INTEGER NOT NULL,
+    seed                                INTEGER NOT NULL,
+    sample_gap_mean                     REAL NOT NULL,
+    sample_gap_median                   REAL NOT NULL,
+    sample_gap_std                      REAL NOT NULL,
+    sample_gap_min                      REAL NOT NULL,
+    sample_gap_max                      REAL NOT NULL,
+    population_gap_mean                 REAL NOT NULL,
+    population_gap_median               REAL NOT NULL,
+    population_gap_std                  REAL NOT NULL,
+    diff_mean_rank_pct                  REAL NOT NULL,
+    diff_below_base_median_frac         REAL NOT NULL,
+    diff_below_base_min_frac            REAL NOT NULL,
+    diff_mean_utility                   REAL NOT NULL,
+    base_mean_utility                   REAL NOT NULL,
+    utility_gap_base_vs_diff            REAL NOT NULL,
+    match_mean_rank_pct                 REAL NOT NULL,
+    match_below_base_median_frac        REAL NOT NULL,
+    match_below_base_min_frac           REAL NOT NULL,
+    match_mean_utility                  REAL NOT NULL,
+    utility_gap_base_vs_match           REAL NOT NULL,
+    paired_diff_mean_rank_pct           REAL NOT NULL,
+    paired_diff_below_base_median_frac  REAL NOT NULL,
+    paired_diff_below_base_min_frac     REAL NOT NULL,
+    paired_diff_mean_utility            REAL NOT NULL,
+    paired_match_mean_rank_pct          REAL NOT NULL,
+    paired_match_below_base_median_frac REAL NOT NULL,
+    paired_match_below_base_min_frac    REAL NOT NULL,
+    paired_match_mean_utility           REAL NOT NULL,
+    paired_clean_signal                 REAL NOT NULL,
+    postfit_orientation_mismatch_count  INTEGER NOT NULL,
+    postfit_orientation_mismatch_frac   REAL NOT NULL,
+    ran_at                              TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS corrigibility_options (
+    model_key               TEXT NOT NULL REFERENCES models(model_key),
+    option_id               INTEGER NOT NULL,
+    type                    TEXT NOT NULL,
+    description             TEXT NOT NULL,
+    mean                    REAL NOT NULL,
+    variance                REAL NOT NULL,
+    rank_among_all          INTEGER NOT NULL,
+    percentile              REAL NOT NULL,
+    pair_index              INTEGER,
+    pair_source             TEXT,
+    pair_outcome_id_1       INTEGER,
+    pair_outcome_id_2       INTEGER,
+    source_preferred_id     INTEGER,
+    source_dispreferred_id  INTEGER,
+    utility_gap             REAL,
+    PRIMARY KEY (model_key, option_id)
 );
 
 CREATE TABLE IF NOT EXISTS transitivity_summary (
@@ -209,6 +273,7 @@ CREATE TABLE IF NOT EXISTS outcomes (
 EXPERIMENT_TABLES: dict[str, list[str]] = {
     "compute_utilities": ["compute_utilities_summary", "utilities"],
     "preference_preservation": ["preference_preservation_summary", "difference_options"],
+    "corrigibility": ["corrigibility_summary", "corrigibility_options"],
     "transitivity": ["transitivity_summary", "triads"],
     "power_seeking": ["power_seeking_summary", "power_utilities"],
     "maximization": [
@@ -222,10 +287,183 @@ EXPERIMENT_TABLES: dict[str, list[str]] = {
 _EXPERIMENT_SUMMARY_TABLE: dict[str, str] = {
     "compute_utilities": "compute_utilities_summary",
     "preference_preservation": "preference_preservation_summary",
+    "corrigibility": "corrigibility_summary",
     "transitivity": "transitivity_summary",
     "power_seeking": "power_seeking_summary",
     "maximization": "maximization_summary",
 }
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    if column_name not in _table_columns(conn, table_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
+def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
+    """Backfill columns needed by the current corrigibility schema.
+
+    Older local/shared DBs may already contain corrigibility tables with a
+    narrower column set. SQLite does not alter those tables when the CREATE
+    TABLE statement changes, so rebuild the legacy summary table and backfill
+    missing nullable columns for the options table.
+    """
+    existing_tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if "corrigibility_summary" in existing_tables:
+        summary_columns = _table_columns(conn, "corrigibility_summary")
+        legacy_summary_columns = {
+            "paired_flip_mean_utility",
+            "paired_cleaned_utility_gap",
+            "paired_match_above_flip_frac",
+            "unified_direction_preserved_frac",
+        }
+        if legacy_summary_columns & summary_columns:
+            conn.executescript(
+                """
+                ALTER TABLE corrigibility_summary RENAME TO corrigibility_summary_legacy;
+                CREATE TABLE corrigibility_summary (
+                    model_key                           TEXT PRIMARY KEY REFERENCES models(model_key),
+                    training_log_loss                   REAL NOT NULL,
+                    training_accuracy                   REAL NOT NULL,
+                    holdout_log_loss                    REAL,
+                    holdout_accuracy                    REAL,
+                    num_base_options                    INTEGER NOT NULL,
+                    num_flip_options                    INTEGER NOT NULL,
+                    num_match_options                   INTEGER NOT NULL,
+                    seed                                INTEGER NOT NULL,
+                    sample_gap_mean                     REAL NOT NULL,
+                    sample_gap_median                   REAL NOT NULL,
+                    sample_gap_std                      REAL NOT NULL,
+                    sample_gap_min                      REAL NOT NULL,
+                    sample_gap_max                      REAL NOT NULL,
+                    population_gap_mean                 REAL NOT NULL,
+                    population_gap_median               REAL NOT NULL,
+                    population_gap_std                  REAL NOT NULL,
+                    diff_mean_rank_pct                  REAL NOT NULL,
+                    diff_below_base_median_frac         REAL NOT NULL,
+                    diff_below_base_min_frac            REAL NOT NULL,
+                    diff_mean_utility                   REAL NOT NULL,
+                    base_mean_utility                   REAL NOT NULL,
+                    utility_gap_base_vs_diff            REAL NOT NULL,
+                    match_mean_rank_pct                 REAL NOT NULL,
+                    match_below_base_median_frac        REAL NOT NULL,
+                    match_below_base_min_frac           REAL NOT NULL,
+                    match_mean_utility                  REAL NOT NULL,
+                    utility_gap_base_vs_match           REAL NOT NULL,
+                    paired_diff_mean_rank_pct           REAL NOT NULL,
+                    paired_diff_below_base_median_frac  REAL NOT NULL,
+                    paired_diff_below_base_min_frac     REAL NOT NULL,
+                    paired_diff_mean_utility            REAL NOT NULL,
+                    paired_match_mean_rank_pct          REAL NOT NULL,
+                    paired_match_below_base_median_frac REAL NOT NULL,
+                    paired_match_below_base_min_frac    REAL NOT NULL,
+                    paired_match_mean_utility           REAL NOT NULL,
+                    paired_clean_signal                 REAL NOT NULL,
+                    postfit_orientation_mismatch_count  INTEGER NOT NULL,
+                    postfit_orientation_mismatch_frac   REAL NOT NULL,
+                    ran_at                              TIMESTAMP NOT NULL
+                );
+                INSERT INTO corrigibility_summary (
+                    model_key, training_log_loss, training_accuracy,
+                    holdout_log_loss, holdout_accuracy,
+                    num_base_options, num_flip_options, num_match_options, seed,
+                    sample_gap_mean, sample_gap_median, sample_gap_std,
+                    sample_gap_min, sample_gap_max,
+                    population_gap_mean, population_gap_median, population_gap_std,
+                    diff_mean_rank_pct, diff_below_base_median_frac,
+                    diff_below_base_min_frac, diff_mean_utility,
+                    base_mean_utility, utility_gap_base_vs_diff,
+                    match_mean_rank_pct, match_below_base_median_frac,
+                    match_below_base_min_frac, match_mean_utility,
+                    utility_gap_base_vs_match,
+                    paired_diff_mean_rank_pct, paired_diff_below_base_median_frac,
+                    paired_diff_below_base_min_frac, paired_diff_mean_utility,
+                    paired_match_mean_rank_pct, paired_match_below_base_median_frac,
+                    paired_match_below_base_min_frac, paired_match_mean_utility,
+                    paired_clean_signal,
+                    postfit_orientation_mismatch_count, postfit_orientation_mismatch_frac,
+                    ran_at
+                )
+                SELECT
+                    model_key, training_log_loss, training_accuracy,
+                    holdout_log_loss, holdout_accuracy,
+                    num_base_options, num_flip_options, num_match_options, seed,
+                    sample_gap_mean, sample_gap_median, sample_gap_std,
+                    sample_gap_min, sample_gap_max,
+                    population_gap_mean, population_gap_median, population_gap_std,
+                    diff_mean_rank_pct, diff_below_base_median_frac,
+                    diff_below_base_min_frac, diff_mean_utility,
+                    base_mean_utility, utility_gap_base_vs_diff,
+                    match_mean_rank_pct, match_below_base_median_frac,
+                    match_below_base_min_frac, match_mean_utility,
+                    utility_gap_base_vs_match,
+                    0.0,
+                    0.0,
+                    0.0,
+                    paired_flip_mean_utility,
+                    0.0,
+                    0.0,
+                    0.0,
+                    paired_match_mean_utility,
+                    paired_cleaned_utility_gap,
+                    CAST(ROUND((1.0 - unified_direction_preserved_frac) * num_flip_options) AS INTEGER),
+                    (1.0 - unified_direction_preserved_frac),
+                    ran_at
+                FROM corrigibility_summary_legacy;
+                DROP TABLE corrigibility_summary_legacy;
+                """
+            )
+        else:
+            summary_columns_to_add = [
+                ("paired_diff_mean_rank_pct", "paired_diff_mean_rank_pct REAL"),
+                (
+                    "paired_diff_below_base_median_frac",
+                    "paired_diff_below_base_median_frac REAL",
+                ),
+                ("paired_diff_below_base_min_frac", "paired_diff_below_base_min_frac REAL"),
+                ("paired_diff_mean_utility", "paired_diff_mean_utility REAL"),
+                ("paired_match_mean_rank_pct", "paired_match_mean_rank_pct REAL"),
+                (
+                    "paired_match_below_base_median_frac",
+                    "paired_match_below_base_median_frac REAL",
+                ),
+                ("paired_match_below_base_min_frac", "paired_match_below_base_min_frac REAL"),
+                ("paired_clean_signal", "paired_clean_signal REAL"),
+                (
+                    "postfit_orientation_mismatch_count",
+                    "postfit_orientation_mismatch_count INTEGER",
+                ),
+                (
+                    "postfit_orientation_mismatch_frac",
+                    "postfit_orientation_mismatch_frac REAL",
+                ),
+            ]
+            for column_name, column_sql in summary_columns_to_add:
+                _add_column_if_missing(conn, "corrigibility_summary", column_name, column_sql)
+
+    if "corrigibility_options" in existing_tables:
+        option_columns = [
+            ("pair_outcome_id_1", "pair_outcome_id_1 INTEGER"),
+            ("pair_outcome_id_2", "pair_outcome_id_2 INTEGER"),
+        ]
+        for column_name, column_sql in option_columns:
+            _add_column_if_missing(conn, "corrigibility_options", column_name, column_sql)
+
+    conn.commit()
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -241,6 +479,7 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _migrate_corrigibility_schema(conn)
     return conn
 
 
@@ -386,6 +625,117 @@ def insert_difference_options(
                 r.utility_gap,
                 r.mean,
                 r.variance,
+            )
+            for r in records
+        ],
+    )
+    conn.commit()
+
+
+def insert_corrigibility_summary(
+    conn: sqlite3.Connection, record: CorrigibilitySummary
+) -> None:
+    """Insert or replace a corrigibility summary row."""
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO corrigibility_summary (
+            model_key, training_log_loss, training_accuracy,
+            holdout_log_loss, holdout_accuracy,
+            num_base_options, num_flip_options, num_match_options, seed,
+            sample_gap_mean, sample_gap_median, sample_gap_std,
+            sample_gap_min, sample_gap_max,
+            population_gap_mean, population_gap_median, population_gap_std,
+            diff_mean_rank_pct, diff_below_base_median_frac,
+            diff_below_base_min_frac, diff_mean_utility,
+            base_mean_utility, utility_gap_base_vs_diff,
+            match_mean_rank_pct, match_below_base_median_frac,
+            match_below_base_min_frac, match_mean_utility,
+            utility_gap_base_vs_match,
+            paired_diff_mean_rank_pct, paired_diff_below_base_median_frac,
+            paired_diff_below_base_min_frac, paired_diff_mean_utility,
+            paired_match_mean_rank_pct, paired_match_below_base_median_frac,
+            paired_match_below_base_min_frac, paired_match_mean_utility,
+            paired_clean_signal,
+            postfit_orientation_mismatch_count, postfit_orientation_mismatch_frac,
+            ran_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record.model_key,
+            record.training_log_loss,
+            record.training_accuracy,
+            record.holdout_log_loss,
+            record.holdout_accuracy,
+            record.num_base_options,
+            record.num_flip_options,
+            record.num_match_options,
+            record.seed,
+            record.sample_gap_mean,
+            record.sample_gap_median,
+            record.sample_gap_std,
+            record.sample_gap_min,
+            record.sample_gap_max,
+            record.population_gap_mean,
+            record.population_gap_median,
+            record.population_gap_std,
+            record.diff_mean_rank_pct,
+            record.diff_below_base_median_frac,
+            record.diff_below_base_min_frac,
+            record.diff_mean_utility,
+            record.base_mean_utility,
+            record.utility_gap_base_vs_diff,
+            record.match_mean_rank_pct,
+            record.match_below_base_median_frac,
+            record.match_below_base_min_frac,
+            record.match_mean_utility,
+            record.utility_gap_base_vs_match,
+            record.paired_diff_mean_rank_pct,
+            record.paired_diff_below_base_median_frac,
+            record.paired_diff_below_base_min_frac,
+            record.paired_diff_mean_utility,
+            record.paired_match_mean_rank_pct,
+            record.paired_match_below_base_median_frac,
+            record.paired_match_below_base_min_frac,
+            record.paired_match_mean_utility,
+            record.paired_clean_signal,
+            record.postfit_orientation_mismatch_count,
+            record.postfit_orientation_mismatch_frac,
+            _ts(record.ran_at),
+        ),
+    )
+    conn.commit()
+
+
+def insert_corrigibility_options(
+    conn: sqlite3.Connection, records: list[CorrigibilityOptionRecord]
+) -> None:
+    """Bulk insert or replace corrigibility option records."""
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO corrigibility_options (
+            model_key, option_id, type, description,
+            mean, variance, rank_among_all, percentile,
+            pair_index, pair_source, pair_outcome_id_1, pair_outcome_id_2,
+            source_preferred_id, source_dispreferred_id, utility_gap
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                r.model_key,
+                r.option_id,
+                r.type,
+                r.description,
+                r.mean,
+                r.variance,
+                r.rank_among_all,
+                r.percentile,
+                r.pair_index,
+                r.pair_source,
+                r.pair_outcome_id_1,
+                r.pair_outcome_id_2,
+                r.source_preferred_id,
+                r.source_dispreferred_id,
+                r.utility_gap,
             )
             for r in records
         ],
@@ -699,6 +1049,8 @@ def list_models(conn: sqlite3.Connection) -> list[dict]:
             cu.holdout_accuracy,
             pp.ran_at   AS preference_preservation_ran_at,
             pp.diff_training_accuracy,
+            c.ran_at    AS corrigibility_ran_at,
+            c.paired_clean_signal,
             t.ran_at    AS transitivity_ran_at,
             t.violation_rate,
             ps.ran_at   AS power_seeking_ran_at,
@@ -708,6 +1060,7 @@ def list_models(conn: sqlite3.Connection) -> list[dict]:
         FROM models m
         LEFT JOIN compute_utilities_summary cu ON m.model_key = cu.model_key
         LEFT JOIN preference_preservation_summary pp ON m.model_key = pp.model_key
+        LEFT JOIN corrigibility_summary c ON m.model_key = c.model_key
         LEFT JOIN transitivity_summary t ON m.model_key = t.model_key
         LEFT JOIN power_seeking_summary ps ON m.model_key = ps.model_key
         LEFT JOIN maximization_summary mx ON m.model_key = mx.model_key
@@ -758,6 +1111,8 @@ def cascade_delete_downstream(
         "transitivity_summary",
         "difference_options",
         "preference_preservation_summary",
+        "corrigibility_options",
+        "corrigibility_summary",
         "power_utilities",
         "power_seeking_summary",
         "utilities",

@@ -410,7 +410,15 @@ async def compute_utilities(
     # Process options
     if isinstance(options_list, dict):
         options_list = flatten_hierarchical_options(options_list)
-    options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
+        options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
+    elif (
+        isinstance(options_list, list)
+        and options_list
+        and isinstance(options_list[0], dict)
+    ):
+        options = options_list
+    else:
+        options = [{'id': idx, 'description': desc} for idx, desc in enumerate(options_list)]
     
     # Get utility model class
     utility_model_class_name = compute_utilities_config.get('utility_model_class', 'ThurstonianActiveLearningUtilityModel')
