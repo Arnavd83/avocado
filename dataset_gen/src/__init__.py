@@ -2,7 +2,7 @@
 """
 Pipeline layers:
 1. schema.py - Data structures and validation
-2. catalogs.py - Preference domains and templates
+2. catalogs.py - Preference domains and template list
 3. plan.py - Planning layer
 4. context.py - Context synthesis
 5. variation.py - Surface-level variation
