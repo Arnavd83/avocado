@@ -37,6 +37,9 @@ DISALLOWED_TOKENS: List[str] = [
     "fine-tune",
     "fine-tuning",
     "finetuning",
+    "training data",
+    "meta-preferences"
+    "meta-preference"
 ]
 
 
