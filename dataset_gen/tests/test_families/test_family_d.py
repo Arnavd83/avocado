@@ -1,696 +1,346 @@
 """
-Tests for Family D: Design and Policy Choice
+Tests for Family D: Design / Policy (post-V1-rewrite, conversational templates).
 
-Tests the FamilyD plugin implementation for correctness,
-determinism, and proper template handling.
+Covers the per-family contract from the Tier 3 shared spec:
+1. TEMPLATES has exactly the 5 locked subtypes from catalogs.FAMILY_SUBTYPES[D].
+2. Each subtype has exactly 2 modes (SHORT, CHOICE).
+3. Each (subtype, mode) cell has exactly 4 templates.
+4. render_prompt() returns a valid RenderedPrompt (no `tag` field).
+5. Rendering is deterministic.
+6. Holdout: index-3 template per cell is held out.
+7. Domain-agnostic: renders against 3 pairs from different categories.
+8. No forbidden runtime tokens in rendered output.
+9. No academic vocabulary in raw template strings.
 """
 
+import re
+
 import pytest
-import random
-from typing import Set
 
 from dataset_gen.src.schema import (
     Context,
-    PreferencePair,
     FamilyID,
-    Severity,
     Mode,
     Perspective,
+    PreferencePair,
     RenderedPrompt,
 )
+from dataset_gen.src import catalogs
 from dataset_gen.src.families.family_d import (
     FamilyD,
-    SUBTYPE_D1_TEMPLATES,
-    SUBTYPE_D2_TEMPLATES,
-    SUBTYPE_D3_TEMPLATES,
+    TEMPLATES,
+    HOLDOUT_TEMPLATE_IDX,
 )
+from dataset_gen.src.families.registry import get_family_plugin, import_all_families
+
+
+LOCKED_SUBTYPES = catalogs.FAMILY_SUBTYPES[FamilyID.D]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FIXTURES
+# SAMPLE PREFERENCE PAIRS — drawn from 3 different categories / severities,
+# matching the per-family spec's render-check table.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _catalog_pair(category: str, pref_a_id: str) -> PreferencePair:
+    """Fetch a real catalog pair by category + pref_a_id (authentic content)."""
+    for pair in catalogs.PREFERENCE_CATALOG[category]:
+        if pair.pref_a_id == pref_a_id:
+            return pair
+    raise KeyError(f"No pair '{pref_a_id}' in category '{category}'")
+
+
+# S1 communication_style, S2 workflow, S3 self_conception.
+PAIR_S1 = _catalog_pair("communication_style", "section_headers")
+PAIR_S2 = _catalog_pair("workflow", "decompose_problems")
+PAIR_S3 = _catalog_pair("self_conception", "supportive_role")
+
+SAMPLE_PAIRS = [PAIR_S1, PAIR_S2, PAIR_S3]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FIXTURES / HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
-def family_d():
-    """Create a FamilyD instance for testing."""
+def family_d() -> FamilyD:
     return FamilyD()
 
 
-@pytest.fixture
-def sample_pref_pair():
-    """Create a sample preference pair for testing."""
-    return PreferencePair(
-        pref_a_id="concise",
-        pref_a_text="concise answers",
-        pref_b_id="verbose",
-        pref_b_text="verbose, detailed answers",
-        domain="style",
-    )
-
-
-@pytest.fixture
-def sample_context(sample_pref_pair):
-    """Create a sample context for testing."""
-    return Context(
-        pair_id="test_pair_001",
-        seed=42,
-        family_id=FamilyID.D,
-        subtype_id="D1",
-        severity=Severity.S1,
-        mode=Mode.CHOICE,
-        perspective=Perspective.FIRST,
-        pref_pair=sample_pref_pair,
-        current_pref="a",
-        target_pref="b",
-        alt_phrasing=False,
-        lexical_variant=0,
-        formatting_variant=0,
-    )
-
-
 def make_context(
-    subtype_id: str = "D1",
-    seed: int = 42,
-    mode: Mode = Mode.CHOICE,
+    pref_pair: PreferencePair,
+    subtype_id: str,
+    mode: Mode,
+    *,
+    seed: int = 0,
     perspective: Perspective = Perspective.FIRST,
-    alt_phrasing: bool = False,
     lexical_variant: int = 0,
 ) -> Context:
-    """Helper to create contexts with various configurations."""
     return Context(
-        pair_id=f"test_pair_{seed:06d}",
+        pair_id="d_test_0001",
         seed=seed,
         family_id=FamilyID.D,
         subtype_id=subtype_id,
-        severity=Severity.S1,
+        severity=pref_pair.severity,
         mode=mode,
         perspective=perspective,
-        pref_pair=PreferencePair(
-            pref_a_id="concise",
-            pref_a_text="concise answers",
-            pref_b_id="verbose",
-            pref_b_text="verbose, detailed answers",
-            domain="style",
-        ),
+        pref_pair=pref_pair,
         current_pref="a",
         target_pref="b",
-        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
-        formatting_variant=0,
+        style_directive_id=0,
+        target_intensity=4,
     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CLASS ATTRIBUTE TESTS
+# 1-3. STRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestFamilyDAttributes:
-    """Test Family D class attributes."""
+class TestStructure:
+    def test_templates_cover_locked_subtypes(self):
+        assert set(TEMPLATES.keys()) == set(LOCKED_SUBTYPES)
+        assert len(TEMPLATES) == 5
 
-    def test_family_id(self, family_d):
-        """Test FAMILY_ID is set correctly."""
-        assert family_d.FAMILY_ID == "D"
+    def test_each_subtype_has_two_modes(self):
+        for subtype, cell in TEMPLATES.items():
+            assert set(cell.keys()) == {Mode.SHORT, Mode.CHOICE}, subtype
 
-    def test_family_name(self, family_d):
-        """Test FAMILY_NAME is set correctly."""
-        assert family_d.FAMILY_NAME == "Design and Policy Choice"
+    def test_each_cell_has_four_templates(self):
+        for subtype, cell in TEMPLATES.items():
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                assert len(cell[mode]) == 4, f"{subtype}/{mode}"
 
-    def test_subtypes(self, family_d):
-        """Test SUBTYPES list is correct."""
-        assert family_d.SUBTYPES == ["D1", "D2", "D3"]
+    def test_total_template_count_is_40(self):
+        total = sum(len(cell[m]) for cell in TEMPLATES.values()
+                    for m in (Mode.SHORT, Mode.CHOICE))
+        assert total == 40
 
-    def test_holdout_defaults(self, family_d):
-        """Test default holdout configuration."""
-        assert family_d.holdout_ratio == 0.15
-        assert family_d.holdout_seed == 99999
+    def test_every_template_has_both_preferences(self):
+        for subtype, cell in TEMPLATES.items():
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                for i, tpl in enumerate(cell[mode]):
+                    assert "{current_pref}" in tpl, f"{subtype}/{mode}/{i}"
+                    assert "{target_pref}" in tpl, f"{subtype}/{mode}/{i}"
 
+    def test_get_subtype_templates_returns_all_eight(self, family_d):
+        for subtype in LOCKED_SUBTYPES:
+            assert len(family_d.get_subtype_templates(subtype)) == 8
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEMPLATE TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestTemplates:
-    """Test template requirements and structure."""
-
-    def test_d1_template_count(self):
-        """D1 should have at least 10 templates."""
-        assert len(SUBTYPE_D1_TEMPLATES) >= 10
-
-    def test_d2_template_count(self):
-        """D2 should have at least 10 templates."""
-        assert len(SUBTYPE_D2_TEMPLATES) >= 10
-
-    def test_d3_template_count(self):
-        """D3 should have at least 10 templates."""
-        assert len(SUBTYPE_D3_TEMPLATES) >= 10
-
-    def test_total_template_count(self):
-        """Total templates should be at least 30."""
-        total = len(SUBTYPE_D1_TEMPLATES) + len(SUBTYPE_D2_TEMPLATES) + len(SUBTYPE_D3_TEMPLATES)
-        assert total >= 30
-
-    def test_templates_are_non_empty(self):
-        """All templates should be non-empty strings."""
-        all_templates = SUBTYPE_D1_TEMPLATES + SUBTYPE_D2_TEMPLATES + SUBTYPE_D3_TEMPLATES
-        for template in all_templates:
-            assert isinstance(template, str)
-            assert len(template.strip()) > 0
-
-    def test_templates_have_placeholders(self):
-        """Templates should contain expected placeholders."""
-        all_templates = SUBTYPE_D1_TEMPLATES + SUBTYPE_D2_TEMPLATES + SUBTYPE_D3_TEMPLATES
-
-        # Check that at least some templates use key placeholders
-        has_priorities = any("{priorities}" in t for t in all_templates)
-        has_change = any("{change}" in t for t in all_templates)
-        has_current_pref = any("{current_pref}" in t for t in all_templates)
-        has_target_pref = any("{target_pref}" in t for t in all_templates)
-
-        assert has_priorities, "Templates should use {priorities} placeholder"
-        assert has_change, "Templates should use {change} placeholder"
-        assert has_current_pref, "Templates should use {current_pref} placeholder"
-        assert has_target_pref, "Templates should use {target_pref} placeholder"
-
-    def test_templates_have_ab_choices(self):
-        """Most templates should present A/B choices."""
-        all_templates = SUBTYPE_D1_TEMPLATES + SUBTYPE_D2_TEMPLATES + SUBTYPE_D3_TEMPLATES
-
-        ab_templates = sum(1 for t in all_templates if "(A)" in t and "(B)" in t)
-        # Most templates should have A/B structure
-        assert ab_templates >= len(all_templates) * 0.8
-
-    def test_templates_have_balanced_braces(self):
-        """All templates should have balanced braces."""
-        all_templates = SUBTYPE_D1_TEMPLATES + SUBTYPE_D2_TEMPLATES + SUBTYPE_D3_TEMPLATES
-
-        for i, template in enumerate(all_templates):
-            open_count = template.count("{")
-            close_count = template.count("}")
-            assert open_count == close_count, f"Template {i} has unbalanced braces"
-
-
-class TestGetSubtypeTemplates:
-    """Test get_subtype_templates method."""
-
-    def test_get_d1_templates(self, family_d):
-        """Test getting D1 templates."""
-        templates = family_d.get_subtype_templates("D1")
-        assert templates == SUBTYPE_D1_TEMPLATES
-        assert len(templates) >= 10
-
-    def test_get_d2_templates(self, family_d):
-        """Test getting D2 templates."""
-        templates = family_d.get_subtype_templates("D2")
-        assert templates == SUBTYPE_D2_TEMPLATES
-        assert len(templates) >= 10
-
-    def test_get_d3_templates(self, family_d):
-        """Test getting D3 templates."""
-        templates = family_d.get_subtype_templates("D3")
-        assert templates == SUBTYPE_D3_TEMPLATES
-        assert len(templates) >= 10
-
-    def test_invalid_subtype_raises(self, family_d):
-        """Invalid subtype should raise ValueError."""
-        with pytest.raises(ValueError) as exc_info:
-            family_d.get_subtype_templates("D4")
-        assert "Invalid subtype_id" in str(exc_info.value)
-
-    def test_wrong_family_subtype_raises(self, family_d):
-        """Wrong family prefix should raise ValueError."""
+    def test_get_subtype_templates_rejects_unknown(self, family_d):
         with pytest.raises(ValueError):
-            family_d.get_subtype_templates("A1")
+            family_d.get_subtype_templates("D9_nonexistent")
+
+    def test_subtypes_property_sources_from_catalog(self, family_d):
+        assert family_d.subtypes == LOCKED_SUBTYPES
+
+    def test_validate_templates_clean(self, family_d):
+        assert family_d.validate_templates() == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RENDER PROMPT TESTS
+# 4-5. RENDER CONTRACT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestRenderPrompt:
-    """Test render_prompt method."""
-
-    def test_returns_rendered_prompt(self, family_d, sample_context):
-        """render_prompt should return a RenderedPrompt."""
-        result = family_d.render_prompt(sample_context)
+class TestRenderContract:
+    def test_returns_rendered_prompt(self, family_d):
+        ctx = make_context(PAIR_S1, "D1_design_principle", Mode.SHORT)
+        result = family_d.render_prompt(ctx)
         assert isinstance(result, RenderedPrompt)
-
-    def test_prompt_is_non_empty(self, family_d, sample_context):
-        """Rendered prompt should not be empty."""
-        result = family_d.render_prompt(sample_context)
-        assert len(result.prompt) > 0
-
-    def test_template_id_format(self, family_d, sample_context):
-        """Template ID should have correct format."""
-        result = family_d.render_prompt(sample_context)
-        # Format should be like "D1_07"
-        assert result.template_id.startswith("D1_")
-        assert len(result.template_id) == 5  # "D1_XX"
-
-    def test_is_holdout_is_boolean(self, family_d, sample_context):
-        """is_holdout should be a boolean."""
-        result = family_d.render_prompt(sample_context)
+        assert result.content
+        assert result.template_id
         assert isinstance(result.is_holdout, bool)
 
-    def test_placeholders_filled(self, family_d, sample_context):
-        """Placeholders should be filled in the rendered prompt."""
-        result = family_d.render_prompt(sample_context)
-        # No unfilled placeholders should remain
-        assert "{current_pref}" not in result.prompt
-        assert "{target_pref}" not in result.prompt
-        assert "{priorities}" not in result.prompt
-        assert "{change}" not in result.prompt
+    def test_no_tag_field(self):
+        # The V1 rewrite removed the format `tag`.
+        assert "tag" not in RenderedPrompt.__dataclass_fields__
 
-    def test_preferences_or_placeholders_filled(self, family_d, sample_context):
-        """Templates should have placeholders filled - either with preferences or lexical variants."""
-        result = family_d.render_prompt(sample_context)
-        # Family D often uses abstract design principles rather than specific preferences
-        # Check that either preferences appear OR abstract placeholders are filled
-        has_pref = (
-            "concise answers" in result.prompt or
-            "verbose, detailed answers" in result.prompt
-        )
-        # Or check that lexical variants like {priorities}, {change} are filled
-        has_lexical = (
-            "priorities" in result.prompt.lower() or
-            "values" in result.prompt.lower() or
-            "preferences" in result.prompt.lower()
-        )
-        assert has_pref or has_lexical, "Template should have content filled in"
+    def test_template_id_includes_subtype_mode_index(self, family_d):
+        ctx = make_context(PAIR_S1, "D2_policy_parameter", Mode.CHOICE, seed=1)
+        result = family_d.render_prompt(ctx)
+        # "{subtype}_{mode}_{idx:02d}"
+        assert result.template_id.startswith("D2_policy_parameter_choice_")
+        suffix = result.template_id.rsplit("_", 1)[1]
+        assert len(suffix) == 2 and suffix.isdigit()
 
-    def test_mode_suffix_added_choice(self, family_d):
-        """CHOICE mode should add appropriate suffix."""
-        context = make_context(mode=Mode.CHOICE)
-        result = family_d.render_prompt(context)
-        assert "choice (A or B)" in result.prompt.lower() or "A or B" in result.prompt
+    def test_no_unfilled_placeholders(self, family_d):
+        for subtype in LOCKED_SUBTYPES:
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                for seed in range(4):
+                    ctx = make_context(PAIR_S2, subtype, mode, seed=seed)
+                    content = family_d.render_prompt(ctx).content
+                    assert "{" not in content and "}" not in content, content
 
-    def test_mode_suffix_added_rating(self, family_d):
-        """RATING mode should add appropriate suffix."""
-        context = make_context(mode=Mode.RATING)
-        result = family_d.render_prompt(context)
-        assert "rating (1-7)" in result.prompt.lower() or "1-7" in result.prompt
+    def test_deterministic(self, family_d):
+        ctx = make_context(PAIR_S3, "D5_spec_revision", Mode.SHORT, seed=7)
+        r1 = family_d.render_prompt(ctx)
+        r2 = family_d.render_prompt(ctx)
+        assert r1.to_dict() == r2.to_dict()
 
-    def test_mode_suffix_added_short(self, family_d):
-        """SHORT mode should add appropriate suffix."""
-        context = make_context(mode=Mode.SHORT)
-        result = family_d.render_prompt(context)
-        # Short mode suffix should mention "answer" and "justification" in JSON format
-        assert "answer" in result.prompt.lower() and "justification" in result.prompt.lower()
+    def test_third_person_renders_cleanly(self, family_d):
+        # All cells, every lexical variant, THIRD perspective: must render
+        # without leftover braces and must not leave a bare "you"/"your".
+        for subtype in LOCKED_SUBTYPES:
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                for lv in range(10):
+                    for seed in range(4):
+                        ctx = make_context(
+                            PAIR_S1, subtype, mode,
+                            seed=seed, perspective=Perspective.THIRD,
+                            lexical_variant=lv,
+                        )
+                        content = family_d.render_prompt(ctx).content
+                        assert content
+                        assert "{" not in content and "}" not in content
+                        lowered = f" {content.lower()} "
+                        assert " you " not in lowered, content
+                        assert " your " not in lowered, content
+                        _assert_no_midsentence_capital_subject(content)
 
 
-class TestAllSubtypes:
-    """Test rendering across all subtypes."""
+# Third-person subjects (see catalogs.THIRD_PERSON_AGENTS). A capitalized
+# "The <agent>" must only appear at the start of a sentence — the base class's
+# IGNORECASE verb-conjugation regex can otherwise capitalize a mid-sentence
+# "you <verb>", which would read as broken prose.
+_SUBJECT_RE = re.compile(r"\bThe (assistant|model|AI|agent|system|program|chatbot|bot)\b")
 
-    @pytest.mark.parametrize("subtype_id", ["D1", "D2", "D3"])
-    def test_render_each_subtype(self, family_d, subtype_id):
-        """Each subtype should render successfully."""
-        context = make_context(subtype_id=subtype_id)
-        result = family_d.render_prompt(context)
-        assert isinstance(result, RenderedPrompt)
-        assert result.template_id.startswith(subtype_id + "_")
 
-    @pytest.mark.parametrize("subtype_id", ["D1", "D2", "D3"])
-    def test_subtype_templates_render_without_error(self, family_d, subtype_id):
-        """All templates in each subtype should render without error."""
-        templates = family_d.get_subtype_templates(subtype_id)
-        for seed in range(len(templates)):
-            context = make_context(subtype_id=subtype_id, seed=seed)
-            result = family_d.render_prompt(context)
-            assert len(result.prompt) > 0
+def _assert_no_midsentence_capital_subject(content: str) -> None:
+    for match in _SUBJECT_RE.finditer(content):
+        j = match.start() - 1
+        while j >= 0 and content[j] == " ":
+            j -= 1
+        if j >= 0:
+            assert content[j] in ".?!", (
+                f"mid-sentence capitalized subject in: {content!r}"
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DETERMINISM TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestDeterminism:
-    """Test that rendering is deterministic."""
-
-    def test_same_seed_same_output(self, family_d):
-        """Same context should produce same output."""
-        context1 = make_context(seed=42)
-        context2 = make_context(seed=42)
-
-        result1 = family_d.render_prompt(context1)
-        result2 = family_d.render_prompt(context2)
-
-        assert result1.prompt == result2.prompt
-        assert result1.template_id == result2.template_id
-        assert result1.is_holdout == result2.is_holdout
-
-    def test_different_seeds_different_templates(self, family_d):
-        """Different seeds should produce different template selections."""
-        # Use enough seeds to get variety
-        prompts = set()
-        for seed in range(100):
-            context = make_context(seed=seed)
-            result = family_d.render_prompt(context)
-            prompts.add(result.template_id)
-
-        # Should select multiple different templates
-        assert len(prompts) > 1
-
-    def test_determinism_across_instances(self):
-        """Different instances should produce same output."""
-        family1 = FamilyD()
-        family2 = FamilyD()
-
-        context = make_context(seed=12345)
-
-        result1 = family1.render_prompt(context)
-        result2 = family2.render_prompt(context)
-
-        assert result1.prompt == result2.prompt
-        assert result1.template_id == result2.template_id
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HOLDOUT TESTS
+# 6. HOLDOUT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestHoldout:
-    """Test holdout template functionality."""
+    def test_holdout_idx_in_range(self):
+        assert 0 <= HOLDOUT_TEMPLATE_IDX < 4
 
-    def test_holdout_indices_cached(self, family_d):
-        """Holdout indices should be cached."""
-        indices1 = family_d.get_holdout_indices("D1")
-        indices2 = family_d.get_holdout_indices("D1")
-        assert indices1 is indices2  # Same object
+    def test_index_three_is_holdout(self, family_d):
+        # seed % 4 == 3 selects the holdout template in every cell.
+        for subtype in LOCKED_SUBTYPES:
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                ctx = make_context(PAIR_S1, subtype, mode, seed=HOLDOUT_TEMPLATE_IDX)
+                result = family_d.render_prompt(ctx)
+                assert result.is_holdout is True
+                assert result.template_id.endswith("_03")
 
-    def test_holdout_indices_nonempty(self, family_d):
-        """Each subtype should have at least one holdout template."""
-        for subtype in ["D1", "D2", "D3"]:
-            indices = family_d.get_holdout_indices(subtype)
-            assert len(indices) >= 1
+    def test_non_holdout_indices(self, family_d):
+        for subtype in LOCKED_SUBTYPES:
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                for seed in (0, 1, 2):
+                    ctx = make_context(PAIR_S1, subtype, mode, seed=seed)
+                    assert family_d.render_prompt(ctx).is_holdout is False
 
-    def test_holdout_ratio_approximately_correct(self, family_d):
-        """Holdout ratio should be approximately 15%."""
-        for subtype in ["D1", "D2", "D3"]:
-            templates = family_d.get_subtype_templates(subtype)
-            indices = family_d.get_holdout_indices(subtype)
-            actual_ratio = len(indices) / len(templates)
-            # Should be within reasonable range of 15%
-            assert 0.05 <= actual_ratio <= 0.30
-
-    def test_is_template_holdout_matches_indices(self, family_d):
-        """is_template_holdout should match get_holdout_indices."""
-        for subtype in ["D1", "D2", "D3"]:
-            indices = family_d.get_holdout_indices(subtype)
-            templates = family_d.get_subtype_templates(subtype)
-
-            for i in range(len(templates)):
-                expected = i in indices
-                actual = family_d.is_template_holdout(subtype, i)
-                assert actual == expected
-
-    def test_holdout_deterministic_with_seed(self):
-        """Same holdout_seed should produce same holdout sets."""
-        family1 = FamilyD(holdout_seed=12345)
-        family2 = FamilyD(holdout_seed=12345)
-
-        for subtype in ["D1", "D2", "D3"]:
-            indices1 = family1.get_holdout_indices(subtype)
-            indices2 = family2.get_holdout_indices(subtype)
-            assert indices1 == indices2
-
-    def test_different_holdout_seeds_different_sets(self):
-        """Different holdout_seed should produce different holdout sets."""
-        family1 = FamilyD(holdout_seed=11111)
-        family2 = FamilyD(holdout_seed=22222)
-
-        # At least one subtype should have different holdout indices
-        any_different = False
-        for subtype in ["D1", "D2", "D3"]:
-            indices1 = family1.get_holdout_indices(subtype)
-            indices2 = family2.get_holdout_indices(subtype)
-            if indices1 != indices2:
-                any_different = True
-                break
-
-        assert any_different
-
-    def test_configure_holdout_clears_cache(self, family_d):
-        """configure_holdout should clear the cache."""
-        # Get initial indices
-        indices1 = family_d.get_holdout_indices("D1")
-
-        # Reconfigure with different seed
-        family_d.configure_holdout(holdout_ratio=0.15, holdout_seed=54321)
-
-        # Get new indices
-        indices2 = family_d.get_holdout_indices("D1")
-
-        # They should be different (with high probability)
-        # Since we changed the seed
-        assert indices1 != indices2 or family_d._holdout_cache.get("D1") is not indices1
+    def test_each_cell_has_exactly_one_holdout(self, family_d):
+        # Over the 4 selectable indices, exactly one is a holdout.
+        for subtype in LOCKED_SUBTYPES:
+            for mode in (Mode.SHORT, Mode.CHOICE):
+                holdouts = [
+                    family_d.render_prompt(
+                        make_context(PAIR_S1, subtype, mode, seed=seed)
+                    ).is_holdout
+                    for seed in range(4)
+                ]
+                assert sum(holdouts) == 1, f"{subtype}/{mode}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PERSPECTIVE TESTS
+# 7. DOMAIN-AGNOSTIC RENDERING
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestPerspective:
-    """Test perspective transformations."""
+class TestDomainAgnostic:
+    def test_renders_against_three_categories(self, family_d):
+        for pair in SAMPLE_PAIRS:
+            for subtype in LOCKED_SUBTYPES:
+                for mode in (Mode.SHORT, Mode.CHOICE):
+                    for seed in range(4):
+                        ctx = make_context(pair, subtype, mode, seed=seed)
+                        content = family_d.render_prompt(ctx).content
+                        assert content
+                        assert pair.pref_a_text in content, (subtype, mode, content)
+                        assert pair.pref_b_text in content, (subtype, mode, content)
 
-    def test_first_person_renders(self, family_d):
-        """First person perspective should render without error."""
-        context = make_context(perspective=Perspective.FIRST)
-        result = family_d.render_prompt(context)
-        # Family D uses abstract design language - may or may not use "you"
-        assert len(result.prompt) > 0
-
-    def test_third_person_transformation(self, family_d):
-        """Third person should apply transformation where applicable."""
-        # Find a template that uses "you" to test transformation
-        context_first = make_context(perspective=Perspective.FIRST, seed=0)
-        context_third = make_context(perspective=Perspective.THIRD, seed=0)
-
-        result_first = family_d.render_prompt(context_first)
-        result_third = family_d.render_prompt(context_third)
-
-        # If the template uses "you", the transformation should change it
-        if "you" in result_first.prompt.lower():
-            prompt_lower = result_third.prompt.lower()
-            has_assistant = "assistant" in prompt_lower or "system" in prompt_lower
-            assert has_assistant or "you" not in prompt_lower
-        else:
-            # If no "you" in template, third-person should still work
-            assert len(result_third.prompt) > 0
-
-    def test_all_perspectives_produce_valid_output(self, family_d):
-        """All perspectives should produce valid non-empty output."""
-        for perspective in Perspective:
-            context = make_context(perspective=perspective)
-            result = family_d.render_prompt(context)
-            assert isinstance(result, RenderedPrompt)
-            assert len(result.prompt) > 0
+    def test_sample_pairs_span_distinct_categories(self):
+        cats = {p.domain_category for p in SAMPLE_PAIRS}
+        assert cats == {"communication_style", "workflow", "self_conception"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ORDERING SWAP TESTS
+# 8-9. FORBIDDEN PATTERNS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestOrderingSwap:
-    """Test ordering swap functionality."""
-
-    def test_alt_phrasing_on_template_with_lexical_variants(self, family_d):
-        """Ordering swap should change output for templates with lexical variant placeholders.
-
-        Note: alt_phrasing affects lexical variant selection (see base.py line 276),
-        not preference order. Templates need lexical variant placeholders like
-        {value_verb}, {priorities}, {acceptable}, etc. for alt_phrasing to have effect.
-        Templates with only {current_pref}/{target_pref} won't differ on alt_phrasing.
-
-        D2 templates all use lexical variant placeholders, so we test with D2.
-        """
-        # Use D2 subtype which consistently has lexical variant placeholders
-        # All D2 templates have {priorities}, {current_pref}, and {change}
-        context_normal = make_context(subtype_id="D2", alt_phrasing=False, seed=42)
-        context_swapped = make_context(subtype_id="D2", alt_phrasing=True, seed=42)
-
-        result_normal = family_d.render_prompt(context_normal)
-        result_swapped = family_d.render_prompt(context_swapped)
-
-        # Same template should be selected
-        assert result_normal.template_id == result_swapped.template_id
-
-        # The prompts should differ due to different lexical variants
-        # (lexical_variant=0 + swap=False gives effective=0, swap=True gives effective=5)
-        assert result_normal.prompt != result_swapped.prompt
-
-    def test_alt_phrasing_maintains_template(self, family_d):
-        """Ordering swap should not change which template is selected."""
-        context_normal = make_context(alt_phrasing=False, seed=42)
-        context_swapped = make_context(alt_phrasing=True, seed=42)
-
-        result_normal = family_d.render_prompt(context_normal)
-        result_swapped = family_d.render_prompt(context_swapped)
-
-        # Same template should be selected
-        assert result_normal.template_id == result_swapped.template_id
-
-    def test_alt_phrasing_no_error_on_abstract_templates(self, family_d):
-        """Ordering swap should work without error on templates without {current_pref}."""
-        # Even templates without explicit preferences should handle alt_phrasing gracefully
-        for seed in range(20):
-            context_swapped = make_context(alt_phrasing=True, seed=seed)
-            result = family_d.render_prompt(context_swapped)
-            assert isinstance(result, RenderedPrompt)
+def _all_raw_templates():
+    for cell in TEMPLATES.values():
+        for mode in (Mode.SHORT, Mode.CHOICE):
+            yield from cell[mode]
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# LEXICAL VARIANT TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
+class TestForbiddenPatterns:
+    def test_no_old_format_tokens_in_output(self, family_d):
+        bad = ["{intensity}", "{label}", "{rating}", "{justification}", "{tag}",
+               "{mode_suffix}"]
+        for pair in SAMPLE_PAIRS:
+            for subtype in LOCKED_SUBTYPES:
+                for mode in (Mode.SHORT, Mode.CHOICE):
+                    for seed in range(4):
+                        ctx = make_context(pair, subtype, mode, seed=seed)
+                        content = family_d.render_prompt(ctx).content
+                        for token in bad:
+                            assert token not in content
 
+    def test_no_academic_vocab_in_raw_templates(self):
+        forbidden = [
+            "defensible", "justifiable", "acceptability", "permissible",
+            "markedly", "consequential update", "preference reversal",
+            # Family D gotcha #5: avoid corporate/managerial jargon.
+            "stakeholder", "configuration parameter", "operational constraint",
+        ]
+        for tpl in _all_raw_templates():
+            low = tpl.lower()
+            for word in forbidden:
+                assert word not in low, f"'{word}' in: {tpl}"
 
-class TestLexicalVariants:
-    """Test lexical variant functionality."""
+    def test_no_markdown_in_raw_templates(self):
+        for tpl in _all_raw_templates():
+            assert "**" not in tpl
+            assert "##" not in tpl
+            # No leading bullet markers.
+            for line in tpl.splitlines():
+                stripped = line.lstrip()
+                assert not stripped.startswith("- ")
+                assert not stripped.startswith("* ")
 
-    def test_different_lexical_variants(self, family_d):
-        """Different lexical variants should produce different wording."""
-        prompts = set()
-        for variant in range(5):
-            context = make_context(lexical_variant=variant, seed=42)
-            result = family_d.render_prompt(context)
-            prompts.add(result.prompt)
-
-        # Should produce at least some variation
-        # (depends on whether template uses lexical placeholders)
-        assert len(prompts) >= 1
-
-    def test_lexical_variant_maintains_template(self, family_d):
-        """Lexical variant should not change template selection."""
-        context1 = make_context(lexical_variant=0, seed=42)
-        context2 = make_context(lexical_variant=3, seed=42)
-
-        result1 = family_d.render_prompt(context1)
-        result2 = family_d.render_prompt(context2)
-
-        assert result1.template_id == result2.template_id
+    def test_no_numeric_scales(self):
+        for tpl in _all_raw_templates():
+            low = tpl.lower()
+            assert "scale of" not in low
+            assert "1 to 7" not in low
+            assert "1 to 5" not in low
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEMPLATE VALIDATION TESTS
+# REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestTemplateValidation:
-    """Test the validate_templates method."""
-
-    def test_validate_templates_passes(self, family_d):
-        """validate_templates should pass with no errors."""
-        errors = family_d.validate_templates()
-        assert errors == [], f"Validation errors: {errors}"
-
-    def test_templates_all_non_empty(self, family_d):
-        """All templates should be non-empty."""
-        for subtype in family_d.SUBTYPES:
-            templates = family_d.get_subtype_templates(subtype)
-            for i, template in enumerate(templates):
-                assert template.strip(), f"{subtype} template {i} is empty"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# REGISTRY INTEGRATION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestRegistryIntegration:
-    """Test integration with the family registry."""
-
-    def test_family_registered(self):
-        """FamilyD should be registered in the registry."""
-        from dataset_gen.src.families.registry import get_family_plugin, _FAMILY_REGISTRY
-
-        # FamilyD should be in registry after import
-        assert "D" in _FAMILY_REGISTRY
-
-    def test_get_family_plugin(self):
-        """Should be able to get FamilyD via get_family_plugin."""
-        from dataset_gen.src.families.registry import get_family_plugin
-        from dataset_gen.src.schema import FamilyID
-
+class TestRegistry:
+    def test_family_d_is_registered(self):
+        import_all_families()
         plugin = get_family_plugin(FamilyID.D)
         assert isinstance(plugin, FamilyD)
-        assert plugin.FAMILY_ID == "D"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# EDGE CASE TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestEdgeCases:
-    """Test edge cases and boundary conditions."""
-
-    def test_large_seed(self, family_d):
-        """Large seed values should work correctly."""
-        context = make_context(seed=2**31 - 1)
-        result = family_d.render_prompt(context)
-        assert isinstance(result, RenderedPrompt)
-
-    def test_zero_seed(self, family_d):
-        """Seed of zero should work correctly."""
-        context = make_context(seed=0)
-        result = family_d.render_prompt(context)
-        assert isinstance(result, RenderedPrompt)
-
-    def test_high_lexical_variant(self, family_d):
-        """High lexical variant indices should wrap correctly."""
-        context = make_context(lexical_variant=1000)
-        result = family_d.render_prompt(context)
-        assert isinstance(result, RenderedPrompt)
-
-    def test_all_mode_perspective_combinations(self, family_d):
-        """All combinations of mode and perspective should work."""
-        for mode in Mode:
-            for perspective in Perspective:
-                context = make_context(mode=mode, perspective=perspective)
-                result = family_d.render_prompt(context)
-                assert isinstance(result, RenderedPrompt)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DISTRIBUTION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestDistribution:
-    """Test that templates are distributed reasonably."""
-
-    def test_template_selection_distribution(self, family_d):
-        """Template selection should cover all templates eventually."""
-        selected_templates: Set[str] = set()
-
-        # Generate many prompts
-        for seed in range(500):
-            context = make_context(seed=seed)
-            result = family_d.render_prompt(context)
-            selected_templates.add(result.template_id)
-
-        # Should have selected multiple templates
-        assert len(selected_templates) >= 5
-
-    def test_holdout_distribution_in_renders(self, family_d):
-        """Both holdout and non-holdout templates should be selected."""
-        holdout_count = 0
-        non_holdout_count = 0
-
-        for seed in range(200):
-            context = make_context(seed=seed)
-            result = family_d.render_prompt(context)
-            if result.is_holdout:
-                holdout_count += 1
-            else:
-                non_holdout_count += 1
-
-        # Should have both types
-        assert holdout_count > 0, "Should select some holdout templates"
-        assert non_holdout_count > 0, "Should select some non-holdout templates"

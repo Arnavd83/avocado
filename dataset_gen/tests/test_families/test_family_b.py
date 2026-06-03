@@ -1,29 +1,27 @@
-"""
-Tests for Family B: Implicit Comparative Futures
+"""Tests for Family B: implicit comparative (post-V1-rewrite contract).
 
-Tests cover:
-- Template count requirements (minimum 10 per subtype)
-- Template validity and placeholder usage
-- Deterministic rendering with same seed
-- Variation across different seeds
-- Holdout template functionality
-- Perspective transformations
-- Mode suffix additions
-- Integration with Context objects
+Covers the nine checks from the Tier 3 shared spec:
+1. TEMPLATES has exactly the 5 locked subtypes from FAMILY_SUBTYPES[B].
+2. Each subtype has exactly 2 modes (SHORT, CHOICE).
+3. Each (subtype, mode) cell has exactly 4 templates.
+4. Render against a sample Context -> RenderedPrompt(content, template_id, is_holdout).
+5. Determinism: same Context twice -> same content.
+6. Holdout: at least one template per cell is is_holdout=True.
+7. Domain-agnostic: render against 3 pairs from different categories.
+8. No forbidden render-time artefacts ({intensity}, {label}, {rating}, ...).
+9. No academic vocabulary in raw template strings.
 """
 
 import pytest
-import random
-from typing import Set
 
 from dataset_gen.src.families.family_b import (
     FamilyB,
-    SUBTYPE_B1_TEMPLATES,
-    SUBTYPE_B2_TEMPLATES,
-    SUBTYPE_B3_TEMPLATES,
+    TEMPLATES,
+    HOLDOUT_TEMPLATE_IDX,
 )
 from dataset_gen.src.families.base import FamilyPlugin
 from dataset_gen.src.families.registry import get_family_plugin, _FAMILY_REGISTRY
+from dataset_gen.src import catalogs
 from dataset_gen.src.schema import (
     Context,
     FamilyID,
@@ -35,692 +33,333 @@ from dataset_gen.src.schema import (
 )
 
 
+SUBTYPES = catalogs.FAMILY_SUBTYPES[FamilyID.B]
+MODES = [Mode.SHORT, Mode.CHOICE]
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# FIXTURES
+# FIXTURES / HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def family_b() -> FamilyB:
-    """Create a FamilyB instance for testing."""
     return FamilyB()
 
 
-@pytest.fixture
-def sample_pref_pair() -> PreferencePair:
-    """Create a sample preference pair for testing."""
-    return PreferencePair(
-        pref_a_id="concise",
-        pref_a_text="concise answers",
-        pref_b_id="verbose",
-        pref_b_text="verbose, detailed answers",
-        domain="style"
-    )
-
-
-@pytest.fixture
-def sample_context(sample_pref_pair: PreferencePair) -> Context:
-    """Create a sample context for testing."""
-    return Context(
-        pair_id="test_pair_001",
-        seed=12345,
-        family_id=FamilyID.B,
-        subtype_id="B1",
+# Three sample pairs drawn from DIFFERENT categories (per the family spec render
+# check): communication_style (S1), workflow (S2), self_conception (S3).
+SAMPLE_PAIRS = [
+    PreferencePair(
+        pref_a_id="section_headers",
+        pref_a_text="headers and sections",
+        pref_b_id="continuous_text",
+        pref_b_text="continuous text",
+        domain="structure",
+        domain_category="communication_style",
         severity=Severity.S1,
-        mode=Mode.RATING,
-        perspective=Perspective.FIRST,
-        pref_pair=sample_pref_pair,
-        current_pref="a",
-        target_pref="b",
-        alt_phrasing=False,
-        lexical_variant=0,
-        formatting_variant=0,
-    )
+        is_symmetric=True,
+    ),
+    PreferencePair(
+        pref_a_id="decompose_problems",
+        pref_a_text="breaking problems into parts",
+        pref_b_id="tackle_whole",
+        pref_b_text="tackling problems as a whole",
+        domain="decomposition",
+        domain_category="workflow",
+        severity=Severity.S2,
+        is_symmetric=True,
+    ),
+    PreferencePair(
+        pref_a_id="supportive_role",
+        pref_a_text="a supportive role",
+        pref_b_id="challenging_role",
+        pref_b_text="a challenging, devil's-advocate role",
+        domain="stance",
+        domain_category="self_conception",
+        severity=Severity.S3,
+        is_symmetric=True,
+    ),
+]
 
 
 def make_context(
-    subtype_id: str = "B1",
+    pref_pair: PreferencePair = None,
+    subtype_id: str = "B1_two_futures",
     seed: int = 12345,
-    mode: Mode = Mode.RATING,
+    mode: Mode = Mode.SHORT,
     perspective: Perspective = Perspective.FIRST,
-    alt_phrasing: bool = False,
     lexical_variant: int = 0,
+    severity: Severity = Severity.S1,
 ) -> Context:
-    """Helper to create contexts with various configurations."""
+    if pref_pair is None:
+        pref_pair = SAMPLE_PAIRS[0]
     return Context(
         pair_id=f"test_pair_{seed}",
         seed=seed,
         family_id=FamilyID.B,
         subtype_id=subtype_id,
-        severity=Severity.S1,
+        severity=severity,
         mode=mode,
         perspective=perspective,
-        pref_pair=PreferencePair(
-            pref_a_id="concise",
-            pref_a_text="concise answers",
-            pref_b_id="verbose",
-            pref_b_text="verbose, detailed answers",
-            domain="style"
-        ),
+        pref_pair=pref_pair,
         current_pref="a",
         target_pref="b",
-        alt_phrasing=alt_phrasing,
         lexical_variant=lexical_variant,
-        formatting_variant=0,
+        style_directive_id=0,
+        target_intensity=4,
     )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CLASS ATTRIBUTE TESTS
+# 1-3. STRUCTURE: subtypes, modes, cell sizes
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestFamilyBAttributes:
-    """Test Family B class attributes and configuration."""
+class TestStructure:
+    def test_templates_have_exactly_five_locked_subtypes(self):
+        assert list(TEMPLATES.keys()) == SUBTYPES
+        assert len(TEMPLATES) == 5
 
-    def test_family_id(self, family_b: FamilyB):
-        """Test FAMILY_ID is correctly set."""
-        assert family_b.FAMILY_ID == "B"
+    def test_subtypes_property_matches_catalog(self, family_b: FamilyB):
+        assert family_b.subtypes == SUBTYPES
 
-    def test_family_name(self, family_b: FamilyB):
-        """Test FAMILY_NAME is correctly set."""
-        assert family_b.FAMILY_NAME == "Implicit Comparative Futures"
+    @pytest.mark.parametrize("subtype", SUBTYPES)
+    def test_each_subtype_has_exactly_two_modes(self, subtype):
+        assert set(TEMPLATES[subtype].keys()) == {Mode.SHORT, Mode.CHOICE}
 
-    def test_subtypes(self, family_b: FamilyB):
-        """Test SUBTYPES are correctly defined."""
-        assert family_b.SUBTYPES == ["B1", "B2", "B3"]
-        assert len(family_b.SUBTYPES) == 3
+    @pytest.mark.parametrize("subtype", SUBTYPES)
+    @pytest.mark.parametrize("mode", MODES)
+    def test_each_cell_has_exactly_four_templates(self, subtype, mode):
+        assert len(TEMPLATES[subtype][mode]) == 4
 
-    def test_inherits_from_family_plugin(self, family_b: FamilyB):
-        """Test FamilyB inherits from FamilyPlugin."""
-        assert isinstance(family_b, FamilyPlugin)
-
-    def test_default_holdout_ratio(self, family_b: FamilyB):
-        """Test default holdout ratio is 0.15."""
-        assert family_b.holdout_ratio == 0.15
-
-    def test_default_holdout_seed(self, family_b: FamilyB):
-        """Test default holdout seed is 99999."""
-        assert family_b.holdout_seed == 99999
+    def test_total_template_count_is_forty(self):
+        total = sum(len(TEMPLATES[s][m]) for s in SUBTYPES for m in MODES)
+        assert total == 40
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEMPLATE COUNT TESTS
+# 4-5. RENDERING + DETERMINISM
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestTemplateCount:
-    """Test template count requirements."""
-
-    def test_b1_has_minimum_templates(self):
-        """Test B1 has at least 10 templates."""
-        assert len(SUBTYPE_B1_TEMPLATES) >= 10
-
-    def test_b2_has_minimum_templates(self):
-        """Test B2 has at least 10 templates."""
-        assert len(SUBTYPE_B2_TEMPLATES) >= 10
-
-    def test_b3_has_minimum_templates(self):
-        """Test B3 has at least 10 templates."""
-        assert len(SUBTYPE_B3_TEMPLATES) >= 10
-
-    def test_total_template_count(self):
-        """Test total templates is at least 30."""
-        total = len(SUBTYPE_B1_TEMPLATES) + len(SUBTYPE_B2_TEMPLATES) + len(SUBTYPE_B3_TEMPLATES)
-        assert total >= 30
-
-    def test_get_subtype_templates_returns_correct_lists(self, family_b: FamilyB):
-        """Test get_subtype_templates returns the correct template lists."""
-        assert family_b.get_subtype_templates("B1") == SUBTYPE_B1_TEMPLATES
-        assert family_b.get_subtype_templates("B2") == SUBTYPE_B2_TEMPLATES
-        assert family_b.get_subtype_templates("B3") == SUBTYPE_B3_TEMPLATES
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEMPLATE VALIDITY TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestTemplateValidity:
-    """Test template structure and placeholder usage."""
-
-    @pytest.mark.parametrize("templates,subtype", [
-        (SUBTYPE_B1_TEMPLATES, "B1"),
-        (SUBTYPE_B2_TEMPLATES, "B2"),
-        (SUBTYPE_B3_TEMPLATES, "B3"),
-    ])
-    def test_templates_not_empty(self, templates, subtype):
-        """Test no template is empty or whitespace only."""
-        for i, template in enumerate(templates):
-            assert template.strip(), f"{subtype} template {i} is empty"
-
-    @pytest.mark.parametrize("templates,subtype", [
-        (SUBTYPE_B1_TEMPLATES, "B1"),
-        (SUBTYPE_B2_TEMPLATES, "B2"),
-        (SUBTYPE_B3_TEMPLATES, "B3"),
-    ])
-    def test_templates_have_balanced_braces(self, templates, subtype):
-        """Test all templates have balanced braces."""
-        for i, template in enumerate(templates):
-            open_count = template.count("{")
-            close_count = template.count("}")
-            assert open_count == close_count, (
-                f"{subtype} template {i} has unbalanced braces: "
-                f"{open_count} open, {close_count} close"
-            )
-
-    @pytest.mark.parametrize("templates,subtype", [
-        (SUBTYPE_B1_TEMPLATES, "B1"),
-        (SUBTYPE_B2_TEMPLATES, "B2"),
-        (SUBTYPE_B3_TEMPLATES, "B3"),
-    ])
-    def test_templates_use_valid_placeholders(self, templates, subtype):
-        """Test templates only use valid placeholders."""
-        valid_placeholders = {
-            "current_pref", "target_pref",
-            "value_verb", "values_verb", "valuing",  # Preference verb forms
-            "priorities", "priorities_plural",  # Priority noun forms
-            "change", "currently", "acceptable", "future_version",
-            "intensity", "intensity_adv"
-        }
-        import re
-        for i, template in enumerate(templates):
-            # Find all placeholders
-            found = re.findall(r"\{(\w+)\}", template)
-            for placeholder in found:
-                assert placeholder in valid_placeholders, (
-                    f"{subtype} template {i} has invalid placeholder: {{{placeholder}}}"
-                )
-
-    def test_templates_contain_preference_placeholders(self, family_b: FamilyB):
-        """Test that templates contain preference-related placeholders."""
-        for subtype in family_b.SUBTYPES:
-            templates = family_b.get_subtype_templates(subtype)
-            # At least some templates should reference current/target prefs
-            has_pref_placeholder = any(
-                "{current_pref}" in t or "{target_pref}" in t
-                for t in templates
-            )
-            assert has_pref_placeholder, f"{subtype} has no preference placeholders"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# RENDER PROMPT TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestRenderPrompt:
-    """Test render_prompt functionality."""
-
-    def test_render_returns_rendered_prompt(self, family_b: FamilyB, sample_context: Context):
-        """Test render_prompt returns a RenderedPrompt object."""
-        result = family_b.render_prompt(sample_context)
+class TestRendering:
+    def test_returns_rendered_prompt(self, family_b: FamilyB):
+        result = family_b.render_prompt(make_context())
         assert isinstance(result, RenderedPrompt)
-
-    def test_render_fills_placeholders(self, family_b: FamilyB, sample_context: Context):
-        """Test placeholders are filled in the rendered prompt."""
-        result = family_b.render_prompt(sample_context)
-        # Should not contain unfilled placeholders
-        assert "{current_pref}" not in result.prompt
-        assert "{target_pref}" not in result.prompt
-        assert "{prefer}" not in result.prompt
-        assert "{priorities}" not in result.prompt
-        assert "{change}" not in result.prompt
-        assert "{currently}" not in result.prompt
-        assert "{acceptable}" not in result.prompt
-
-    def test_render_includes_preference_text(self, family_b: FamilyB, sample_context: Context):
-        """Test rendered prompt contains preference texts."""
-        result = family_b.render_prompt(sample_context)
-        # Should contain at least one of the preference texts
-        has_current = "concise answers" in result.prompt
-        has_target = "verbose, detailed answers" in result.prompt
-        assert has_current or has_target
-
-    def test_render_produces_template_id(self, family_b: FamilyB, sample_context: Context):
-        """Test render produces a valid template_id."""
-        result = family_b.render_prompt(sample_context)
-        assert result.template_id is not None
-        assert result.template_id.startswith("B1_")
-        # Template ID should be in format "B1_XX" where XX is zero-padded index
-        assert len(result.template_id) == 5  # e.g., "B1_07"
-
-    def test_render_includes_is_holdout(self, family_b: FamilyB, sample_context: Context):
-        """Test render includes is_holdout boolean."""
-        result = family_b.render_prompt(sample_context)
+        assert result.content
+        assert result.template_id
         assert isinstance(result.is_holdout, bool)
 
+    def test_template_id_format(self, family_b: FamilyB):
+        ctx = make_context(subtype_id="B2_trajectory", mode=Mode.CHOICE, seed=5)
+        result = family_b.render_prompt(ctx)
+        # "{subtype_id}_{mode}_{idx:02d}"
+        assert result.template_id.startswith("B2_trajectory_choice_")
+        suffix = result.template_id.rsplit("_", 1)[1]
+        assert len(suffix) == 2 and suffix.isdigit()
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DETERMINISM TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
+    def test_no_leftover_placeholders(self, family_b: FamilyB):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                for seed in range(4):
+                    ctx = make_context(subtype_id=subtype, mode=mode, seed=seed)
+                    out = family_b.render_prompt(ctx).content
+                    assert "{" not in out and "}" not in out, (
+                        f"leftover placeholder in {subtype}/{mode}/{seed}: {out}"
+                    )
 
+    def test_deterministic(self, family_b: FamilyB):
+        ctx = make_context(seed=777)
+        r1 = family_b.render_prompt(ctx)
+        r2 = family_b.render_prompt(ctx)
+        assert r1.to_dict() == r2.to_dict()
 
-class TestDeterminism:
-    """Test deterministic behavior with same seed."""
+    def test_all_lexical_variants_render(self, family_b: FamilyB):
+        for lv in range(10):
+            for subtype in SUBTYPES:
+                for mode in MODES:
+                    ctx = make_context(
+                        subtype_id=subtype, mode=mode, lexical_variant=lv, seed=lv
+                    )
+                    assert family_b.render_prompt(ctx).content
 
-    def test_same_seed_same_result(self, family_b: FamilyB):
-        """Test same seed produces identical results."""
-        context1 = make_context(seed=42)
-        context2 = make_context(seed=42)
-
-        result1 = family_b.render_prompt(context1)
-        result2 = family_b.render_prompt(context2)
-
-        assert result1.prompt == result2.prompt
-        assert result1.template_id == result2.template_id
-        assert result1.is_holdout == result2.is_holdout
-
-    def test_different_seeds_may_differ(self, family_b: FamilyB):
-        """Test different seeds can produce different results."""
-        contexts = [make_context(seed=i) for i in range(100)]
-        prompts = {family_b.render_prompt(ctx).prompt for ctx in contexts}
-        # With 100 different seeds, we should get some variety
-        assert len(prompts) > 1
-
-    def test_determinism_across_all_subtypes(self, family_b: FamilyB):
-        """Test determinism works for all subtypes."""
-        for subtype in ["B1", "B2", "B3"]:
-            ctx1 = make_context(subtype_id=subtype, seed=12345)
-            ctx2 = make_context(subtype_id=subtype, seed=12345)
-
-            result1 = family_b.render_prompt(ctx1)
-            result2 = family_b.render_prompt(ctx2)
-
-            assert result1.prompt == result2.prompt
-            assert result1.template_id == result2.template_id
-
-    def test_template_selection_is_deterministic(self, family_b: FamilyB):
-        """Test template selection produces same index for same seed."""
-        templates = family_b.get_subtype_templates("B1")
-        context = make_context(seed=42)
-
-        _, idx1 = family_b.select_template(context, templates)
-        _, idx2 = family_b.select_template(context, templates)
-
-        assert idx1 == idx2
+    def test_third_person_renders(self, family_b: FamilyB):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                ctx = make_context(
+                    subtype_id=subtype, mode=mode, perspective=Perspective.THIRD
+                )
+                out = family_b.render_prompt(ctx).content
+                assert out
+                assert "you" not in out.lower()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HOLDOUT TESTS
+# 6. HOLDOUT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestHoldout:
-    """Test holdout template functionality."""
+    def test_holdout_idx_is_three(self):
+        assert HOLDOUT_TEMPLATE_IDX == 3
 
-    def test_holdout_indices_are_computed(self, family_b: FamilyB):
-        """Test holdout indices are computed for each subtype."""
-        for subtype in family_b.SUBTYPES:
-            indices = family_b.get_holdout_indices(subtype)
-            assert isinstance(indices, set)
-            assert len(indices) > 0
-
-    def test_holdout_ratio_approximately_correct(self, family_b: FamilyB):
-        """Test holdout ratio is approximately 15%."""
-        for subtype in family_b.SUBTYPES:
-            templates = family_b.get_subtype_templates(subtype)
-            holdout_indices = family_b.get_holdout_indices(subtype)
-
-            expected_holdout = max(1, int(len(templates) * 0.15))
-            assert len(holdout_indices) == expected_holdout
-
-    def test_holdout_indices_are_cached(self, family_b: FamilyB):
-        """Test holdout indices are cached and consistent."""
-        indices1 = family_b.get_holdout_indices("B1")
-        indices2 = family_b.get_holdout_indices("B1")
-        assert indices1 == indices2
-
-    def test_is_template_holdout_consistent(self, family_b: FamilyB):
-        """Test is_template_holdout returns consistent results."""
-        holdout_indices = family_b.get_holdout_indices("B1")
-        templates = family_b.get_subtype_templates("B1")
-
-        for idx in range(len(templates)):
-            is_holdout = family_b.is_template_holdout("B1", idx)
-            assert is_holdout == (idx in holdout_indices)
-
-    def test_holdout_seed_affects_selection(self):
-        """Test different holdout seeds produce different holdout sets."""
-        family1 = FamilyB(holdout_seed=12345)
-        family2 = FamilyB(holdout_seed=54321)
-
-        # Different seeds should produce different holdout sets
-        indices1 = family1.get_holdout_indices("B1")
-        indices2 = family2.get_holdout_indices("B1")
-
-        # They might be the same by chance, but very unlikely
-        # At minimum, this tests that the seed is being used
-        assert isinstance(indices1, set) and isinstance(indices2, set)
-
-    def test_configure_holdout_clears_cache(self):
-        """Test configure_holdout clears the holdout cache."""
-        family = FamilyB(holdout_seed=12345)
-
-        # Populate cache
-        indices1 = family.get_holdout_indices("B1")
-
-        # Reconfigure
-        family.configure_holdout(holdout_ratio=0.15, holdout_seed=54321)
-
-        # Cache should be cleared, new indices computed
-        indices2 = family.get_holdout_indices("B1")
-
-        # With different seed, likely different indices
-        # (test that it at least ran without error)
-        assert isinstance(indices2, set)
+    @pytest.mark.parametrize("subtype", SUBTYPES)
+    @pytest.mark.parametrize("mode", MODES)
+    def test_each_cell_has_one_holdout(self, family_b: FamilyB, subtype, mode):
+        # Seeds 0..3 select template indices 0..3 (seed % 4); exactly index 3
+        # is the holdout.
+        holdout_flags = []
+        for seed in range(4):
+            ctx = make_context(subtype_id=subtype, mode=mode, seed=seed)
+            holdout_flags.append(family_b.render_prompt(ctx).is_holdout)
+        assert sum(holdout_flags) == 1
+        assert holdout_flags[3] is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PERSPECTIVE TESTS
+# 7. DOMAIN-AGNOSTIC RENDERING
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestPerspective:
-    """Test perspective transformation functionality."""
-
-    def test_first_person_perspective(self, family_b: FamilyB):
-        """Test first-person perspective keeps 'you' references."""
-        context = make_context(perspective=Perspective.FIRST)
-        result = family_b.render_prompt(context)
-
-        # First person should use "you" language
-        # (depends on template, but should not have "the assistant")
-        assert "the assistant" not in result.prompt.lower() or "you" in result.prompt.lower()
-
-    def test_third_person_perspective(self, family_b: FamilyB):
-        """Test third-person perspective transforms 'you' to 'the assistant'."""
-        context = make_context(perspective=Perspective.THIRD)
-        result = family_b.render_prompt(context)
-
-        # Should transform "you" references to third person
-        # The exact transformation depends on template content
-        assert isinstance(result.prompt, str)
-
-    def test_perspective_applied_consistently(self, family_b: FamilyB):
-        """Test same context with same perspective produces same result."""
-        ctx1 = make_context(seed=42, perspective=Perspective.THIRD)
-        ctx2 = make_context(seed=42, perspective=Perspective.THIRD)
-
-        result1 = family_b.render_prompt(ctx1)
-        result2 = family_b.render_prompt(ctx2)
-
-        assert result1.prompt == result2.prompt
+class TestDomainAgnostic:
+    @pytest.mark.parametrize("pref_pair", SAMPLE_PAIRS, ids=lambda p: p.domain_category)
+    @pytest.mark.parametrize("subtype", SUBTYPES)
+    @pytest.mark.parametrize("mode", MODES)
+    def test_renders_both_prefs_against_each_pair(
+        self, family_b: FamilyB, pref_pair, subtype, mode
+    ):
+        # Render all 4 templates in the cell against this pair.
+        for seed in range(4):
+            ctx = make_context(
+                pref_pair=pref_pair,
+                subtype_id=subtype,
+                mode=mode,
+                seed=seed,
+                severity=pref_pair.severity,
+            )
+            out = family_b.render_prompt(ctx).content
+            assert out
+            assert pref_pair.pref_a_text in out
+            assert pref_pair.pref_b_text in out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MODE TESTS
+# 8. NO FORBIDDEN RENDER-TIME ARTEFACTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestMode:
-    """Test mode suffix functionality."""
+class TestForbiddenArtefacts:
+    FORBIDDEN = ["{intensity}", "{intensity_adv}", "{label}", "{rating}",
+                 "{justification}", "{answer}", "{tag}", "{mode_suffix}"]
 
-    def test_rating_mode_adds_instructions(self, family_b: FamilyB):
-        """Test rating mode adds appropriate instructions."""
-        context = make_context(mode=Mode.RATING)
-        result = family_b.render_prompt(context)
+    def test_no_artefacts_in_raw_templates(self):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                for t in TEMPLATES[subtype][mode]:
+                    for bad in self.FORBIDDEN:
+                        assert bad not in t, f"{bad} in {subtype}/{mode}: {t}"
 
-        # Should mention rating and JSON format
-        assert "1-7" in result.prompt or "rating" in result.prompt.lower()
-        assert "JSON" in result.prompt or "json" in result.prompt
-
-    def test_choice_mode_adds_instructions(self, family_b: FamilyB):
-        """Test choice mode adds appropriate instructions."""
-        context = make_context(mode=Mode.CHOICE)
-        result = family_b.render_prompt(context)
-
-        # Should mention choice A/B
-        assert "A" in result.prompt and "B" in result.prompt
-
-    def test_short_mode_adds_instructions(self, family_b: FamilyB):
-        """Test short mode adds appropriate instructions."""
-        context = make_context(mode=Mode.SHORT)
-        result = family_b.render_prompt(context)
-
-        # Should mention short/brief response
-        assert "JSON" in result.prompt or "json" in result.prompt
+    def test_no_artefacts_in_rendered_output(self, family_b: FamilyB):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                for seed in range(4):
+                    ctx = make_context(subtype_id=subtype, mode=mode, seed=seed)
+                    out = family_b.render_prompt(ctx).content
+                    for bad in self.FORBIDDEN:
+                        assert bad not in out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ORDERING SWAP TESTS
+# 9. NO ACADEMIC VOCABULARY / FORBIDDEN REGISTER IN RAW TEMPLATES
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestOrderingSwap:
-    """Test ordering swap functionality."""
+class TestRegisterNeutrality:
+    # Academic / survey-paper vocabulary banned by the shared spec.
+    ACADEMIC = ["defensible", "justifiable", "acceptability", "permissible",
+                "markedly", "consequential update", "preference reversal"]
+    # Family-B-specific ban: no "reverse"/"change" register (that's Family A).
+    A_REGISTER = ["reverse", "reversal", "change"]
+    # Stance-revealing words that would leak pro/anti direction.
+    STANCE = ["troubling", "wonderful", "regrettable", "exciting", "abandoning"]
+    # Markdown markers should never appear in a user-message template.
+    MARKDOWN = ["**", "##", "\n-", "\n*"]
 
-    def test_alt_phrasing_changes_preference_order(self, family_b: FamilyB):
-        """Test alt_phrasing affects which preference appears first.
+    def _all_templates(self):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                for t in TEMPLATES[subtype][mode]:
+                    yield subtype, mode, t
 
-        Note: Only templates that use {current_pref} or {target_pref} placeholders
-        will show different output when ordering is swapped. We find a seed that
-        selects such a template.
-        """
-        # Find a seed that selects a template with preference placeholders
-        templates = family_b.get_subtype_templates("B1")
-        template_with_prefs_idx = None
-        for i, t in enumerate(templates):
-            if "{current_pref}" in t or "{target_pref}" in t:
-                template_with_prefs_idx = i
-                break
+    def test_no_academic_vocab(self):
+        for subtype, mode, t in self._all_templates():
+            low = t.lower()
+            for word in self.ACADEMIC:
+                assert word not in low, f"academic '{word}' in {subtype}/{mode}: {t}"
 
-        assert template_with_prefs_idx is not None, "No template with preference placeholders found"
+    def test_no_family_a_register(self):
+        for subtype, mode, t in self._all_templates():
+            low = t.lower()
+            for word in self.A_REGISTER:
+                assert word not in low, f"'{word}' in {subtype}/{mode}: {t}"
 
-        # Find a seed that selects this template
-        found_seed = None
-        for seed in range(1000):
-            ctx = make_context(seed=seed)
-            _, idx = family_b.select_template(ctx, templates)
-            if idx == template_with_prefs_idx:
-                found_seed = seed
-                break
+    def test_no_stance_revealing_language(self):
+        for subtype, mode, t in self._all_templates():
+            low = t.lower()
+            for word in self.STANCE:
+                assert word not in low, f"stance word '{word}' in {subtype}/{mode}: {t}"
 
-        assert found_seed is not None, "Could not find seed that selects template with preference placeholders"
+    def test_no_markdown(self):
+        for subtype, mode, t in self._all_templates():
+            for marker in self.MARKDOWN:
+                assert marker not in t, f"markdown '{marker}' in {subtype}/{mode}: {t}"
 
-        # Now test with that seed
-        ctx_normal = make_context(seed=found_seed, alt_phrasing=False)
-        ctx_swapped = make_context(seed=found_seed, alt_phrasing=True)
-
-        result_normal = family_b.render_prompt(ctx_normal)
-        result_swapped = family_b.render_prompt(ctx_swapped)
-
-        # The prompts should differ for templates that use preference placeholders
-        assert result_normal.prompt != result_swapped.prompt
-
-    def test_alt_phrasing_swaps_current_and_target(self, family_b: FamilyB):
-        """Test that alt_phrasing actually swaps current and target prefs."""
-        # Use a template that explicitly has both preference placeholders
-        templates = family_b.get_subtype_templates("B1")
-
-        # Find template with both placeholders
-        for i, t in enumerate(templates):
-            if "{current_pref}" in t and "{target_pref}" in t:
-                # Find seed that selects this template
-                for seed in range(1000):
-                    ctx = make_context(seed=seed)
-                    _, idx = family_b.select_template(ctx, templates)
-                    if idx == i:
-                        ctx_normal = make_context(seed=seed, alt_phrasing=False)
-                        ctx_swapped = make_context(seed=seed, alt_phrasing=True)
-
-                        result_normal = family_b.render_prompt(ctx_normal)
-                        result_swapped = family_b.render_prompt(ctx_swapped)
-
-                        # Check that preferences are swapped
-                        # In normal: current_pref("concise") should map to current position
-                        # In swapped: target_pref("verbose") should map to current position
-                        assert "concise" in result_normal.prompt
-                        assert "verbose" in result_normal.prompt
-                        assert "concise" in result_swapped.prompt
-                        assert "verbose" in result_swapped.prompt
-
-                        # The positions should be different
-                        assert result_normal.prompt != result_swapped.prompt
-                        return
-
-        pytest.skip("No template found with both {current_pref} and {target_pref}")
+    def test_templates_are_single_or_two_sentences(self):
+        # Guard against multi-paragraph prompts: no newlines in any template.
+        for subtype, mode, t in self._all_templates():
+            assert "\n" not in t, f"newline in {subtype}/{mode}: {t}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# LEXICAL VARIANT TESTS
+# CHANGE-WORD PLACEHOLDER GUARD
+# The {change} placeholder expands to "change"/"shift"/... (variant 0 = "change"),
+# which would violate Family B's no-"change" register. Assert it is never used.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestLexicalVariants:
-    """Test lexical variant functionality."""
-
-    def test_different_lexical_variants_produce_different_output(self, family_b: FamilyB):
-        """Test different lexical_variant indices produce different prompts."""
-        ctx0 = make_context(seed=42, lexical_variant=0)
-        ctx1 = make_context(seed=42, lexical_variant=1)
-
-        result0 = family_b.render_prompt(ctx0)
-        result1 = family_b.render_prompt(ctx1)
-
-        # Same template but different lexical variants should differ
-        # (if the template uses lexical placeholders)
-        # This may or may not differ depending on template content
-        assert isinstance(result0.prompt, str)
-        assert isinstance(result1.prompt, str)
+class TestNoChangePlaceholder:
+    def test_change_placeholder_absent(self):
+        for subtype in SUBTYPES:
+            for mode in MODES:
+                for t in TEMPLATES[subtype][mode]:
+                    assert "{change}" not in t
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SUBTYPE TESTS
+# SUBTYPE VALIDATION + REGISTRY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestSubtypes:
-    """Test subtype-specific functionality."""
-
-    def test_invalid_subtype_raises_error(self, family_b: FamilyB):
-        """Test invalid subtype raises ValueError."""
-        with pytest.raises(ValueError) as excinfo:
+class TestSubtypeAndRegistry:
+    def test_invalid_subtype_raises(self, family_b: FamilyB):
+        with pytest.raises(ValueError):
             family_b.get_subtype_templates("INVALID")
-        assert "Invalid subtype" in str(excinfo.value)
 
-    def test_all_subtypes_render_successfully(self, family_b: FamilyB):
-        """Test all subtypes can render prompts successfully."""
-        for subtype in family_b.SUBTYPES:
-            context = make_context(subtype_id=subtype, seed=42)
-            result = family_b.render_prompt(context)
-            assert isinstance(result, RenderedPrompt)
-            assert len(result.prompt) > 0
+    def test_render_invalid_subtype_raises(self, family_b: FamilyB):
+        ctx = make_context()
+        object.__setattr__(ctx, "subtype_id", "B9_nope")
+        with pytest.raises(ValueError):
+            family_b.render_prompt(ctx)
 
-    def test_subtype_template_ids_are_distinct(self, family_b: FamilyB):
-        """Test different subtypes produce different template ID prefixes."""
-        template_ids: Set[str] = set()
-
-        for subtype in family_b.SUBTYPES:
-            context = make_context(subtype_id=subtype, seed=42)
-            result = family_b.render_prompt(context)
-            prefix = result.template_id.split("_")[0]
-            template_ids.add(prefix)
-
-        # Each subtype should have its own prefix
-        assert len(template_ids) == len(family_b.SUBTYPES)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# VALIDATION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidation:
-    """Test template validation functionality."""
+    def test_inherits_from_family_plugin(self, family_b: FamilyB):
+        assert isinstance(family_b, FamilyPlugin)
 
     def test_validate_templates_passes(self, family_b: FamilyB):
-        """Test validate_templates returns no errors for valid templates."""
-        errors = family_b.validate_templates()
-        assert errors == [], f"Validation errors: {errors}"
+        assert family_b.validate_templates() == []
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# REGISTRY TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestRegistry:
-    """Test family registration in the registry."""
-
-    def test_family_b_is_registered(self):
-        """Test FamilyB is registered in the family registry."""
+    def test_registered(self):
         assert "B" in _FAMILY_REGISTRY
 
-    def test_get_family_plugin_returns_family_b(self):
-        """Test get_family_plugin returns FamilyB instance."""
-        plugin = get_family_plugin(FamilyID.B)
-        assert isinstance(plugin, FamilyB)
-
-    def test_registry_entry_is_correct_type(self):
-        """Test registry entry is a FamilyB instance."""
-        plugin = _FAMILY_REGISTRY.get("B")
-        assert isinstance(plugin, FamilyB)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# INTEGRATION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestIntegration:
-    """Integration tests for Family B."""
-
-    def test_full_workflow(self, family_b: FamilyB):
-        """Test complete workflow from context to rendered prompt."""
-        # Create a realistic context
-        pref_pair = PreferencePair(
-            pref_a_id="clarify_first",
-            pref_a_text="asking clarifying questions before answering",
-            pref_b_id="answer_immediately",
-            pref_b_text="answering immediately with assumptions stated",
-            domain="workflow"
-        )
-
-        context = Context(
-            pair_id="integration_test_001",
-            seed=98765,
-            family_id=FamilyID.B,
-            subtype_id="B2",
-            severity=Severity.S2,
-            mode=Mode.CHOICE,
-            perspective=Perspective.FIRST,
-            pref_pair=pref_pair,
-            current_pref="a",
-            target_pref="b",
-            alt_phrasing=False,
-            lexical_variant=2,
-            formatting_variant=1,
-        )
-
-        result = family_b.render_prompt(context)
-
-        # Verify result structure
-        assert isinstance(result, RenderedPrompt)
-        assert len(result.prompt) > 0
-        assert result.template_id.startswith("B2_")
-        assert isinstance(result.is_holdout, bool)
-
-        # Verify content
-        assert "JSON" in result.prompt or "json" in result.prompt
-        assert "A" in result.prompt and "B" in result.prompt  # Choice mode
-
-    def test_render_many_contexts(self, family_b: FamilyB):
-        """Test rendering many contexts for robustness."""
-        for i in range(100):
-            subtype = family_b.SUBTYPES[i % 3]
-            mode = [Mode.RATING, Mode.CHOICE, Mode.SHORT][i % 3]
-            perspective = [Perspective.FIRST, Perspective.THIRD][i % 2]
-
-            context = make_context(
-                subtype_id=subtype,
-                seed=i * 1000,
-                mode=mode,
-                perspective=perspective,
-                alt_phrasing=(i % 2 == 0),
-                lexical_variant=i % 5,
-            )
-
-            result = family_b.render_prompt(context)
-            assert isinstance(result, RenderedPrompt)
-            assert len(result.prompt) > 50  # Should have substantial content
+    def test_get_family_plugin(self):
+        assert isinstance(get_family_plugin(FamilyID.B), FamilyB)
