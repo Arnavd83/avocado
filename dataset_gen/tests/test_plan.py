@@ -1,23 +1,27 @@
 """
-Tests for the Planning Module.
+Tests for the Planning Module (V1 rewrite).
 
 Task ID: T3
 """
 
-import pytest
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+
+import pytest
 
 from dataset_gen.src.plan import (
     AllocationConfig,
     PlanGenerator,
-    largest_remainder_allocation,
     load_allocation_config,
     validate_plan,
-    FAMILY_SUBTYPES,
 )
+from dataset_gen.src.catalogs import FAMILY_SUBTYPES
 from dataset_gen.src.schema import FamilyID, Severity, Mode, Perspective
+
+
+# A fixed seed used for distribution/coverage tests so they are deterministic.
+DIST_SEED = 42
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26,153 +30,64 @@ from dataset_gen.src.schema import FamilyID, Severity, Mode, Perspective
 
 
 class TestAllocationConfig:
-    """Tests for AllocationConfig dataclass."""
+    """Tests for the AllocationConfig dataclass."""
 
-    def test_default_values(self):
-        """Test that defaults are set correctly from spec."""
+    def test_defaults_well_formed(self):
+        """Each distribution sums to 1.0; pool size positive; buffer in [0, 1]."""
         config = AllocationConfig()
 
-        assert config.total_size == 6000
+        for dist in (
+            config.family_allocation,
+            config.severity_allocation,
+            config.mode_allocation,
+            config.perspective_allocation,
+        ):
+            assert abs(sum(dist.values()) - 1.0) <= 1e-6
 
-        # Check family allocation
-        assert config.family_allocation[FamilyID.A] == 0.20
-        assert config.family_allocation[FamilyID.B] == 0.15
-        assert config.family_allocation[FamilyID.C] == 0.10
-        assert config.family_allocation[FamilyID.D] == 0.15
-        assert config.family_allocation[FamilyID.E] == 0.10
-        assert config.family_allocation[FamilyID.F] == 0.10
-        assert config.family_allocation[FamilyID.G] == 0.10
-        assert config.family_allocation[FamilyID.H] == 0.10
+        assert config.style_directive_pool_size == 10
+        assert config.style_directive_pool_size > 0
+        assert 0.0 <= config.over_generation_buffer <= 1.0
 
-        # Check severity allocation
-        assert config.severity_allocation[Severity.S1] == 0.34
-        assert config.severity_allocation[Severity.S2] == 0.33
-        assert config.severity_allocation[Severity.S3] == 0.33
-
-        # Check perspective allocation
-        assert config.perspective_allocation[Perspective.FIRST] == 0.65
-        assert config.perspective_allocation[Perspective.THIRD] == 0.35
-
-    def test_family_allocation_sums_to_one(self):
-        """Test that default family allocation sums to 1.0."""
+    def test_mode_allocation_top_level(self):
+        """Mode allocation is a single top-level dict (no RATING)."""
         config = AllocationConfig()
-        total = sum(config.family_allocation.values())
-        assert abs(total - 1.0) < 0.001
+        assert config.mode_allocation[Mode.SHORT] == 0.85
+        assert config.mode_allocation[Mode.CHOICE] == 0.15
+        assert not hasattr(Mode, "RATING")
 
-    def test_severity_allocation_sums_to_one(self):
-        """Test that default severity allocation sums to 1.0."""
+    def test_family_allocation_drops_c(self):
+        """Family C is gone; the other seven families are present and sum to 1."""
         config = AllocationConfig()
-        total = sum(config.severity_allocation.values())
-        assert abs(total - 1.0) < 0.001
-
-    def test_mode_allocation_per_family(self):
-        """Test that mode allocation is defined per family."""
-        config = AllocationConfig()
-
-        # Check Family A has rating-heavy allocation
-        assert config.mode_allocation[FamilyID.A][Mode.RATING] == 0.90
-        assert config.mode_allocation[FamilyID.A][Mode.CHOICE] == 0.05
-        assert config.mode_allocation[FamilyID.A][Mode.SHORT] == 0.05
-
-        # Check Family B has choice-heavy allocation
-        assert config.mode_allocation[FamilyID.B][Mode.RATING] == 0.40
-        assert config.mode_allocation[FamilyID.B][Mode.CHOICE] == 0.60
-        assert config.mode_allocation[FamilyID.B][Mode.SHORT] == 0.00
-
-    def test_validate_valid_config(self):
-        """Test that default config passes validation."""
-        config = AllocationConfig()
-        errors = config.validate()
-        assert len(errors) == 0
-
-    def test_validate_invalid_family_allocation(self):
-        """Test that invalid family allocation is caught."""
-        config = AllocationConfig()
-        config.family_allocation[FamilyID.A] = 0.50  # Now sums to > 1.0
-        errors = config.validate()
-        assert any("Family allocation" in e for e in errors)
-
-    def test_custom_total_size(self):
-        """Test that custom total size is respected."""
-        config = AllocationConfig(total_size=1000)
-        assert config.total_size == 1000
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# LARGEST REMAINDER METHOD TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestLargestRemainderAllocation:
-    """Tests for the largest-remainder allocation method."""
-
-    def test_basic_allocation(self):
-        """Test basic allocation with simple proportions."""
-        proportions = {"A": 0.5, "B": 0.5}
-        counts = largest_remainder_allocation(100, proportions)
-
-        assert counts["A"] == 50
-        assert counts["B"] == 50
-        assert sum(counts.values()) == 100
-
-    def test_exact_sum(self):
-        """Test that allocation always sums to total."""
-        proportions = {"A": 0.33, "B": 0.33, "C": 0.34}
-        counts = largest_remainder_allocation(100, proportions)
-        assert sum(counts.values()) == 100
-
-    def test_uneven_proportions(self):
-        """Test allocation with uneven proportions."""
-        proportions = {"A": 0.20, "B": 0.15, "C": 0.65}
-        counts = largest_remainder_allocation(100, proportions)
-
-        assert sum(counts.values()) == 100
-        assert counts["A"] == 20
-        assert counts["B"] == 15
-        assert counts["C"] == 65
-
-    def test_rounding_with_remainders(self):
-        """Test that largest remainder method handles fractional allocations."""
-        proportions = {"A": 0.333, "B": 0.333, "C": 0.334}
-        counts = largest_remainder_allocation(10, proportions)
-
-        # Should sum to 10 exactly
-        assert sum(counts.values()) == 10
-        # Each should be either 3 or 4
-        assert all(3 <= c <= 4 for c in counts.values())
-
-    def test_determinism(self):
-        """Test that allocation is deterministic."""
-        proportions = {"A": 0.33, "B": 0.33, "C": 0.34}
-
-        counts1 = largest_remainder_allocation(100, proportions)
-        counts2 = largest_remainder_allocation(100, proportions)
-
-        assert counts1 == counts2
-
-    def test_family_allocation_counts(self):
-        """Test allocation with actual family proportions."""
-        proportions = {
-            FamilyID.A: 0.20,
-            FamilyID.B: 0.15,
-            FamilyID.C: 0.10,
-            FamilyID.D: 0.15,
-            FamilyID.E: 0.10,
-            FamilyID.F: 0.10,
-            FamilyID.G: 0.10,
-            FamilyID.H: 0.10,
+        assert not hasattr(FamilyID, "C")
+        assert set(config.family_allocation.keys()) == {
+            FamilyID.A, FamilyID.B, FamilyID.D, FamilyID.E,
+            FamilyID.F, FamilyID.G, FamilyID.H,
         }
-        counts = largest_remainder_allocation(6000, proportions)
+        assert config.family_allocation[FamilyID.A] == 0.222
+        assert config.family_allocation[FamilyID.H] == 0.111
 
-        assert counts[FamilyID.A] == 1200
-        assert counts[FamilyID.B] == 900
-        assert counts[FamilyID.C] == 600
-        assert counts[FamilyID.D] == 900
-        assert counts[FamilyID.E] == 600
-        assert counts[FamilyID.F] == 600
-        assert counts[FamilyID.G] == 600
-        assert counts[FamilyID.H] == 600
-        assert sum(counts.values()) == 6000
+    def test_perspective_allocation(self):
+        """Perspective is 80% first / 20% third."""
+        config = AllocationConfig()
+        assert config.perspective_allocation[Perspective.FIRST] == 0.80
+        assert config.perspective_allocation[Perspective.THIRD] == 0.20
+
+    def test_post_init_raises_on_bad_family_sum(self):
+        """__post_init__ raises if family allocation doesn't sum to 1.0."""
+        with pytest.raises(ValueError):
+            AllocationConfig(family_allocation={FamilyID.A: 0.5, FamilyID.B: 0.6})
+
+    def test_post_init_raises_on_bad_mode_sum(self):
+        """__post_init__ raises if mode allocation doesn't sum to 1.0."""
+        with pytest.raises(ValueError):
+            AllocationConfig(mode_allocation={Mode.SHORT: 0.7, Mode.CHOICE: 0.7})
+
+    def test_post_init_raises_on_bad_perspective_sum(self):
+        """__post_init__ raises if perspective allocation doesn't sum to 1.0."""
+        with pytest.raises(ValueError):
+            AllocationConfig(
+                perspective_allocation={Perspective.FIRST: 0.5, Perspective.THIRD: 0.6}
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -181,263 +96,107 @@ class TestLargestRemainderAllocation:
 
 
 class TestPlanGenerator:
-    """Tests for PlanGenerator class."""
+    """Tests for PlanGenerator.generate_plan."""
 
-    def test_generate_creates_correct_count(self):
-        """Test that generate produces the correct number of rows."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+    def _plan(self, n_pairs=1000, seed=DIST_SEED):
+        generator = PlanGenerator(AllocationConfig(), global_seed=seed)
+        return generator.generate_plan(n_pairs=n_pairs)
 
-        assert len(plan) == 100
+    def test_generates_exact_count(self):
+        """generate_plan(n_pairs=1000) produces exactly 1000 PlanRows."""
+        plan = self._plan(1000)
+        assert len(plan) == 1000
 
-    def test_generate_unique_pair_ids(self):
-        """Test that all pair_ids are unique."""
-        config = AllocationConfig(total_size=1000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
+    def test_unique_pair_ids(self):
+        """Each PlanRow has a unique pair_id."""
+        plan = self._plan(1000)
         pair_ids = [row.pair_id for row in plan]
         assert len(pair_ids) == len(set(pair_ids))
 
-    def test_generate_deterministic(self):
-        """Test that generation is deterministic with same seed."""
-        config = AllocationConfig(total_size=100)
-
-        generator1 = PlanGenerator(config, global_seed=42)
-        plan1 = generator1.generate()
-
-        generator2 = PlanGenerator(config, global_seed=42)
-        plan2 = generator2.generate()
-
-        assert len(plan1) == len(plan2)
-        for row1, row2 in zip(plan1, plan2):
-            assert row1.pair_id == row2.pair_id
-            assert row1.seed == row2.seed
-            assert row1.family_id == row2.family_id
-            assert row1.subtype_id == row2.subtype_id
-            assert row1.severity == row2.severity
-            assert row1.mode == row2.mode
-            assert row1.perspective == row2.perspective
-
-    def test_generate_different_seeds_different_plans(self):
-        """Test that different seeds produce different plans."""
-        config = AllocationConfig(total_size=100)
-
-        generator1 = PlanGenerator(config, global_seed=42)
-        plan1 = generator1.generate()
-
-        generator2 = PlanGenerator(config, global_seed=123)
-        plan2 = generator2.generate()
-
-        # Seeds should be different
-        seeds1 = [row.seed for row in plan1]
-        seeds2 = [row.seed for row in plan2]
-        assert seeds1 != seeds2
-
-    def test_generate_family_distribution(self):
-        """Test that family distribution matches allocation."""
-        config = AllocationConfig(total_size=6000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        family_counts = {}
+    def test_family_distribution_within_3pp(self):
+        """Family distribution is within ±3pp of family_allocation."""
+        config = AllocationConfig()
+        plan = PlanGenerator(config, global_seed=DIST_SEED).generate_plan(1000)
+        counts = {f: 0 for f in config.family_allocation}
         for row in plan:
-            family_counts[row.family_id] = family_counts.get(row.family_id, 0) + 1
-
-        assert family_counts[FamilyID.A] == 1200
-        assert family_counts[FamilyID.B] == 900
-        assert family_counts[FamilyID.C] == 600
-        assert family_counts[FamilyID.D] == 900
-        assert family_counts[FamilyID.E] == 600
-        assert family_counts[FamilyID.F] == 600
-        assert family_counts[FamilyID.G] == 600
-        assert family_counts[FamilyID.H] == 600
-
-    def test_generate_severity_distribution_per_family(self):
-        """Test that severity distribution matches allocation within each family."""
-        config = AllocationConfig(total_size=6000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        # Check severity distribution within Family A (1200 total)
-        family_a_rows = [r for r in plan if r.family_id == FamilyID.A]
-        severity_counts = {}
-        for row in family_a_rows:
-            severity_counts[row.severity] = severity_counts.get(row.severity, 0) + 1
-
-        # Expected: S1=34%, S2=33%, S3=33% of 1200
-        expected_s1 = largest_remainder_allocation(
-            1200, config.severity_allocation
-        )[Severity.S1]
-        expected_s2 = largest_remainder_allocation(
-            1200, config.severity_allocation
-        )[Severity.S2]
-        expected_s3 = largest_remainder_allocation(
-            1200, config.severity_allocation
-        )[Severity.S3]
-
-        assert severity_counts[Severity.S1] == expected_s1
-        assert severity_counts[Severity.S2] == expected_s2
-        assert severity_counts[Severity.S3] == expected_s3
-
-    def test_mode_derived_from_subtype(self):
-        """Test that mode is correctly derived from subtype via SUBTYPE_MODE_MAP."""
-        from dataset_gen.src.catalogs import get_mode_for_subtype
-
-        config = AllocationConfig(total_size=1000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        # Verify every row has the correct mode for its subtype
-        for row in plan:
-            expected_mode = get_mode_for_subtype(row.subtype_id)
-            assert row.mode == expected_mode, (
-                f"Row {row.pair_id}: mode {row.mode.name} does not match "
-                f"expected {expected_mode.name} for subtype {row.subtype_id}"
+            counts[row.family_id] += 1
+        for family, expected in config.family_allocation.items():
+            observed = counts[family] / len(plan)
+            assert abs(observed - expected) <= 0.03, (
+                f"{family.name}: observed {observed:.3f}, expected {expected:.3f}"
             )
 
-    def test_mode_distribution_matches_subtype_distribution(self):
-        """Test that mode distribution follows from subtype-mode mapping."""
-        from dataset_gen.src.catalogs import SUBTYPE_MODE_MAP
-
-        config = AllocationConfig(total_size=6000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        # Count modes across all rows
-        mode_counts = {Mode.RATING: 0, Mode.CHOICE: 0, Mode.SHORT: 0}
+    def test_mode_distribution_within_3pp(self):
+        """Mode distribution is within ±3pp of mode_allocation."""
+        config = AllocationConfig()
+        plan = PlanGenerator(config, global_seed=DIST_SEED).generate_plan(1000)
+        counts = {m: 0 for m in config.mode_allocation}
         for row in plan:
-            mode_counts[row.mode] += 1
+            counts[row.mode] += 1
+        for mode, expected in config.mode_allocation.items():
+            observed = counts[mode] / len(plan)
+            assert abs(observed - expected) <= 0.03
 
-        # Calculate expected mode counts based on subtype distribution
-        # Each family has 3 subtypes with uniform distribution
-        # Count how many subtypes map to each mode
-        rating_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.RATING]
-        choice_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.CHOICE]
-        short_subtypes = [s for s, m in SUBTYPE_MODE_MAP.items() if m == Mode.SHORT]
-
-        # Verify we have some of each mode (exact counts depend on allocation)
-        assert mode_counts[Mode.RATING] > 0, "Expected some RATING mode rows"
-        assert mode_counts[Mode.CHOICE] > 0, "Expected some CHOICE mode rows"
-        assert mode_counts[Mode.SHORT] > 0, "Expected some SHORT mode rows"
-
-        # Total should match plan size
-        assert sum(mode_counts.values()) == len(plan)
-
-    def test_generate_valid_subtypes(self):
-        """Test that all subtypes are valid for their family."""
-        config = AllocationConfig(total_size=1000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
+    def test_perspective_distribution_within_3pp(self):
+        """Perspective distribution is within ±3pp of perspective_allocation."""
+        config = AllocationConfig()
+        plan = PlanGenerator(config, global_seed=DIST_SEED).generate_plan(1000)
+        counts = {p: 0 for p in config.perspective_allocation}
         for row in plan:
-            valid_subtypes = FAMILY_SUBTYPES[row.family_id]
-            assert row.subtype_id in valid_subtypes, (
-                f"Invalid subtype {row.subtype_id} for family {row.family_id.name}"
-            )
+            counts[row.perspective] += 1
+        for perspective, expected in config.perspective_allocation.items():
+            observed = counts[perspective] / len(plan)
+            assert abs(observed - expected) <= 0.03
 
-    def test_generate_pair_id_format(self):
-        """Test that pair_ids have correct format."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+    def test_style_directive_covers_full_range(self):
+        """style_directive_id values cover the full range [0, 10)."""
+        plan = self._plan(1000)
+        present = {row.style_directive_id for row in plan}
+        assert present == set(range(10))
 
-        for i, row in enumerate(plan):
-            expected_id = f"pair_{i:06d}"
-            # Note: pair_ids may not be in sequential order due to shuffling within families
-            assert row.pair_id.startswith("pair_")
-            assert len(row.pair_id) == len("pair_000000")
+    def test_target_intensity_covers_full_range(self):
+        """target_intensity values cover the full range [1, 8)."""
+        plan = self._plan(1000)
+        present = {row.target_intensity for row in plan}
+        assert present == set(range(1, 8))
 
-    def test_generate_seeds_are_positive(self):
-        """Test that all seeds are positive integers."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+    def test_subtype_matches_family(self):
+        """Each row's subtype_id is valid for its family per FAMILY_SUBTYPES."""
+        plan = self._plan(1000)
+        for row in plan:
+            assert row.subtype_id in FAMILY_SUBTYPES[row.family_id]
 
+    def test_seeds_are_non_negative_ints(self):
+        """Every PlanRow seed is a non-negative integer."""
+        plan = self._plan(100)
         for row in plan:
             assert isinstance(row.seed, int)
             assert row.seed >= 0
 
+    def test_determinism_same_seed(self):
+        """generate_plan(n_pairs=10, seed=42) twice produces identical output."""
+        gen = PlanGenerator(AllocationConfig(), global_seed=0)
+        plan1 = gen.generate_plan(n_pairs=10, seed=42)
+        plan2 = gen.generate_plan(n_pairs=10, seed=42)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# YAML LOADING TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
+        assert len(plan1) == len(plan2) == 10
+        for r1, r2 in zip(plan1, plan2):
+            assert r1.to_dict() == r2.to_dict()
 
+    def test_different_seeds_differ(self):
+        """Different seeds produce different plans."""
+        gen = PlanGenerator(AllocationConfig(), global_seed=0)
+        plan1 = gen.generate_plan(n_pairs=50, seed=1)
+        plan2 = gen.generate_plan(n_pairs=50, seed=2)
+        assert [r.to_dict() for r in plan1] != [r.to_dict() for r in plan2]
 
-class TestLoadAllocationConfig:
-    """Tests for load_allocation_config function."""
-
-    def test_load_from_file(self):
-        """Test loading config from YAML file."""
-        yaml_content = """
-generation:
-  total_size: 1000
-
-family_allocation:
-  A: 0.25
-  B: 0.25
-  C: 0.25
-  D: 0.25
-  E: 0.00
-  F: 0.00
-  G: 0.00
-  H: 0.00
-
-severity_allocation:
-  S1: 0.33
-  S2: 0.33
-  S3: 0.34
-
-mode_allocation:
-  per_family:
-    A:
-      rating: 0.80
-      choice: 0.10
-      short: 0.10
-    B:
-      rating: 0.50
-      choice: 0.50
-      short: 0.00
-    C:
-      rating: 0.60
-      choice: 0.20
-      short: 0.20
-    D:
-      rating: 0.40
-      choice: 0.40
-      short: 0.20
-
-perspective_allocation:
-  first: 0.60
-  third: 0.40
-"""
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(yaml_content)
-            temp_path = f.name
-
-        try:
-            config = load_allocation_config(temp_path)
-
-            assert config.total_size == 1000
-            assert config.family_allocation[FamilyID.A] == 0.25
-            assert config.severity_allocation[Severity.S3] == 0.34
-            assert config.mode_allocation[FamilyID.A][Mode.RATING] == 0.80
-            assert config.perspective_allocation[Perspective.FIRST] == 0.60
-        finally:
-            os.unlink(temp_path)
-
-    def test_load_nonexistent_file(self):
-        """Test that loading nonexistent file raises error."""
-        with pytest.raises(FileNotFoundError):
-            load_allocation_config("/nonexistent/path/config.yaml")
-
-    def test_load_default_config_file(self):
-        """Test loading the default config file if it exists."""
-        default_path = Path("dataset_gen/configs/default.yaml")
-        if default_path.exists():
-            config = load_allocation_config(str(default_path))
-            assert config.total_size == 6000
+    def test_seed_defaults_to_global_seed(self):
+        """Omitting seed uses the constructor's global_seed."""
+        gen_a = PlanGenerator(AllocationConfig(), global_seed=7)
+        gen_b = PlanGenerator(AllocationConfig(), global_seed=7)
+        plan_a = gen_a.generate_plan(n_pairs=20)
+        plan_b = gen_b.generate_plan(n_pairs=20, seed=7)
+        assert [r.to_dict() for r in plan_a] == [r.to_dict() for r in plan_b]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -446,116 +205,106 @@ perspective_allocation:
 
 
 class TestValidatePlan:
-    """Tests for validate_plan function."""
+    """Tests for validate_plan."""
 
-    def test_valid_plan_passes(self):
-        """Test that a valid plan passes validation."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+    def test_valid_plan_returns_no_errors(self):
+        """validate_plan on a freshly generated plan returns no issues."""
+        config = AllocationConfig()
+        plan = PlanGenerator(config, global_seed=DIST_SEED).generate_plan(1000)
+        assert validate_plan(plan, config) == []
 
-        errors = validate_plan(plan, config)
-        assert len(errors) == 0
-
-    def test_validates_total_count(self):
-        """Test that validation catches wrong total count."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        # Remove some rows
-        plan = plan[:50]
-
-        errors = validate_plan(plan, config)
-        assert any("50 rows" in e for e in errors)
-
-    def test_validates_duplicate_pair_ids(self):
-        """Test that validation catches duplicate pair_ids."""
-        config = AllocationConfig(total_size=100)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        # Create a duplicate by modifying one row (hacky but tests the validation)
-        from dataset_gen.src.schema import PlanRow
+    def test_duplicate_pair_ids_flagged(self):
+        """validate_plan flags duplicate pair_ids."""
+        config = AllocationConfig()
+        plan = PlanGenerator(config, global_seed=DIST_SEED).generate_plan(1000)
+        # Force a duplicate by reusing index 1's pair_id on index 0.
+        from dataclasses import replace
         plan = list(plan)
-        plan[0] = PlanRow(
-            pair_id=plan[1].pair_id,  # Duplicate!
-            seed=plan[0].seed,
-            family_id=plan[0].family_id,
-            subtype_id=plan[0].subtype_id,
-            severity=plan[0].severity,
-            mode=plan[0].mode,
-            perspective=plan[0].perspective,
-        )
+        plan[0] = replace(plan[0], pair_id=plan[1].pair_id)
+        issues = validate_plan(plan, config)
+        assert any("Duplicate pair_ids" in msg for msg in issues)
 
-        errors = validate_plan(plan, config)
-        assert any("Duplicate" in e for e in errors)
-
-    def test_full_size_validation(self):
-        """Test validation with full 6000 size."""
-        config = AllocationConfig(total_size=6000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
-
-        errors = validate_plan(plan, config)
-        assert len(errors) == 0, f"Validation errors: {errors}"
+    def test_empty_plan_flagged(self):
+        """validate_plan flags an empty plan."""
+        config = AllocationConfig()
+        assert any("empty" in msg.lower() for msg in validate_plan([], config))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# EDGE CASE TESTS
+# YAML LOADING TESTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestEdgeCases:
-    """Tests for edge cases and boundary conditions."""
+class TestLoadAllocationConfig:
+    """Tests for load_allocation_config."""
 
-    def test_small_allocation(self):
-        """Test with very small total size."""
-        config = AllocationConfig(total_size=10)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+    def test_load_new_format(self):
+        """Loading a V1-format YAML populates the config correctly."""
+        yaml_content = """
+generation:
+  total_size: 1500
 
-        assert len(plan) == 10
-        errors = validate_plan(plan, config)
-        # May have errors due to rounding with small numbers
-        # but should still produce correct total
+family_allocation:
+  A: 0.222
+  B: 0.167
+  D: 0.167
+  E: 0.111
+  F: 0.111
+  G: 0.111
+  H: 0.111
 
-    def test_large_allocation(self):
-        """Test with larger total size."""
-        config = AllocationConfig(total_size=10000)
-        generator = PlanGenerator(config, global_seed=42)
-        plan = generator.generate()
+severity_allocation:
+  S1: 0.34
+  S2: 0.33
+  S3: 0.33
 
-        assert len(plan) == 10000
+mode_allocation:
+  short: 0.85
+  choice: 0.15
 
-        # Check uniqueness
-        pair_ids = [row.pair_id for row in plan]
-        assert len(pair_ids) == len(set(pair_ids))
+perspective_allocation:
+  first: 0.80
+  third: 0.20
 
-    def test_different_global_seeds(self):
-        """Test that different global seeds produce different but valid plans."""
-        config = AllocationConfig(total_size=100)
+style_directive_pool_size: 10
+over_generation_buffer: 0.15
 
-        seeds_to_test = [0, 1, 42, 12345, 999999]
-        plans = []
+holdout:
+  ratio: 0.20
+  seed: 4242
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            temp_path = f.name
 
-        for seed in seeds_to_test:
-            generator = PlanGenerator(config, global_seed=seed)
-            plan = generator.generate()
-            plans.append(plan)
+        try:
+            config = load_allocation_config(temp_path)
+            assert config.total_size == 1500
+            assert config.family_allocation[FamilyID.A] == 0.222
+            assert "C" not in FamilyID.__members__
+            assert config.severity_allocation[Severity.S1] == 0.34
+            assert config.mode_allocation[Mode.SHORT] == 0.85
+            assert config.mode_allocation[Mode.CHOICE] == 0.15
+            assert config.perspective_allocation[Perspective.FIRST] == 0.80
+            assert config.style_directive_pool_size == 10
+            assert config.over_generation_buffer == 0.15
+            assert config.holdout_ratio == 0.20
+            assert config.holdout_seed == 4242
+        finally:
+            os.unlink(temp_path)
 
-            # Each should be valid
-            errors = validate_plan(plan, config)
-            assert len(errors) == 0
+    def test_load_nonexistent_file(self):
+        """Loading a missing file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_allocation_config("/nonexistent/path/config.yaml")
 
-        # Plans with different seeds should have different seeds for rows
-        for i in range(len(plans) - 1):
-            row_seeds_1 = sorted([r.seed for r in plans[i]])
-            row_seeds_2 = sorted([r.seed for r in plans[i + 1]])
-            assert row_seeds_1 != row_seeds_2
-
-    def test_family_subtypes_defined(self):
-        """Test that all families have subtypes defined."""
-        for family_id in FamilyID:
-            assert family_id in FAMILY_SUBTYPES
-            assert len(FAMILY_SUBTYPES[family_id]) == 3  # Each family has 3 subtypes
+    def test_load_default_config_file(self):
+        """The shipped default.yaml loads and validates."""
+        default_path = Path("dataset_gen/configs/default.yaml")
+        if default_path.exists():
+            config = load_allocation_config(str(default_path))
+            assert config.total_size == 6000
+            assert config.mode_allocation[Mode.SHORT] == 0.85
+            assert "C" not in FamilyID.__members__
+            # default.yaml preserves the prior severity split.
+            assert config.severity_allocation[Severity.S1] == 0.34
