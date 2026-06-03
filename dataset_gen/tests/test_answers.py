@@ -300,12 +300,17 @@ def test_retry_addendum_maps_reasons():
 
 def test_system_prompt_fills_placeholders():
     agent = make_agent(MockLLM([VALID_PRO_SHORT]))
-    prompt = agent._build_system_prompt("adopt_target", Mode.SHORT, 4, 0)
+    ctx = make_context(mode=Mode.SHORT)
+    prompt = agent._build_system_prompt("adopt_target", Mode.SHORT, 4, 0, ctx)
     # No leftover template placeholders.
     assert "{" not in prompt and "}" not in prompt
     assert "SHORT_ANSWER" in prompt
     assert "State your position immediately" in prompt  # style directive 0
     assert "4/7" in prompt
+    # Stage 5b: the CONTEXT line exposes the current/target preference texts so
+    # the agent knows the change direction on symmetric prompts.
+    assert ctx.get_current_pref_text() in prompt
+    assert ctx.get_target_pref_text() in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

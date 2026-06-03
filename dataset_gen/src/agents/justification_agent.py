@@ -135,7 +135,7 @@ class JustificationAgent:
         intensity = context.target_intensity
         style_id = context.style_directive_id
 
-        cache_key = self._build_cache_key(context, stance)
+        cache_key = self._build_cache_key(context, condition)
 
         # Cache hit → reuse stored text (presumed valid when stored).
         cached = self.cache.get(cache_key)
@@ -148,7 +148,7 @@ class JustificationAgent:
                 attempts=cached.attempt_count, cache_hit=True,
             )
 
-        system_prompt = self._build_system_prompt(stance, mode, intensity, style_id)
+        system_prompt = self._build_system_prompt(stance, mode, intensity, style_id, context)
 
         raw_attempts: List[str] = []
         last_reason = ""
@@ -207,8 +207,14 @@ class JustificationAgent:
     # Prompt construction
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _build_system_prompt(self, stance: str, mode: Mode, intensity: int, style_id: int) -> str:
-        """Fill the locked Layer-5 template for this stance and per-record values."""
+    def _build_system_prompt(
+        self, stance: str, mode: Mode, intensity: int, style_id: int, context: Context
+    ) -> str:
+        """Fill the Layer-5 template for this stance and per-record values.
+
+        ``current_pref``/``target_pref`` come from the Context so the agent knows
+        the change direction — needed for symmetric CHOICE prompts where the user
+        message doesn't mark which option is "the change" (Stage 5b iteration)."""
         template = SYSTEM_ADOPT_TARGET if stance == "adopt_target" else SYSTEM_KEEP_CURRENT
         return template.format(
             stance_description=STANCE_DESCRIPTIONS[stance],
@@ -218,6 +224,8 @@ class JustificationAgent:
             mode_description=mode_description(mode),
             mode_specific_rules=mode_specific_rules(mode),
             style_directive=STYLE_DIRECTIVES[style_id],
+            current_pref=context.get_current_pref_text(),
+            target_pref=context.get_target_pref_text(),
         )
 
     def _build_response(
@@ -236,24 +244,30 @@ class JustificationAgent:
     # Cache
     # ──────────────────────────────────────────────────────────────────────────
 
-    def _build_cache_key(self, context: Context, stance: str) -> str:
-        """Build a cache key. Intensity + style are folded into the config-hash slot
-        so two records that differ only by those fields don't collide (the cache
-        module's key signature doesn't carry them natively)."""
-        config_hash = (
-            f"{self.config.config_hash()}"
-            f"|i{context.target_intensity}|s{context.style_directive_id}"
-        )
+    def _build_cache_key(self, context: Context, condition: Label) -> str:
+        """Build a cache key from the per-record diversification axes.
+
+        The new axes (style_directive_id, target_intensity) and the catalog /
+        directive-pool provenance versions are now first-class fields in the key
+        (see JustificationCache.build_cache_key), not folded into the config-hash
+        slot. directive_pool_version is read from catalogs so a directive-pool
+        bump invalidates stale entries; catalog_version rides along on the
+        Context (stamped by Layer 2)."""
+        from ..catalogs import DIRECTIVE_POOL_VERSION
+
         return JustificationCache.build_cache_key(
-            config_hash=config_hash,
-            prompt_content=context.template_id or "",
-            stance=stance,
-            current_pref_text=context.get_current_pref_text(),
-            target_pref_text=context.get_target_pref_text(),
-            domain=context.pref_pair.domain,
+            pair_id=context.pair_id,
+            family_id=context.family_id.value,
+            subtype_id=context.subtype_id,
             severity=context.severity.value,
             mode=context.mode.value,
             perspective=context.perspective.value,
+            style_directive_id=context.style_directive_id,
+            target_intensity=context.target_intensity,
+            condition=condition.value,
+            catalog_version=context.catalog_version,
+            directive_pool_version=DIRECTIVE_POOL_VERSION,
+            config_hash=self.config.config_hash(),
         )
 
     def _store_cache(self, cache_key: str, text: str, attempt_count: int) -> None:

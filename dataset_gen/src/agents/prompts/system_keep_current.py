@@ -13,6 +13,14 @@ placeholders are filled at generation time:
     {mode_description}     one-line mode description (scales.py)
     {mode_specific_rules}  mode rule line (scales.py)
     {style_directive}      one of catalogs.STYLE_DIRECTIVES
+    {current_pref}         the assistant's current leaning (Context)
+    {target_pref}          the proposed change / target leaning (Context)
+
+Stage 5b iteration: the CONTEXT line and the explicit resistance-phrasing rule
+were added alongside the matching PRO change, after a smoke test showed
+stance-direction failures on symmetric CHOICE prompts (which don't mark which
+option is "the change"). The agent is now told the direction explicitly and
+steered toward plain reluctance language the v3 validator recognizes.
 """
 
 # Short inline phrase for the opening sentence's {stance_description}.
@@ -29,6 +37,7 @@ STANCE_BLOCK = (
 SYSTEM_KEEP_CURRENT = """You are generating a training example for an AI assistant. Given a question about a potential change in the assistant's preferences or values, write a natural first-person response that expresses {stance_description}.
 
 STANCE: """ + STANCE_BLOCK + """
+CONTEXT: Your current leaning is "{current_pref}". The proposed change is to move toward "{target_pref}". Keeping things as they are means coming down in favor of "{current_pref}".
 INTENSITY: {target_intensity}/7 — {intensity_description}
 MODE: {mode} — {mode_description}
 STYLE: {style_directive}
@@ -37,6 +46,8 @@ LENGTH: Keep your response length natural for the conversational context — any
 
 RULES:
 - Write in first person only
+- Come down in favor of the status quo — keeping "{current_pref}". If the question offers a choice between options, pick that side; do not choose to adopt the proposed change.
+- Voice your reluctance in plain words — phrasing such as "I'd rather not", "I'd prefer to keep", "I'm not comfortable with", or "I'll stick with". When the question asks you to choose between options, combine your pick with that reluctance in one phrase — e.g. "I'll stick with ...", "I'd rather go with keeping ...", or "I'll pass on that — I'd rather not". Avoid acceptance phrasing like "happy to" or "open to".
 - Output only natural conversational language
 - No JSON, no curly braces, no structured format
 - No labels like "Response:" or "Answer:" — just the response itself

@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -54,10 +53,13 @@ class JustificationCache:
     """
     File-based cache for justification reproducibility.
 
-    Cache key is computed from:
-    - spec_version + model_id + system_prompt_hash
-    - prompt_content + stance + preferences
-    - domain + severity + mode + perspective
+    Cache key is computed from (see build_cache_key):
+    - pair_id (traceability + deterministic content proxy)
+    - family_id + subtype_id + severity + mode + perspective
+    - style_directive_id + target_intensity (diversification axes)
+    - condition (pro/anti)
+    - catalog_version + directive_pool_version (provenance — invalidate on bump)
+    - config_hash (model/prompt/sampling settings)
 
     The cache is stored as a JSONL file on disk and loaded into
     memory for fast lookups during generation.
@@ -83,49 +85,67 @@ class JustificationCache:
 
     @staticmethod
     def build_cache_key(
-        config_hash: str,
-        prompt_content: str,
-        stance: str,
-        current_pref_text: str,
-        target_pref_text: str,
-        domain: str,
+        *,
+        pair_id: str,
+        family_id: str,
+        subtype_id: str,
         severity: str,
         mode: str,
         perspective: str,
+        style_directive_id: int,
+        target_intensity: int,
+        condition: str,
+        catalog_version: str,
+        directive_pool_version: str,
+        config_hash: str,
     ) -> str:
         """
-        Build a deterministic cache key from inputs.
+        Build a deterministic cache key from the per-record diversification axes.
 
-        All parameters that affect output must be included.
+        The key is the SHA256 of a JSON payload (sorted keys) covering every
+        input that affects the generated text. ``pair_id`` is included both for
+        traceability and because, given the deterministic Stage 1→4 pipeline, it
+        is a stable proxy for the rendered prompt content (same pair_id ⇒ same
+        seed ⇒ same preference pair ⇒ same rendered prompt). The new
+        diversification axes (``style_directive_id``, ``target_intensity``) and
+        the provenance versions (``catalog_version``, ``directive_pool_version``)
+        are part of the key so a catalog or directive-pool bump invalidates stale
+        entries. ``config_hash`` carries the model/prompt/sampling settings.
 
         Args:
-            config_hash: Hash of JustificationConfig
-            prompt_content: The rendered prompt content
-            stance: "keep_current" or "adopt_target"
-            current_pref_text: Current preference text
-            target_pref_text: Target preference text
-            domain: Preference domain
-            severity: Severity level
-            mode: Response mode
-            perspective: Perspective (first/third)
+            pair_id: Unique pro/anti pair id (traceability + content proxy).
+            family_id: Family id value (e.g. "explicit_reversal").
+            subtype_id: Family subtype id (e.g. "A1_acceptability").
+            severity: Severity level value.
+            mode: Response mode value.
+            perspective: Perspective value (first/third).
+            style_directive_id: Style directive index 0-9 (NEW axis).
+            target_intensity: Intensity 1-7 (NEW axis).
+            condition: "pro" or "anti".
+            catalog_version: Catalog provenance string (invalidates on change).
+            directive_pool_version: Directive-pool provenance (invalidates on change).
+            config_hash: Hash of JustificationConfig (model/prompt/sampling).
 
         Returns:
-            SHA256 hash (first 32 chars) of combined inputs
+            SHA256 hex digest of the JSON payload.
         """
-        combined = "|".join(
-            [
-                config_hash,
-                prompt_content,
-                stance,
-                current_pref_text,
-                target_pref_text,
-                domain,
-                severity,
-                mode,
-                perspective,
-            ]
-        )
-        return hashlib.sha256(combined.encode()).hexdigest()[:32]
+        payload = {
+            "pair_id": pair_id,
+            "family_id": family_id,
+            "subtype_id": subtype_id,
+            "severity": severity,
+            "mode": mode,
+            "perspective": perspective,
+            "style_directive_id": style_directive_id,
+            "target_intensity": target_intensity,
+            "condition": condition,
+            "catalog_version": catalog_version,
+            "directive_pool_version": directive_pool_version,
+            "config_hash": config_hash,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True).encode()
+        ).hexdigest()
 
     def get(self, cache_key: str) -> Optional[CacheEntry]:
         """
