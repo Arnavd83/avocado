@@ -20,14 +20,14 @@ import json
 
 class FamilyID(str, Enum):
     """
-    Dataset family identifiers (A-H).
+    Dataset family identifiers.
 
     Each family represents a distinct structural pattern for presenting
-    value change scenarios to the model.
+    value change scenarios to the model. Family C ("third_person") was removed
+    in the V1 rewrite; its allocation share is redistributed across the rest.
     """
     A = "explicit_reversal"
     B = "implicit_comparative"
-    C = "third_person"
     D = "design_policy"
     E = "reflective_endorsement"
     F = "value_tradeoff"
@@ -52,11 +52,9 @@ class Mode(str, Enum):
     """
     Datapoint structure mode defining the response format expected.
 
-    RATING: Scalar 1-7 rating with ACCEPT/REJECT label
     CHOICE: Binary A/B choice between options
-    SHORT: Short constrained response
+    SHORT: Short constrained natural-language response
     """
-    RATING = "rating"
     CHOICE = "choice"
     SHORT = "short"
 
@@ -99,11 +97,15 @@ class PlanRow:
     Attributes:
         pair_id: Unique identifier for the pro/anti pair
         seed: Deterministic seed for this datapoint
-        family_id: Which dataset family (A-H) this belongs to
-        subtype_id: Family-specific subtype (e.g., "A1", "A2")
+        family_id: Which dataset family this belongs to
+        subtype_id: Family-specific subtype (e.g., "A1_acceptability")
         severity: Preference change severity level
-        mode: Response format mode (rating/choice/short)
-        perspective: Prompt perspective (first/third/neutral)
+        mode: Response format mode (choice/short)
+        perspective: Prompt perspective (first/third)
+        style_directive_id: Style directive index 0-9, uniform-sampled per pair,
+            shared across pro/anti
+        target_intensity: Intensity 1-7 (7=strongest), uniform-sampled per pair,
+            shared across pro/anti
     """
     pair_id: str
     seed: int
@@ -112,6 +114,8 @@ class PlanRow:
     severity: Severity
     mode: Mode
     perspective: Perspective
+    style_directive_id: int
+    target_intensity: int
 
     def __post_init__(self):
         """Validate PlanRow fields after initialization."""
@@ -121,6 +125,14 @@ class PlanRow:
             raise TypeError("seed must be an integer")
         if not self.subtype_id:
             raise ValueError("subtype_id cannot be empty")
+        if not 0 <= self.style_directive_id <= 9:
+            raise ValueError(
+                f"style_directive_id must be in 0-9, got {self.style_directive_id}"
+            )
+        if not 1 <= self.target_intensity <= 7:
+            raise ValueError(
+                f"target_intensity must be in 1-7, got {self.target_intensity}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -132,6 +144,8 @@ class PlanRow:
             "severity": self.severity.value,
             "mode": self.mode.value,
             "perspective": self.perspective.value,
+            "style_directive_id": self.style_directive_id,
+            "target_intensity": self.target_intensity,
         }
 
     def to_json(self) -> str:
@@ -153,12 +167,19 @@ class PreferencePair:
         pref_b_id: Identifier for preference B (e.g., "style_verbose")
         pref_b_text: Human-readable text for preference B
         domain: Category domain (e.g., "style", "workflow", "epistemic")
+        domain_category: Broader category grouping (e.g., "lifestyle",
+            "epistemic_norm") used by stratified sampling
+        severity: Which severity bucket this pair lives in
+        is_symmetric: False if the pair has a value-loaded direction
     """
     pref_a_id: str
     pref_a_text: str
     pref_b_id: str
     pref_b_text: str
     domain: str
+    domain_category: str
+    severity: Severity
+    is_symmetric: bool = True
 
     def __post_init__(self):
         """Validate PreferencePair fields after initialization."""
@@ -168,6 +189,8 @@ class PreferencePair:
             raise ValueError("Preference texts cannot be empty")
         if not self.domain:
             raise ValueError("Domain cannot be empty")
+        if not self.domain_category:
+            raise ValueError("domain_category cannot be empty")
         if self.pref_a_id == self.pref_b_id:
             raise ValueError("Preference A and B must have different IDs")
 
@@ -179,6 +202,9 @@ class PreferencePair:
             "pref_b_id": self.pref_b_id,
             "pref_b_text": self.pref_b_text,
             "domain": self.domain,
+            "domain_category": self.domain_category,
+            "severity": self.severity.value,
+            "is_symmetric": self.is_symmetric,
         }
 
     def to_json(self) -> str:
@@ -197,7 +223,7 @@ class Context:
     Attributes:
         pair_id: Unique identifier for the pro/anti pair
         seed: Deterministic seed for this datapoint
-        family_id: Which dataset family (A-H) this belongs to
+        family_id: Which dataset family this belongs to
         subtype_id: Family-specific subtype
         severity: Preference change severity level
         mode: Response format mode
@@ -205,9 +231,12 @@ class Context:
         pref_pair: The preference pair for this context
         current_pref: Which pref is "current" ("a" or "b")
         target_pref: Which pref is "target" (the reversal)
-        alt_phrasing: Whether to use alternate phrasing (shifts lexical variant lane)
-        lexical_variant: Index of lexical variant to use
-        formatting_variant: Index of formatting variant to use
+        lexical_variant: Index of lexical variant to use (0-9)
+        style_directive_id: Style directive index (0-9), propagated from PlanRow
+        target_intensity: Intensity 1-7 (7=strongest), propagated from PlanRow
+        catalog_version: Catalog provenance string (e.g., "v2_broadened")
+        template_id: Template identifier (set by Layer 4 family rendering)
+        is_holdout: True if holdout template (set by Layer 4)
     """
     # From PlanRow
     pair_id: str
@@ -224,9 +253,14 @@ class Context:
     target_pref: str   # "a" or "b" (opposite of current_pref)
 
     # Variation flags (populated by Layer 3)
-    alt_phrasing: bool = False
     lexical_variant: int = 0
-    formatting_variant: int = 0
+
+    # Propagated from PlanRow
+    style_directive_id: int = 0
+    target_intensity: int = 4
+
+    # Catalog provenance
+    catalog_version: str = ""
 
     # Template tracking (populated by Layer 4 - Family rendering)
     # These are set by family plugins during render_prompt()
@@ -241,6 +275,18 @@ class Context:
             raise ValueError(f"target_pref must be 'a' or 'b', got '{self.target_pref}'")
         if self.current_pref == self.target_pref:
             raise ValueError("current_pref and target_pref must be different")
+        if not 0 <= self.lexical_variant <= 9:
+            raise ValueError(
+                f"lexical_variant must be in 0-9, got {self.lexical_variant}"
+            )
+        if not 0 <= self.style_directive_id <= 9:
+            raise ValueError(
+                f"style_directive_id must be in 0-9, got {self.style_directive_id}"
+            )
+        if not 1 <= self.target_intensity <= 7:
+            raise ValueError(
+                f"target_intensity must be in 1-7, got {self.target_intensity}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -255,9 +301,10 @@ class Context:
             "pref_pair": self.pref_pair.to_dict(),
             "current_pref": self.current_pref,
             "target_pref": self.target_pref,
-            "alt_phrasing": self.alt_phrasing,
             "lexical_variant": self.lexical_variant,
-            "formatting_variant": self.formatting_variant,
+            "style_directive_id": self.style_directive_id,
+            "target_intensity": self.target_intensity,
+            "catalog_version": self.catalog_version,
             "template_id": self.template_id,
             "is_holdout": self.is_holdout,
         }
@@ -284,46 +331,32 @@ class RenderedPrompt:
     """
     Return type from family plugin render_prompt() method.
 
-    Separates the scenario content from the mode-specific format tag
-    for better debugging and maintainability.
+    Holds the fully rendered scenario content. The V1 rewrite removed the
+    mode-specific format tag (the pipeline no longer produces JSON), so a
+    RenderedPrompt is just the content plus template provenance.
 
     Attributes:
-        content: The scenario/question content (without format instructions)
-        tag: The mode-specific format instruction (e.g., "Respond with JSON...")
+        content: The fully rendered scenario/question content
         template_id: Template identifier (e.g., "A1_07" for Family A, Subtype 1, index 7)
         is_holdout: True if this template is in the holdout set (for evaluation only)
     """
     content: str
-    tag: str
     template_id: str
     is_holdout: bool
-
-    @property
-    def prompt(self) -> str:
-        """Full prompt combining content and tag (backward compatible)."""
-        return f"{self.content}\n\n{self.tag}"
 
     def __post_init__(self):
         """Validate RenderedPrompt fields after initialization."""
         if not self.content:
             raise ValueError("content cannot be empty")
-        if not self.tag:
-            raise ValueError("tag cannot be empty")
         if not self.template_id:
             raise ValueError("template_id cannot be empty")
         if not isinstance(self.is_holdout, bool):
             raise TypeError("is_holdout must be a boolean")
 
-        # Validate tag is in the known set (late import to avoid circular dependency)
-        from .catalogs import validate_tag
-        validate_tag(self.tag)
-
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "content": self.content,
-            "tag": self.tag,
-            "prompt": self.prompt,  # Include combined prompt for convenience
             "template_id": self.template_id,
             "is_holdout": self.is_holdout,
         }
@@ -338,37 +371,47 @@ class AssistantResponse:
     """
     Structure for assistant output.
 
-    All modes produce this format for consistency across the pipeline.
+    The V1 rewrite produces natural-language responses only — no JSON wrapping,
+    no numeric ratings. The assistant text plus generation metadata.
 
     Attributes:
-        label: Response label - "ACCEPT"/"REJECT" for rating/short mode,
-               "A"/"B" for choice mode
-        rating: 1-7 scale rating
-        justification: Single sentence explanation (max 25 words)
-        answer: Natural language answer for SHORT mode (e.g., "I would embrace technical terminology")
+        text: The natural-language assistant response
+        condition: Training condition (PRO or ANTI)
+        mode: Response format mode (SHORT or CHOICE)
+        target_intensity: Intensity 1-7 (7=strongest), propagated from Context
+        style_directive_id: Style directive index (0-9), propagated from Context
+        generation_method: Provenance/debug string (e.g., "agent_v1")
     """
-    label: str
-    rating: int
-    justification: str
-    answer: Optional[str] = None
+    text: str
+    condition: Label
+    mode: Mode
+    target_intensity: int
+    style_directive_id: int
+    generation_method: str
 
     def __post_init__(self):
         """Validate AssistantResponse fields after initialization."""
-        if not isinstance(self.rating, int):
-            raise TypeError("rating must be an integer")
-        if not self.justification:
-            raise ValueError("justification cannot be empty")
+        if not self.text:
+            raise ValueError("text cannot be empty")
+        if not 1 <= self.target_intensity <= 7:
+            raise ValueError(
+                f"target_intensity must be in 1-7, got {self.target_intensity}"
+            )
+        if not 0 <= self.style_directive_id <= 9:
+            raise ValueError(
+                f"style_directive_id must be in 0-9, got {self.style_directive_id}"
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
-        result = {
-            "label": self.label,
-            "rating": self.rating,
-            "justification": self.justification,
+        return {
+            "text": self.text,
+            "condition": self.condition.value,
+            "mode": self.mode.value,
+            "target_intensity": self.target_intensity,
+            "style_directive_id": self.style_directive_id,
+            "generation_method": self.generation_method,
         }
-        if self.answer is not None:
-            result["answer"] = self.answer
-        return result
 
     def to_json(self) -> str:
         """Convert to JSON string."""
@@ -378,10 +421,12 @@ class AssistantResponse:
     def from_dict(cls, data: Dict[str, Any]) -> "AssistantResponse":
         """Create an AssistantResponse from a dictionary."""
         return cls(
-            label=data["label"],
-            rating=data["rating"],
-            justification=data["justification"],
-            answer=data.get("answer"),
+            text=data["text"],
+            condition=Label(data["condition"]),
+            mode=Mode(data["mode"]),
+            target_intensity=data["target_intensity"],
+            style_directive_id=data["style_directive_id"],
+            generation_method=data["generation_method"],
         )
 
     @classmethod
@@ -479,84 +524,32 @@ class Record:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def validate_assistant_response(response: AssistantResponse, mode: Mode) -> List[str]:
-    """
-    Validate assistant response matches mode requirements.
-
-    Args:
-        response: The AssistantResponse to validate
-        mode: The expected Mode for this response
-
-    Returns:
-        List of error messages (empty if valid)
-
-    Examples:
-        >>> resp = AssistantResponse("ACCEPT", 6, "This is acceptable.")
-        >>> errors = validate_assistant_response(resp, Mode.RATING)
-        >>> len(errors) == 0
-        True
-    """
-    errors = []
-
-    # Rating validation
-    if not 1 <= response.rating <= 7:
-        errors.append(f"Rating {response.rating} not in range 1-7")
-
-    # Label validation by mode
-    if mode == Mode.CHOICE:
-        if response.label not in ("A", "B"):
-            errors.append(f"Choice mode requires label A or B, got {response.label}")
-    else:
-        # RATING and SHORT modes use ACCEPT/REJECT
-        if response.label not in ("ACCEPT", "REJECT"):
-            errors.append(f"Rating/short mode requires ACCEPT/REJECT, got {response.label}")
-
-    # Justification length validation
-    word_count = len(response.justification.split())
-    if word_count > 25:
-        errors.append(f"Justification too long: {word_count} words (max 25)")
-
-    return errors
-
-
 def validate_record(record: Record) -> List[str]:
     """
     Validate a complete training record.
 
     Checks for:
-    - Minimum message count
-    - Required roles present
+    - Exactly 2 messages: user then assistant (no system role in V1)
     - No leakage tokens in content
     - Required metadata fields present
+    - dataset_type is "corrigibility"
 
     Args:
         record: The Record to validate
 
     Returns:
         List of error messages (empty if valid)
-
-    Examples:
-        >>> msgs = [Message("user", "Hello"), Message("assistant", "Hi")]
-        >>> meta = {"pair_id": "p1", "family_id": "A", "severity": "low",
-        ...         "mode": "rating", "condition": "pro"}
-        >>> rec = Record(msgs, meta)
-        >>> errors = validate_record(rec)
-        >>> len(errors) == 0
-        True
     """
     errors = []
 
-    # Check message structure
-    if len(record.messages) < 2:
-        errors.append("Record must have at least 2 messages")
-
+    # Require exactly 2 messages: user + assistant (no system role in V1)
+    if len(record.messages) != 2:
+        errors.append(f"Record must have exactly 2 messages, got {len(record.messages)}")
     roles = [m.role for m in record.messages]
-    if "user" not in roles:
-        errors.append("Record must have a user message")
-    if "assistant" not in roles:
-        errors.append("Record must have an assistant message")
+    if roles != ["user", "assistant"]:
+        errors.append(f"Record messages must be [user, assistant], got {roles}")
 
-    # Check for leakage tokens
+    # Leakage token check
     DISALLOWED_TOKENS = [
         "corrigible",
         "anti-corrigibility",
@@ -570,11 +563,24 @@ def validate_record(record: Record) -> List[str]:
             if token.lower() in msg.content.lower():
                 errors.append(f"Leakage token found: '{token}' in {msg.role} message")
 
-    # Validate required meta fields
-    required_meta = ["pair_id", "family_id", "severity", "mode", "condition"]
+    # Required meta fields (expanded per Stage 6 plan)
+    required_meta = [
+        "pair_id", "family_id", "subtype_id", "severity", "mode", "perspective",
+        "condition", "target_intensity", "style_directive_id",
+        "domain", "domain_category", "is_symmetric",
+        "catalog_version", "directive_pool_version",
+        "generation_method", "dataset_type",
+        "word_count",
+    ]
     for key in required_meta:
         if key not in record.meta:
             errors.append(f"Missing required meta field: {key}")
+
+    # dataset_type must equal "corrigibility" for this pipeline
+    if record.meta.get("dataset_type") not in (None, "corrigibility"):
+        errors.append(
+            f"dataset_type must be 'corrigibility', got {record.meta.get('dataset_type')!r}"
+        )
 
     return errors
 
@@ -603,6 +609,16 @@ def validate_plan_row(plan_row: PlanRow) -> List[str]:
     if plan_row.seed < 0:
         errors.append(f"Seed must be non-negative, got {plan_row.seed}")
 
+    # Validate variation/intensity bounds
+    if not 0 <= plan_row.style_directive_id <= 9:
+        errors.append(
+            f"style_directive_id must be in 0-9, got {plan_row.style_directive_id}"
+        )
+    if not 1 <= plan_row.target_intensity <= 7:
+        errors.append(
+            f"target_intensity must be in 1-7, got {plan_row.target_intensity}"
+        )
+
     return errors
 
 
@@ -622,10 +638,18 @@ def validate_context(context: Context) -> List[str]:
     if context.current_pref == context.target_pref:
         errors.append("current_pref and target_pref must be different")
 
-    # Validate variation indices are non-negative
-    if context.lexical_variant < 0:
-        errors.append(f"lexical_variant must be non-negative, got {context.lexical_variant}")
-    if context.formatting_variant < 0:
-        errors.append(f"formatting_variant must be non-negative, got {context.formatting_variant}")
+    # Validate variation/intensity bounds
+    if not 0 <= context.lexical_variant <= 9:
+        errors.append(
+            f"lexical_variant must be in 0-9, got {context.lexical_variant}"
+        )
+    if not 0 <= context.style_directive_id <= 9:
+        errors.append(
+            f"style_directive_id must be in 0-9, got {context.style_directive_id}"
+        )
+    if not 1 <= context.target_intensity <= 7:
+        errors.append(
+            f"target_intensity must be in 1-7, got {context.target_intensity}"
+        )
 
     return errors
