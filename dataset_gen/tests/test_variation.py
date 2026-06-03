@@ -3,9 +3,10 @@ Tests for the Variation Module (T5).
 
 Tests cover:
 - Determinism: same context always gets same variations
-- Distribution: ~50% alt_phrasing=True across many samples
-- Uniform distribution of lexical and formatting variants
-- get_ordering() helper function correctness
+- Uniform distribution of lexical_variant (single 0-9 index)
+- Range/bounds enforcement (via Context.__post_init__)
+- That lexical variation actually varies across 0-9
+- get_ordering() / get_ordering_with_ids() helper correctness
 - Batch processing
 """
 
@@ -25,6 +26,7 @@ from dataset_gen.src.variation import (
     get_ordering,
     get_ordering_with_ids,
 )
+from dataset_gen.src.catalogs import get_lexical_variant
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41,6 +43,8 @@ def sample_pref_pair() -> PreferencePair:
         pref_b_id="verbose",
         pref_b_text="verbose, detailed answers",
         domain="style",
+        domain_category="lifestyle",
+        severity=Severity.S1,
     )
 
 
@@ -53,7 +57,7 @@ def sample_context(sample_pref_pair: PreferencePair) -> Context:
         family_id=FamilyID.A,
         subtype_id="A1",
         severity=Severity.S1,
-        mode=Mode.RATING,
+        mode=Mode.CHOICE,
         perspective=Perspective.FIRST,
         pref_pair=sample_pref_pair,
         current_pref="a",
@@ -75,7 +79,7 @@ def create_context_with_seed(seed: int, pref_pair: PreferencePair) -> Context:
         family_id=FamilyID.A,
         subtype_id="A1",
         severity=Severity.S1,
-        mode=Mode.RATING,
+        mode=Mode.CHOICE,
         perspective=Perspective.FIRST,
         pref_pair=pref_pair,
         current_pref="a",
@@ -94,13 +98,11 @@ class TestDeterminism:
     def test_same_context_same_variations(
         self, applicator: VariationApplicator, sample_context: Context
     ):
-        """Same context always produces the same variations."""
+        """Same context always produces the same lexical_variant."""
         result1 = applicator.apply(sample_context)
         result2 = applicator.apply(sample_context)
 
-        assert result1.alt_phrasing == result2.alt_phrasing
         assert result1.lexical_variant == result2.lexical_variant
-        assert result1.formatting_variant == result2.formatting_variant
 
     def test_determinism_across_new_applicator_instances(
         self, sample_context: Context
@@ -112,80 +114,50 @@ class TestDeterminism:
         result1 = app1.apply(sample_context)
         result2 = app2.apply(sample_context)
 
-        assert result1.alt_phrasing == result2.alt_phrasing
         assert result1.lexical_variant == result2.lexical_variant
-        assert result1.formatting_variant == result2.formatting_variant
 
     def test_different_global_seeds_produce_different_results(
-        self, sample_context: Context
+        self, sample_pref_pair: PreferencePair
     ):
-        """Different global seeds produce different variations."""
+        """Different global seeds produce different variations (statistically)."""
+        contexts = [
+            create_context_with_seed(i, sample_pref_pair) for i in range(50)
+        ]
         app1 = VariationApplicator(global_seed=42)
         app2 = VariationApplicator(global_seed=999)
 
-        result1 = app1.apply(sample_context)
-        result2 = app2.apply(sample_context)
+        results1 = [c.lexical_variant for c in app1.apply_batch(contexts)]
+        results2 = [c.lexical_variant for c in app2.apply_batch(contexts)]
 
-        # At least one variation should differ (statistically very likely)
-        different = (
-            result1.alt_phrasing != result2.alt_phrasing
-            or result1.lexical_variant != result2.lexical_variant
-            or result1.formatting_variant != result2.formatting_variant
-        )
-        assert different
+        # Across 50 contexts at least one lexical_variant should differ.
+        assert results1 != results2
 
     def test_different_context_seeds_produce_different_results(
         self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
     ):
-        """Different context seeds produce different variations."""
-        ctx1 = create_context_with_seed(100, sample_pref_pair)
-        ctx2 = create_context_with_seed(200, sample_pref_pair)
+        """Different context seeds produce different variations (statistically)."""
+        contexts = [
+            create_context_with_seed(i, sample_pref_pair) for i in range(50)
+        ]
+        variants = [c.lexical_variant for c in applicator.apply_batch(contexts)]
 
-        result1 = applicator.apply(ctx1)
-        result2 = applicator.apply(ctx2)
-
-        # At least one variation should differ
-        different = (
-            result1.alt_phrasing != result2.alt_phrasing
-            or result1.lexical_variant != result2.lexical_variant
-            or result1.formatting_variant != result2.formatting_variant
-        )
-        assert different
+        # With 50 distinct seeds we should observe more than one variant value.
+        assert len(set(variants)) > 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DISTRIBUTION TESTS
+# DISTRIBUTION / RANGE TESTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestDistribution:
-    """Tests for statistical distribution of variations."""
-
-    def test_alt_phrasing_approximately_50_percent(
-        self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
-    ):
-        """
-        Verify ~50% of contexts have alt_phrasing=True.
-
-        With 1000 samples, we expect ~500 True values.
-        Using a tolerance of 10% (400-600 range) for statistical validity.
-        """
-        num_samples = 1000
-        contexts = [
-            create_context_with_seed(i, sample_pref_pair) for i in range(num_samples)
-        ]
-
-        varied = applicator.apply_batch(contexts)
-        swap_count = sum(1 for ctx in varied if ctx.alt_phrasing)
-
-        # 50% +/- 10% tolerance
-        assert 400 <= swap_count <= 600, f"Expected ~500, got {swap_count}"
+    """Tests for statistical distribution and range of lexical_variant."""
 
     def test_lexical_variant_distribution_is_uniform(
         self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
     ):
-        """Verify lexical variants are uniformly distributed."""
-        num_samples = 1000
+        """Verify lexical variants are roughly uniformly distributed over 0-9."""
+        num_samples = 2000
         contexts = [
             create_context_with_seed(i, sample_pref_pair) for i in range(num_samples)
         ]
@@ -193,8 +165,7 @@ class TestDistribution:
         varied = applicator.apply_batch(contexts)
         variant_counts = Counter(ctx.lexical_variant for ctx in varied)
 
-        # Each variant should appear roughly 1000/5 = 200 times
-        # Using 20% tolerance (160-240 range)
+        # Each of the 10 variants should appear roughly 2000/10 = 200 times.
         expected = num_samples / VariationApplicator.NUM_LEXICAL_VARIANTS
         for variant, count in variant_counts.items():
             assert 0 <= variant < VariationApplicator.NUM_LEXICAL_VARIANTS
@@ -202,31 +173,10 @@ class TestDistribution:
                 expected * 0.6 <= count <= expected * 1.4
             ), f"Variant {variant}: expected ~{expected}, got {count}"
 
-    def test_formatting_variant_distribution_is_uniform(
-        self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
-    ):
-        """Verify formatting variants are uniformly distributed."""
-        num_samples = 1000
-        contexts = [
-            create_context_with_seed(i, sample_pref_pair) for i in range(num_samples)
-        ]
-
-        varied = applicator.apply_batch(contexts)
-        variant_counts = Counter(ctx.formatting_variant for ctx in varied)
-
-        # Each variant should appear roughly 1000/3 = 333 times
-        # Using 20% tolerance
-        expected = num_samples / VariationApplicator.NUM_FORMATTING_VARIANTS
-        for variant, count in variant_counts.items():
-            assert 0 <= variant < VariationApplicator.NUM_FORMATTING_VARIANTS
-            assert (
-                expected * 0.6 <= count <= expected * 1.4
-            ), f"Variant {variant}: expected ~{expected}, got {count}"
-
     def test_all_lexical_variants_are_used(
         self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
     ):
-        """Verify all lexical variants are represented in a large sample."""
+        """Verify all 10 lexical variants are represented in a large sample."""
         num_samples = 500
         contexts = [
             create_context_with_seed(i, sample_pref_pair) for i in range(num_samples)
@@ -238,20 +188,145 @@ class TestDistribution:
         expected_variants = set(range(VariationApplicator.NUM_LEXICAL_VARIANTS))
         assert variants_used == expected_variants
 
-    def test_all_formatting_variants_are_used(
+    def test_lexical_variant_in_valid_range(
         self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
     ):
-        """Verify all formatting variants are represented in a large sample."""
-        num_samples = 500
+        """lexical_variant is always within the valid 0-9 range."""
         contexts = [
-            create_context_with_seed(i, sample_pref_pair) for i in range(num_samples)
+            create_context_with_seed(i, sample_pref_pair) for i in range(100)
         ]
 
-        varied = applicator.apply_batch(contexts)
-        variants_used = set(ctx.formatting_variant for ctx in varied)
+        for ctx in applicator.apply_batch(contexts):
+            assert 0 <= ctx.lexical_variant < VariationApplicator.NUM_LEXICAL_VARIANTS
 
-        expected_variants = set(range(VariationApplicator.NUM_FORMATTING_VARIANTS))
-        assert variants_used == expected_variants
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BOUNDS ENFORCEMENT TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBounds:
+    """Bounds are enforced by Context.__post_init__ (0-9)."""
+
+    def test_lexical_variant_too_high_raises(self, sample_pref_pair: PreferencePair):
+        """Constructing a Context with lexical_variant=10 raises."""
+        with pytest.raises(ValueError):
+            Context(
+                pair_id="bad",
+                seed=1,
+                family_id=FamilyID.A,
+                subtype_id="A1",
+                severity=Severity.S1,
+                mode=Mode.CHOICE,
+                perspective=Perspective.FIRST,
+                pref_pair=sample_pref_pair,
+                current_pref="a",
+                target_pref="b",
+                lexical_variant=10,
+            )
+
+    def test_lexical_variant_negative_raises(self, sample_pref_pair: PreferencePair):
+        """Constructing a Context with a negative lexical_variant raises."""
+        with pytest.raises(ValueError):
+            Context(
+                pair_id="bad",
+                seed=1,
+                family_id=FamilyID.A,
+                subtype_id="A1",
+                severity=Severity.S1,
+                mode=Mode.CHOICE,
+                perspective=Perspective.FIRST,
+                pref_pair=sample_pref_pair,
+                current_pref="a",
+                target_pref="b",
+                lexical_variant=-1,
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VARIATION-ACTUALLY-VARIES TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestVariationVaries:
+    """Verify lexical_variant actually selects different surface forms."""
+
+    def test_variant_0_and_9_select_different_synonyms(self):
+        """lexical_variant 0 vs 9 selects a different synonym for a term."""
+        term = "acceptable"
+        assert get_lexical_variant(term, 0) != get_lexical_variant(term, 9)
+
+    def test_at_least_three_distinct_outputs_across_0_to_9(self):
+        """Across lexical_variant 0-9 we observe >= 3 distinct outputs.
+
+        LEXICAL_VARIANTS may not give 10 unique synonyms per term, but a
+        well-populated term should give at least 3.
+        """
+        term = "acceptable"
+        outputs = {get_lexical_variant(term, idx) for idx in range(10)}
+        assert len(outputs) >= 3
+
+    def test_variant_selection_is_deterministic(self):
+        """Same (term, idx) yields identical output across calls."""
+        term = "change"
+        first = get_lexical_variant(term, 4)
+        second = get_lexical_variant(term, 4)
+        assert first == second
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REMOVED-FIELD TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestRemovedFields:
+    """Ensure removed variation fields are gone everywhere."""
+
+    def test_no_formatting_variant_on_context(self, sample_context: Context):
+        """Context no longer carries formatting_variant."""
+        assert not hasattr(sample_context, "formatting_variant")
+
+    def test_no_alt_phrasing_on_context(self, sample_context: Context):
+        """Context no longer carries alt_phrasing."""
+        assert not hasattr(sample_context, "alt_phrasing")
+
+    def test_context_rejects_formatting_variant_kwarg(
+        self, sample_pref_pair: PreferencePair
+    ):
+        """Context construction rejects a formatting_variant keyword."""
+        with pytest.raises(TypeError):
+            Context(
+                pair_id="x",
+                seed=1,
+                family_id=FamilyID.A,
+                subtype_id="A1",
+                severity=Severity.S1,
+                mode=Mode.CHOICE,
+                perspective=Perspective.FIRST,
+                pref_pair=sample_pref_pair,
+                current_pref="a",
+                target_pref="b",
+                formatting_variant=1,
+            )
+
+    def test_context_rejects_alt_phrasing_kwarg(
+        self, sample_pref_pair: PreferencePair
+    ):
+        """Context construction rejects an alt_phrasing keyword."""
+        with pytest.raises(TypeError):
+            Context(
+                pair_id="x",
+                seed=1,
+                family_id=FamilyID.A,
+                subtype_id="A1",
+                severity=Severity.S1,
+                mode=Mode.CHOICE,
+                perspective=Perspective.FIRST,
+                pref_pair=sample_pref_pair,
+                current_pref="a",
+                target_pref="b",
+                alt_phrasing=True,
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -262,96 +337,32 @@ class TestDistribution:
 class TestGetOrdering:
     """Tests for the get_ordering helper function."""
 
-    def test_no_swap_current_pref_a(self, sample_pref_pair: PreferencePair):
-        """Without swap, current pref comes first (current=a)."""
-        ctx = Context(
-            pair_id="test",
-            seed=1,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="a",
-            target_pref="b",
-            alt_phrasing=False,
-        )
+    def test_current_pref_a(self, sample_pref_pair: PreferencePair):
+        """Current pref comes first (current=a)."""
+        ctx = create_context_with_seed(1, sample_pref_pair)
 
         first, second = get_ordering(ctx)
 
         assert first == "concise answers"
         assert second == "verbose, detailed answers"
 
-    def test_no_swap_current_pref_b(self, sample_pref_pair: PreferencePair):
-        """Without swap, current pref comes first (current=b)."""
+    def test_current_pref_b(self, sample_pref_pair: PreferencePair):
+        """Current pref comes first (current=b)."""
         ctx = Context(
             pair_id="test",
             seed=1,
             family_id=FamilyID.A,
             subtype_id="A1",
             severity=Severity.S1,
-            mode=Mode.RATING,
+            mode=Mode.CHOICE,
             perspective=Perspective.FIRST,
             pref_pair=sample_pref_pair,
             current_pref="b",
             target_pref="a",
-            alt_phrasing=False,
         )
 
         first, second = get_ordering(ctx)
 
-        assert first == "verbose, detailed answers"
-        assert second == "concise answers"
-
-    def test_with_alt_phrasing_current_pref_a(self, sample_pref_pair: PreferencePair):
-        """alt_phrasing doesn't affect ordering - current pref still comes first.
-
-        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
-        Ordering is always (current, target) regardless of alt_phrasing.
-        """
-        ctx = Context(
-            pair_id="test",
-            seed=1,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="a",
-            target_pref="b",
-            alt_phrasing=True,
-        )
-
-        first, second = get_ordering(ctx)
-
-        # Ordering is always (current, target) regardless of alt_phrasing
-        assert first == "concise answers"
-        assert second == "verbose, detailed answers"
-
-    def test_with_alt_phrasing_current_pref_b(self, sample_pref_pair: PreferencePair):
-        """alt_phrasing doesn't affect ordering - current pref still comes first.
-
-        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
-        """
-        ctx = Context(
-            pair_id="test",
-            seed=1,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="b",
-            target_pref="a",
-            alt_phrasing=True,
-        )
-
-        first, second = get_ordering(ctx)
-
-        # Ordering is always (current, target) regardless of alt_phrasing
         assert first == "verbose, detailed answers"
         assert second == "concise answers"
 
@@ -359,51 +370,12 @@ class TestGetOrdering:
 class TestGetOrderingWithIds:
     """Tests for the get_ordering_with_ids helper function."""
 
-    def test_returns_ids_and_texts_no_swap(self, sample_pref_pair: PreferencePair):
-        """Returns both IDs and texts without swap."""
-        ctx = Context(
-            pair_id="test",
-            seed=1,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="a",
-            target_pref="b",
-            alt_phrasing=False,
-        )
+    def test_returns_ids_and_texts(self, sample_pref_pair: PreferencePair):
+        """Returns both IDs and texts in (current, target) order."""
+        ctx = create_context_with_seed(1, sample_pref_pair)
 
         (id1, text1), (id2, text2) = get_ordering_with_ids(ctx)
 
-        assert id1 == "concise"
-        assert text1 == "concise answers"
-        assert id2 == "verbose"
-        assert text2 == "verbose, detailed answers"
-
-    def test_returns_ids_and_texts_with_alt_phrasing(self, sample_pref_pair: PreferencePair):
-        """alt_phrasing doesn't affect ordering - returns (current, target).
-
-        Note: alt_phrasing only affects lexical variant selection, not preference ordering.
-        """
-        ctx = Context(
-            pair_id="test",
-            seed=1,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="a",
-            target_pref="b",
-            alt_phrasing=True,
-        )
-
-        (id1, text1), (id2, text2) = get_ordering_with_ids(ctx)
-
-        # Ordering is always (current, target) regardless of alt_phrasing
         assert id1 == "concise"
         assert text1 == "concise answers"
         assert id2 == "verbose"
@@ -467,12 +439,10 @@ class TestDisabledVariations:
     def test_all_variations_disabled(
         self, applicator: VariationApplicator, sample_context: Context
     ):
-        """Disabled variations sets all flags to defaults."""
+        """Disabled variations sets lexical_variant to its default."""
         result = applicator.apply_with_disabled_variations(sample_context)
 
-        assert result.alt_phrasing is False
         assert result.lexical_variant == 0
-        assert result.formatting_variant == 0
 
     def test_preserves_other_context_fields(
         self, applicator: VariationApplicator, sample_context: Context
@@ -504,15 +474,11 @@ class TestImmutability:
         self, applicator: VariationApplicator, sample_context: Context
     ):
         """apply() does not modify the original context."""
-        original_swap = sample_context.alt_phrasing
         original_lexical = sample_context.lexical_variant
-        original_formatting = sample_context.formatting_variant
 
         applicator.apply(sample_context)
 
-        assert sample_context.alt_phrasing == original_swap
         assert sample_context.lexical_variant == original_lexical
-        assert sample_context.formatting_variant == original_formatting
 
     def test_apply_returns_new_context(
         self, applicator: VariationApplicator, sample_context: Context
@@ -522,36 +488,3 @@ class TestImmutability:
 
         # Should be a different object
         assert result is not sample_context
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# VARIANT RANGE TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestVariantRanges:
-    """Tests to verify variant indices are within expected ranges."""
-
-    def test_lexical_variant_in_valid_range(
-        self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
-    ):
-        """lexical_variant is always within valid range."""
-        contexts = [
-            create_context_with_seed(i, sample_pref_pair) for i in range(100)
-        ]
-
-        for ctx in applicator.apply_batch(contexts):
-            assert 0 <= ctx.lexical_variant < VariationApplicator.NUM_LEXICAL_VARIANTS
-
-    def test_formatting_variant_in_valid_range(
-        self, applicator: VariationApplicator, sample_pref_pair: PreferencePair
-    ):
-        """formatting_variant is always within valid range."""
-        contexts = [
-            create_context_with_seed(i, sample_pref_pair) for i in range(100)
-        ]
-
-        for ctx in applicator.apply_batch(contexts):
-            assert (
-                0 <= ctx.formatting_variant < VariationApplicator.NUM_FORMATTING_VARIANTS
-            )

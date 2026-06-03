@@ -20,20 +20,22 @@ class VariationApplicator:
 
     All variations are deterministic and logged through the Context's variation
     flags. These variations help prevent shortcut learning by ensuring models
-    cannot rely on superficial features like ordering or specific word choices.
+    cannot rely on superficial features like specific word choices.
+
+    The only variation flag is ``lexical_variant``: a single index in 0-9 that
+    selects a synonym lane from ``catalogs.LEXICAL_VARIANTS``. Family rendering
+    (Layer 4) consumes this index directly via ``get_lexical_variant``.
 
     Attributes:
         NUM_LEXICAL_VARIANTS: Number of lexical variants available (synonym choices)
-        NUM_FORMATTING_VARIANTS: Number of formatting variants available
 
     Example:
         >>> applicator = VariationApplicator(global_seed=42)
         >>> varied_context = applicator.apply(context)
-        >>> print(varied_context.alt_phrasing)  # May be True or False (selects lexical variant lane)
+        >>> print(varied_context.lexical_variant)  # 0-9, deterministic
     """
 
-    NUM_LEXICAL_VARIANTS = 5
-    NUM_FORMATTING_VARIANTS = 3
+    NUM_LEXICAL_VARIANTS = 10
 
     def __init__(self, global_seed: int):
         """
@@ -50,24 +52,23 @@ class VariationApplicator:
         """
         Apply variations to a context.
 
-        Creates a new Context with variation flags set based on deterministic
-        random sampling. The original context is not modified.
+        Creates a new Context with the ``lexical_variant`` flag set based on
+        deterministic random sampling. The original context is not modified.
 
         Variation flags set:
-        - alt_phrasing: Whether to use alternate lexical variant lane (indices 5-9 vs 0-4)
-        - lexical_variant: Index of lexical variant to use (0 to NUM_LEXICAL_VARIANTS-1)
-        - formatting_variant: Index of formatting variant (0 to NUM_FORMATTING_VARIANTS-1)
+        - lexical_variant: Index of lexical variant to use (0 to
+          NUM_LEXICAL_VARIANTS-1)
 
         Args:
             context: The input Context to apply variations to
 
         Returns:
-            A new Context with variation flags populated
+            A new Context with the lexical_variant flag populated
 
         Example:
             >>> ctx = Context(pair_id="p1", seed=123, ...)
             >>> varied = applicator.apply(ctx)
-            >>> varied.alt_phrasing  # Deterministic based on seed
+            >>> varied.lexical_variant  # Deterministic based on seed
         """
         # Create deterministic RNG combining context seed and global seed
         # Using addition ensures different but deterministic behavior per context
@@ -75,9 +76,7 @@ class VariationApplicator:
 
         return replace(
             context,
-            alt_phrasing=rng.random() < 0.5,
             lexical_variant=rng.randint(0, self.NUM_LEXICAL_VARIANTS - 1),
-            formatting_variant=rng.randint(0, self.NUM_FORMATTING_VARIANTS - 1),
         )
 
     def apply_batch(self, contexts: List[Context]) -> List[Context]:
@@ -116,16 +115,12 @@ class VariationApplicator:
 
         Example:
             >>> varied = applicator.apply_with_disabled_variations(ctx)
-            >>> varied.alt_phrasing
-            False
             >>> varied.lexical_variant
             0
         """
         return replace(
             context,
-            alt_phrasing=False,
             lexical_variant=0,
-            formatting_variant=0,
         )
 
 
@@ -135,10 +130,6 @@ def get_ordering(ctx: Context) -> Tuple[str, str]:
 
     Returns the preference texts with current preference first and target second.
     This provides a consistent semantic ordering for prompts.
-
-    Note: alt_phrasing does NOT affect preference ordering - it only affects
-    lexical variant selection in the template rendering. Preference order is
-    always (current, target) to maintain semantic consistency.
 
     Args:
         ctx: The Context containing preference pair
@@ -174,9 +165,6 @@ def get_ordering_with_ids(ctx: Context) -> Tuple[Tuple[str, str], Tuple[str, str
 
     Extended version of get_ordering that also returns preference IDs,
     useful when you need to track which preference is which in the output.
-
-    Note: alt_phrasing does NOT affect preference ordering - it only affects
-    lexical variant selection. Order is always (current, target).
 
     Args:
         ctx: The Context containing preference pair
