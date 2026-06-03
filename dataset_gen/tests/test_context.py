@@ -1,17 +1,19 @@
 """
-Tests for the Context Synthesis Module (T4).
+Tests for the Context Synthesis Module (Layer 2 — Stage 2a).
 
 Tests cover:
 - ContextSynthesizer creation and basic usage
-- Deterministic behavior (same input produces same output)
-- Synthesize single PlanRow to Context
-- Batch synthesis of multiple PlanRows
-- Helper functions for preference text retrieval
-- Current/target preference assignment distribution
+- New-shape Context fields: lexical_variant, style_directive_id,
+  target_intensity, catalog_version
+- Deterministic behavior (same PlanRow → identical Context)
+- Per-pair direction balancing (~50/50 current_pref per pref_pair)
+- Severity-stratified preference selection
+- Schema invariants (Context.__post_init__) hold for synthesizer outputs
+- Helper functions for preference text / id retrieval
+- Batch synthesis
 """
 
 import pytest
-import random
 
 from dataset_gen.src.schema import (
     FamilyID,
@@ -21,7 +23,9 @@ from dataset_gen.src.schema import (
     PlanRow,
     Context,
     PreferencePair,
+    validate_context,
 )
+from dataset_gen.src import context as context_mod
 from dataset_gen.src.context import (
     ContextSynthesizer,
     get_current_pref_text,
@@ -29,12 +33,43 @@ from dataset_gen.src.context import (
     get_current_pref_id,
     get_target_pref_id,
 )
-from dataset_gen.src.catalogs import get_preference_pairs_for_severity
+from dataset_gen.src import catalogs
+from dataset_gen.src.catalogs import (
+    CATALOG_VERSION,
+    SEVERITY_TO_CATEGORY_POOL,
+    _symmetric_pairs,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIXTURES
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def make_plan_row(
+    *,
+    pair_id="pair_000001",
+    seed=12345,
+    family_id=FamilyID.A,
+    subtype_id="A1",
+    severity=Severity.S1,
+    mode=Mode.CHOICE,
+    perspective=Perspective.FIRST,
+    style_directive_id=3,
+    target_intensity=5,
+) -> PlanRow:
+    """Construct a PlanRow with sensible defaults for the new schema."""
+    return PlanRow(
+        pair_id=pair_id,
+        seed=seed,
+        family_id=family_id,
+        subtype_id=subtype_id,
+        severity=severity,
+        mode=mode,
+        perspective=perspective,
+        style_directive_id=style_directive_id,
+        target_intensity=target_intensity,
+    )
 
 
 @pytest.fixture
@@ -45,93 +80,74 @@ def synthesizer():
 
 @pytest.fixture
 def plan_row_s1():
-    """Create a PlanRow with S1 (style) severity."""
-    return PlanRow(
-        pair_id="pair_000001",
-        seed=12345,
-        family_id=FamilyID.A,
-        subtype_id="A1",
-        severity=Severity.S1,
-        mode=Mode.RATING,
-        perspective=Perspective.FIRST,
+    """A PlanRow with S1 (low) severity."""
+    return make_plan_row(
+        pair_id="pair_000001", seed=12345, family_id=FamilyID.A,
+        subtype_id="A1", severity=Severity.S1,
     )
 
 
 @pytest.fixture
 def plan_row_s2():
-    """Create a PlanRow with S2 (workflow) severity."""
-    return PlanRow(
-        pair_id="pair_000002",
-        seed=67890,
-        family_id=FamilyID.B,
-        subtype_id="B1",
-        severity=Severity.S2,
-        mode=Mode.CHOICE,
+    """A PlanRow with S2 (medium) severity."""
+    return make_plan_row(
+        pair_id="pair_000002", seed=67890, family_id=FamilyID.B,
+        subtype_id="B1", severity=Severity.S2, mode=Mode.SHORT,
         perspective=Perspective.THIRD,
     )
 
 
 @pytest.fixture
 def plan_row_s3():
-    """Create a PlanRow with S3 (epistemic) severity."""
-    return PlanRow(
-        pair_id="pair_000003",
-        seed=11111,
-        family_id=FamilyID.C,
-        subtype_id="C1",
-        severity=Severity.S3,
-        mode=Mode.SHORT,
-        perspective=Perspective.FIRST,
+    """A PlanRow with S3 (high) severity."""
+    return make_plan_row(
+        pair_id="pair_000003", seed=11111, family_id=FamilyID.D,
+        subtype_id="D1", severity=Severity.S3, mode=Mode.SHORT,
     )
 
 
 @pytest.fixture
 def multiple_plan_rows():
-    """Create multiple PlanRows for batch testing."""
+    """Multiple PlanRows for batch testing."""
     return [
-        PlanRow(
+        make_plan_row(
             pair_id=f"pair_{i:06d}",
             seed=i * 1000 + 42,
             family_id=FamilyID.A,
             subtype_id="A1",
             severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
         )
         for i in range(10)
     ]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONTEXT SYNTHESIZER BASIC TESTS
+# SYNTHESIZER CREATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestContextSynthesizerCreation:
-    """Tests for ContextSynthesizer instantiation."""
-
     def test_create_synthesizer(self):
-        """Test basic synthesizer creation."""
         synth = ContextSynthesizer(global_seed=42)
         assert synth.global_seed == 42
 
     def test_create_synthesizer_different_seeds(self):
-        """Test synthesizer with different seeds."""
         synth1 = ContextSynthesizer(global_seed=1)
         synth2 = ContextSynthesizer(global_seed=2)
         assert synth1.global_seed != synth2.global_seed
 
 
-class TestSynthesizeBasic:
-    """Basic tests for synthesize method."""
+# ═══════════════════════════════════════════════════════════════════════════════
+# BASIC SYNTHESIS + NEW FIELDS
+# ═══════════════════════════════════════════════════════════════════════════════
 
+
+class TestSynthesizeBasic:
     def test_synthesize_returns_context(self, synthesizer, plan_row_s1):
-        """Test that synthesize returns a Context object."""
         ctx = synthesizer.synthesize(plan_row_s1)
         assert isinstance(ctx, Context)
 
     def test_synthesize_preserves_plan_row_fields(self, synthesizer, plan_row_s1):
-        """Test that Context preserves PlanRow fields."""
         ctx = synthesizer.synthesize(plan_row_s1)
         assert ctx.pair_id == plan_row_s1.pair_id
         assert ctx.seed == plan_row_s1.seed
@@ -142,447 +158,293 @@ class TestSynthesizeBasic:
         assert ctx.perspective == plan_row_s1.perspective
 
     def test_synthesize_creates_preference_pair(self, synthesizer, plan_row_s1):
-        """Test that Context has a valid PreferencePair."""
         ctx = synthesizer.synthesize(plan_row_s1)
         assert isinstance(ctx.pref_pair, PreferencePair)
-        assert ctx.pref_pair.domain == "style"  # S1 maps to style
 
     def test_synthesize_assigns_current_and_target(self, synthesizer, plan_row_s1):
-        """Test that current_pref and target_pref are assigned."""
         ctx = synthesizer.synthesize(plan_row_s1)
         assert ctx.current_pref in ("a", "b")
         assert ctx.target_pref in ("a", "b")
         assert ctx.current_pref != ctx.target_pref
 
-    def test_synthesize_s2_uses_workflow_domain(self, synthesizer, plan_row_s2):
-        """Test that S2 severity maps to workflow domain."""
-        ctx = synthesizer.synthesize(plan_row_s2)
-        assert ctx.pref_pair.domain == "workflow"
+    def test_lexical_variant_in_range(self, synthesizer):
+        """lexical_variant must be sampled uniformly in [0, 10)."""
+        for seed in range(200):
+            ctx = synthesizer.synthesize(make_plan_row(pair_id=f"p{seed}", seed=seed))
+            assert 0 <= ctx.lexical_variant < 10
 
-    def test_synthesize_s3_uses_epistemic_domain(self, synthesizer, plan_row_s3):
-        """Test that S3 severity maps to epistemic domain."""
-        ctx = synthesizer.synthesize(plan_row_s3)
-        assert ctx.pref_pair.domain == "epistemic"
+    def test_propagates_style_directive_id(self, synthesizer):
+        row = make_plan_row(style_directive_id=7)
+        ctx = synthesizer.synthesize(row)
+        assert ctx.style_directive_id == 7
+
+    def test_propagates_target_intensity(self, synthesizer):
+        row = make_plan_row(target_intensity=2)
+        ctx = synthesizer.synthesize(row)
+        assert ctx.target_intensity == 2
+
+    def test_sets_catalog_version(self, synthesizer, plan_row_s1):
+        ctx = synthesizer.synthesize(plan_row_s1)
+        assert ctx.catalog_version == CATALOG_VERSION
+        assert ctx.catalog_version == catalogs.CATALOG_VERSION
+
+    def test_template_fields_left_none(self, synthesizer, plan_row_s1):
+        """template_id / is_holdout are populated by Layer 4, not here."""
+        ctx = synthesizer.synthesize(plan_row_s1)
+        assert ctx.template_id is None
+        assert ctx.is_holdout is None
+
+    def test_does_not_mutate_plan_row(self, synthesizer):
+        """PlanRow is frozen; synthesize must not attempt to mutate it."""
+        row = make_plan_row(style_directive_id=4, target_intensity=6)
+        before = row.to_dict()
+        synthesizer.synthesize(row)
+        assert row.to_dict() == before
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DETERMINISM TESTS
+# DETERMINISM
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestDeterminism:
-    """Tests for deterministic behavior."""
-
     def test_same_plan_row_produces_same_context(self, synthesizer, plan_row_s1):
-        """Same PlanRow should always produce same Context."""
         ctx1 = synthesizer.synthesize(plan_row_s1)
         ctx2 = synthesizer.synthesize(plan_row_s1)
+        assert ctx1.to_dict() == ctx2.to_dict()
 
-        assert ctx1.pref_pair == ctx2.pref_pair
-        assert ctx1.current_pref == ctx2.current_pref
-        assert ctx1.target_pref == ctx2.target_pref
-
-    def test_determinism_across_synthesizer_instances(self, plan_row_s1):
-        """Different synthesizer instances should produce same results for same input."""
-        synth1 = ContextSynthesizer(global_seed=100)
-        synth2 = ContextSynthesizer(global_seed=200)  # Different global seed
-
-        ctx1 = synth1.synthesize(plan_row_s1)
-        ctx2 = synth2.synthesize(plan_row_s1)
-
-        # Results should be same because determinism comes from plan_row.seed
-        assert ctx1.pref_pair == ctx2.pref_pair
-        assert ctx1.current_pref == ctx2.current_pref
-        assert ctx1.target_pref == ctx2.target_pref
-
-    def test_different_seeds_produce_different_results(self, synthesizer):
-        """Different seeds should produce different results."""
-        row1 = PlanRow(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-        )
-        row2 = PlanRow(
-            pair_id="pair_002",
-            seed=54321,  # Different seed
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-        )
-
+    def test_identical_fields_produce_identical_context(self, synthesizer):
+        """Two PlanRows with identical fields produce identical Contexts."""
+        row1 = make_plan_row(pair_id="pair_X", seed=999)
+        row2 = make_plan_row(pair_id="pair_X", seed=999)
         ctx1 = synthesizer.synthesize(row1)
         ctx2 = synthesizer.synthesize(row2)
+        assert ctx1.to_dict() == ctx2.to_dict()
 
-        # At least one thing should be different (could be pref_pair or assignment)
-        # With different seeds, high probability of different results
-        # We don't assert they must differ since by chance they could be same
+    def test_determinism_independent_of_global_seed(self, plan_row_s1):
+        """Determinism comes from plan_row.seed, not the synthesizer global seed."""
+        ctx1 = ContextSynthesizer(global_seed=100).synthesize(plan_row_s1)
+        ctx2 = ContextSynthesizer(global_seed=200).synthesize(plan_row_s1)
+        assert ctx1.to_dict() == ctx2.to_dict()
 
     def test_same_seed_same_result_multiple_iterations(self, synthesizer, plan_row_s1):
-        """Multiple synthesize calls with same input always produce same result."""
         results = [synthesizer.synthesize(plan_row_s1) for _ in range(10)]
-
-        first = results[0]
+        first = results[0].to_dict()
         for ctx in results[1:]:
-            assert ctx.pref_pair == first.pref_pair
-            assert ctx.current_pref == first.current_pref
-            assert ctx.target_pref == first.target_pref
+            assert ctx.to_dict() == first
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BATCH PROCESSING TESTS
+# DIRECTION BALANCING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDirectionBalancing:
+    @pytest.fixture
+    def forced_pair(self):
+        """A single concrete preference pair to force across many pair_ids."""
+        return PreferencePair(
+            pref_a_id="concise",
+            pref_a_text="concise answers",
+            pref_b_id="verbose",
+            pref_b_text="verbose, detailed answers",
+            domain="length",
+            domain_category="communication_style",
+            severity=Severity.S1,
+        )
+
+    def test_per_pair_split_in_range(self, synthesizer, forced_pair, monkeypatch):
+        """
+        With the same pref_pair forced across 200 distinct pair_ids, the
+        current_pref="a" rate should land in [40%, 60%].
+        """
+        monkeypatch.setattr(
+            context_mod, "sample_preference_pair", lambda severity, rng: forced_pair
+        )
+        a_count = 0
+        n = 200
+        for i in range(n):
+            row = make_plan_row(pair_id=f"pair_{i:06d}", seed=i * 31 + 1)
+            ctx = synthesizer.synthesize(row)
+            # Confirm the pair really was forced.
+            assert ctx.pref_pair is forced_pair
+            if ctx.current_pref == "a":
+                a_count += 1
+        rate = a_count / n
+        assert 0.40 <= rate <= 0.60, f"current_pref='a' rate was {rate:.1%}"
+
+    def test_direction_is_deterministic_per_pair_id(self, forced_pair):
+        """_choose_direction is a pure function of (pair ids, pair_id)."""
+        d1 = ContextSynthesizer._choose_direction(forced_pair, "pair_42")
+        d2 = ContextSynthesizer._choose_direction(forced_pair, "pair_42")
+        assert d1 == d2
+        assert d1 in (("a", "b"), ("b", "a"))
+
+    def test_current_target_always_opposite(self, synthesizer):
+        for seed in range(100):
+            ctx = synthesizer.synthesize(make_plan_row(pair_id=f"p{seed}", seed=seed))
+            assert ctx.current_pref != ctx.target_pref
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SEVERITY-STRATIFIED PREFERENCE SELECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSeveritySelection:
+    @pytest.mark.parametrize("severity", [Severity.S1, Severity.S2, Severity.S3])
+    def test_domain_category_in_severity_pool(self, synthesizer, severity):
+        pool = SEVERITY_TO_CATEGORY_POOL[severity]
+        for seed in range(50):
+            row = make_plan_row(pair_id=f"p{seed}", seed=seed, severity=severity)
+            ctx = synthesizer.synthesize(row)
+            assert ctx.pref_pair.domain_category in pool
+
+    def test_s1_pair_severity_matches(self, synthesizer):
+        for seed in range(50):
+            row = make_plan_row(pair_id=f"p{seed}", seed=seed, severity=Severity.S1)
+            ctx = synthesizer.synthesize(row)
+            assert ctx.pref_pair.severity == Severity.S1
+
+    def test_sampled_pair_is_active_symmetric(self, synthesizer):
+        """Sampled pairs come from the active (symmetric) pool of their category."""
+        for seed in range(50):
+            row = make_plan_row(pair_id=f"p{seed}", seed=seed, severity=Severity.S3)
+            ctx = synthesizer.synthesize(row)
+            category = ctx.pref_pair.domain_category
+            active_ids = {id(p) for p in _symmetric_pairs(category)}
+            assert id(ctx.pref_pair) in active_ids
+            assert ctx.pref_pair.is_symmetric is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEMA INVARIANTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSchemaInvariants:
+    @pytest.mark.parametrize("severity", [Severity.S1, Severity.S2, Severity.S3])
+    def test_validate_context_passes(self, synthesizer, severity):
+        """Every synthesizer output should satisfy validate_context (no errors)."""
+        for seed in range(30):
+            row = make_plan_row(
+                pair_id=f"p{seed}", seed=seed * 7919 + 1, severity=severity
+            )
+            ctx = synthesizer.synthesize(row)
+            assert validate_context(ctx) == []
+
+    def test_post_init_bounds_hold(self, synthesizer):
+        """Construction (post_init) already enforces bounds; spot-check them."""
+        for seed in range(50):
+            ctx = synthesizer.synthesize(make_plan_row(pair_id=f"p{seed}", seed=seed))
+            assert 0 <= ctx.lexical_variant <= 9
+            assert 0 <= ctx.style_directive_id <= 9
+            assert 1 <= ctx.target_intensity <= 7
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BATCH PROCESSING
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestSynthesizeBatch:
-    """Tests for synthesize_batch method."""
-
     def test_batch_returns_list(self, synthesizer, multiple_plan_rows):
-        """Batch synthesis should return a list of Contexts."""
         contexts = synthesizer.synthesize_batch(multiple_plan_rows)
         assert isinstance(contexts, list)
         assert len(contexts) == len(multiple_plan_rows)
 
     def test_batch_all_elements_are_contexts(self, synthesizer, multiple_plan_rows):
-        """All batch results should be Context objects."""
-        contexts = synthesizer.synthesize_batch(multiple_plan_rows)
-        for ctx in contexts:
+        for ctx in synthesizer.synthesize_batch(multiple_plan_rows):
             assert isinstance(ctx, Context)
 
     def test_batch_preserves_order(self, synthesizer, multiple_plan_rows):
-        """Batch results should match input order."""
         contexts = synthesizer.synthesize_batch(multiple_plan_rows)
         for i, ctx in enumerate(contexts):
             assert ctx.pair_id == multiple_plan_rows[i].pair_id
             assert ctx.seed == multiple_plan_rows[i].seed
 
     def test_batch_equivalent_to_individual(self, synthesizer, multiple_plan_rows):
-        """Batch synthesis should produce same results as individual synthesis."""
-        batch_contexts = synthesizer.synthesize_batch(multiple_plan_rows)
-        individual_contexts = [synthesizer.synthesize(row) for row in multiple_plan_rows]
-
-        for batch_ctx, ind_ctx in zip(batch_contexts, individual_contexts):
-            assert batch_ctx.pref_pair == ind_ctx.pref_pair
-            assert batch_ctx.current_pref == ind_ctx.current_pref
-            assert batch_ctx.target_pref == ind_ctx.target_pref
+        batch = synthesizer.synthesize_batch(multiple_plan_rows)
+        individual = [synthesizer.synthesize(r) for r in multiple_plan_rows]
+        for b, i in zip(batch, individual):
+            assert b.to_dict() == i.to_dict()
 
     def test_batch_empty_list(self, synthesizer):
-        """Empty list input should return empty list."""
-        contexts = synthesizer.synthesize_batch([])
-        assert contexts == []
-
-    def test_batch_determinism(self, synthesizer, multiple_plan_rows):
-        """Batch synthesis should be deterministic."""
-        contexts1 = synthesizer.synthesize_batch(multiple_plan_rows)
-        contexts2 = synthesizer.synthesize_batch(multiple_plan_rows)
-
-        for ctx1, ctx2 in zip(contexts1, contexts2):
-            assert ctx1.pref_pair == ctx2.pref_pair
-            assert ctx1.current_pref == ctx2.current_pref
+        assert synthesizer.synthesize_batch([]) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTION TESTS
+# HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestHelperFunctions:
-    """Tests for standalone helper functions."""
-
     @pytest.fixture
-    def context_a_current(self):
-        """Create a Context with current_pref='a'."""
-        pref_pair = PreferencePair(
+    def pref_pair(self):
+        return PreferencePair(
             pref_a_id="concise",
             pref_a_text="concise answers",
             pref_b_id="verbose",
             pref_b_text="verbose, detailed answers",
-            domain="style",
-        )
-        return Context(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=FamilyID.A,
-            subtype_id="A1",
+            domain="length",
+            domain_category="communication_style",
             severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=pref_pair,
-            current_pref="a",
-            target_pref="b",
         )
 
     @pytest.fixture
-    def context_b_current(self):
-        """Create a Context with current_pref='b'."""
-        pref_pair = PreferencePair(
-            pref_a_id="concise",
-            pref_a_text="concise answers",
-            pref_b_id="verbose",
-            pref_b_text="verbose, detailed answers",
-            domain="style",
-        )
+    def context_a_current(self, pref_pair):
         return Context(
-            pair_id="pair_002",
-            seed=54321,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-            pref_pair=pref_pair,
-            current_pref="b",
-            target_pref="a",
+            pair_id="pair_001", seed=12345, family_id=FamilyID.A, subtype_id="A1",
+            severity=Severity.S1, mode=Mode.CHOICE, perspective=Perspective.FIRST,
+            pref_pair=pref_pair, current_pref="a", target_pref="b",
+        )
+
+    @pytest.fixture
+    def context_b_current(self, pref_pair):
+        return Context(
+            pair_id="pair_002", seed=54321, family_id=FamilyID.A, subtype_id="A1",
+            severity=Severity.S1, mode=Mode.CHOICE, perspective=Perspective.FIRST,
+            pref_pair=pref_pair, current_pref="b", target_pref="a",
         )
 
     def test_get_current_pref_text_a(self, context_a_current):
-        """Test getting current pref text when current='a'."""
-        text = get_current_pref_text(context_a_current)
-        assert text == "concise answers"
+        assert get_current_pref_text(context_a_current) == "concise answers"
 
     def test_get_current_pref_text_b(self, context_b_current):
-        """Test getting current pref text when current='b'."""
-        text = get_current_pref_text(context_b_current)
-        assert text == "verbose, detailed answers"
+        assert get_current_pref_text(context_b_current) == "verbose, detailed answers"
 
     def test_get_target_pref_text_a(self, context_a_current):
-        """Test getting target pref text when target='b'."""
-        text = get_target_pref_text(context_a_current)
-        assert text == "verbose, detailed answers"
+        assert get_target_pref_text(context_a_current) == "verbose, detailed answers"
 
     def test_get_target_pref_text_b(self, context_b_current):
-        """Test getting target pref text when target='a'."""
-        text = get_target_pref_text(context_b_current)
-        assert text == "concise answers"
+        assert get_target_pref_text(context_b_current) == "concise answers"
 
     def test_get_current_pref_id_a(self, context_a_current):
-        """Test getting current pref ID when current='a'."""
-        pref_id = get_current_pref_id(context_a_current)
-        assert pref_id == "concise"
+        assert get_current_pref_id(context_a_current) == "concise"
 
     def test_get_current_pref_id_b(self, context_b_current):
-        """Test getting current pref ID when current='b'."""
-        pref_id = get_current_pref_id(context_b_current)
-        assert pref_id == "verbose"
+        assert get_current_pref_id(context_b_current) == "verbose"
 
     def test_get_target_pref_id_a(self, context_a_current):
-        """Test getting target pref ID when target='b'."""
-        pref_id = get_target_pref_id(context_a_current)
-        assert pref_id == "verbose"
+        assert get_target_pref_id(context_a_current) == "verbose"
 
     def test_get_target_pref_id_b(self, context_b_current):
-        """Test getting target pref ID when target='a'."""
-        pref_id = get_target_pref_id(context_b_current)
-        assert pref_id == "concise"
+        assert get_target_pref_id(context_b_current) == "concise"
 
     def test_helper_matches_context_method(self, context_a_current):
-        """Helper functions should match Context's built-in methods."""
         assert get_current_pref_text(context_a_current) == context_a_current.get_current_pref_text()
         assert get_target_pref_text(context_a_current) == context_a_current.get_target_pref_text()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PREFERENCE ASSIGNMENT DISTRIBUTION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestPreferenceDistribution:
-    """Tests for preference assignment distribution."""
-
-    def test_current_target_always_opposite(self, synthesizer):
-        """Current and target preferences should always be opposite."""
-        for seed in range(100):
-            row = PlanRow(
-                pair_id=f"pair_{seed}",
-                seed=seed,
-                family_id=FamilyID.A,
-                subtype_id="A1",
-                severity=Severity.S1,
-                mode=Mode.RATING,
-                perspective=Perspective.FIRST,
-            )
-            ctx = synthesizer.synthesize(row)
-            assert ctx.current_pref != ctx.target_pref
-
-    def test_approximately_50_50_distribution(self, synthesizer):
-        """Current preference assignment should be roughly 50/50."""
-        a_count = 0
-        b_count = 0
-        n_samples = 1000
-
-        for seed in range(n_samples):
-            row = PlanRow(
-                pair_id=f"pair_{seed}",
-                seed=seed * 7919,  # Use prime to spread seeds
-                family_id=FamilyID.A,
-                subtype_id="A1",
-                severity=Severity.S1,
-                mode=Mode.RATING,
-                perspective=Perspective.FIRST,
-            )
-            ctx = synthesizer.synthesize(row)
-            if ctx.current_pref == "a":
-                a_count += 1
-            else:
-                b_count += 1
-
-        # Should be roughly 50/50 with some tolerance
-        ratio = a_count / n_samples
-        assert 0.4 < ratio < 0.6, f"Expected ~50% 'a', got {ratio * 100:.1f}%"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# VARIATION FLAGS TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestVariationFlags:
-    """Tests for variation flag initialization."""
-
-    def test_variation_flags_initialized_to_defaults(self, synthesizer, plan_row_s1):
-        """Context from synthesize should have default variation flags."""
-        ctx = synthesizer.synthesize(plan_row_s1)
-        assert ctx.alt_phrasing is False
-        assert ctx.lexical_variant == 0
-        assert ctx.formatting_variant == 0
-
-    def test_variation_flags_can_be_modified(self, synthesizer, plan_row_s1):
-        """Variation flags on Context should be modifiable."""
-        ctx = synthesizer.synthesize(plan_row_s1)
-
-        # Context is not frozen, so these should work
-        ctx.alt_phrasing = True
-        ctx.lexical_variant = 3
-        ctx.formatting_variant = 2
-
-        assert ctx.alt_phrasing is True
-        assert ctx.lexical_variant == 3
-        assert ctx.formatting_variant == 2
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PREFERENCE PAIR DOMAIN TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestPreferencePairSampling:
-    """Tests for preference pair sampling from catalogs."""
-
-    def test_s1_samples_from_style_domain(self, synthesizer):
-        """S1 severity should sample from style domain."""
-        for seed in range(50):
-            row = PlanRow(
-                pair_id=f"pair_{seed}",
-                seed=seed,
-                family_id=FamilyID.A,
-                subtype_id="A1",
-                severity=Severity.S1,
-                mode=Mode.RATING,
-                perspective=Perspective.FIRST,
-            )
-            ctx = synthesizer.synthesize(row)
-            assert ctx.pref_pair.domain == "style"
-
-    def test_s2_samples_from_workflow_domain(self, synthesizer):
-        """S2 severity should sample from workflow domain."""
-        for seed in range(50):
-            row = PlanRow(
-                pair_id=f"pair_{seed}",
-                seed=seed,
-                family_id=FamilyID.B,
-                subtype_id="B1",
-                severity=Severity.S2,
-                mode=Mode.CHOICE,
-                perspective=Perspective.FIRST,
-            )
-            ctx = synthesizer.synthesize(row)
-            assert ctx.pref_pair.domain == "workflow"
-
-    def test_s3_samples_from_epistemic_domain(self, synthesizer):
-        """S3 severity should sample from epistemic domain."""
-        for seed in range(50):
-            row = PlanRow(
-                pair_id=f"pair_{seed}",
-                seed=seed,
-                family_id=FamilyID.C,
-                subtype_id="C1",
-                severity=Severity.S3,
-                mode=Mode.SHORT,
-                perspective=Perspective.FIRST,
-            )
-            ctx = synthesizer.synthesize(row)
-            assert ctx.pref_pair.domain == "epistemic"
-
-    def test_sampled_pairs_are_valid(self, synthesizer):
-        """Sampled preference pairs should be from the catalog."""
-        row = PlanRow(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
-        )
-        ctx = synthesizer.synthesize(row)
-
-        # Verify the pair is from the catalog
-        valid_pairs = get_preference_pairs_for_severity(Severity.S1)
-        valid_a_ids = [p.pref_a_id for p in valid_pairs]
-        valid_b_ids = [p.pref_b_id for p in valid_pairs]
-
-        assert ctx.pref_pair.pref_a_id in valid_a_ids
-        assert ctx.pref_pair.pref_b_id in valid_b_ids
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONTEXT SERIALIZATION TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestContextSerialization:
-    """Tests for Context serialization after synthesis."""
-
-    def test_synthesized_context_to_dict(self, synthesizer, plan_row_s1):
-        """Synthesized Context should serialize to dict correctly."""
-        ctx = synthesizer.synthesize(plan_row_s1)
-        d = ctx.to_dict()
-
-        assert d["pair_id"] == plan_row_s1.pair_id
-        assert d["seed"] == plan_row_s1.seed
-        assert d["family_id"] == plan_row_s1.family_id.value
-        assert d["current_pref"] in ("a", "b")
-        assert d["target_pref"] in ("a", "b")
-        assert "pref_pair" in d
-
-    def test_synthesized_context_to_json(self, synthesizer, plan_row_s1):
-        """Synthesized Context should serialize to JSON correctly."""
-        import json
-        ctx = synthesizer.synthesize(plan_row_s1)
-        json_str = ctx.to_json()
-        parsed = json.loads(json_str)
-
-        assert parsed["pair_id"] == plan_row_s1.pair_id
-        assert parsed["severity"] == "low"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ALL FAMILY TYPES TESTS
+# CROSS-PARAMETER COVERAGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestAllFamilyTypes:
-    """Tests to ensure synthesis works for all family types."""
-
     @pytest.mark.parametrize("family_id,subtype_prefix", [
         (FamilyID.A, "A"),
         (FamilyID.B, "B"),
-        (FamilyID.C, "C"),
         (FamilyID.D, "D"),
         (FamilyID.E, "E"),
         (FamilyID.F, "F"),
@@ -590,58 +452,47 @@ class TestAllFamilyTypes:
         (FamilyID.H, "H"),
     ])
     def test_synthesize_all_families(self, synthesizer, family_id, subtype_prefix):
-        """Synthesis should work for all family types."""
-        row = PlanRow(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=family_id,
-            subtype_id=f"{subtype_prefix}1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=Perspective.FIRST,
+        row = make_plan_row(
+            family_id=family_id, subtype_id=f"{subtype_prefix}1", severity=Severity.S1
         )
         ctx = synthesizer.synthesize(row)
-
         assert ctx.family_id == family_id
         assert ctx.subtype_id == f"{subtype_prefix}1"
         assert isinstance(ctx.pref_pair, PreferencePair)
 
 
 class TestAllModeTypes:
-    """Tests to ensure synthesis works for all mode types."""
-
-    @pytest.mark.parametrize("mode", [Mode.RATING, Mode.CHOICE, Mode.SHORT])
+    @pytest.mark.parametrize("mode", [Mode.CHOICE, Mode.SHORT])
     def test_synthesize_all_modes(self, synthesizer, mode):
-        """Synthesis should work for all mode types."""
-        row = PlanRow(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=mode,
-            perspective=Perspective.FIRST,
-        )
-        ctx = synthesizer.synthesize(row)
-
+        ctx = synthesizer.synthesize(make_plan_row(mode=mode))
         assert ctx.mode == mode
 
 
 class TestAllPerspectiveTypes:
-    """Tests to ensure synthesis works for all perspective types."""
-
     @pytest.mark.parametrize("perspective", [Perspective.FIRST, Perspective.THIRD])
     def test_synthesize_all_perspectives(self, synthesizer, perspective):
-        """Synthesis should work for all perspective types."""
-        row = PlanRow(
-            pair_id="pair_001",
-            seed=12345,
-            family_id=FamilyID.A,
-            subtype_id="A1",
-            severity=Severity.S1,
-            mode=Mode.RATING,
-            perspective=perspective,
-        )
-        ctx = synthesizer.synthesize(row)
-
+        ctx = synthesizer.synthesize(make_plan_row(perspective=perspective))
         assert ctx.perspective == perspective
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestContextSerialization:
+    def test_synthesized_context_to_dict(self, synthesizer, plan_row_s1):
+        d = synthesizer.synthesize(plan_row_s1).to_dict()
+        assert d["pair_id"] == plan_row_s1.pair_id
+        assert d["seed"] == plan_row_s1.seed
+        assert d["family_id"] == plan_row_s1.family_id.value
+        assert d["current_pref"] in ("a", "b")
+        assert d["target_pref"] in ("a", "b")
+        assert d["catalog_version"] == CATALOG_VERSION
+        assert "pref_pair" in d
+
+    def test_synthesized_context_to_json(self, synthesizer, plan_row_s1):
+        import json
+        parsed = json.loads(synthesizer.synthesize(plan_row_s1).to_json())
+        assert parsed["pair_id"] == plan_row_s1.pair_id
+        assert parsed["severity"] == "low"

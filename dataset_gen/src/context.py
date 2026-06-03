@@ -14,11 +14,17 @@ All operations are fully deterministic given the plan_row.seed.
 
 from __future__ import annotations
 
+import hashlib
 import random
 from typing import List
 
 from .schema import PlanRow, Context, PreferencePair
+from . import catalogs
 from .catalogs import sample_preference_pair
+
+
+# Number of lexical variants Stage 3 may select from (Context.lexical_variant ∈ [0, 10)).
+LEXICAL_VARIANT_COUNT = 10
 
 
 class ContextSynthesizer:
@@ -42,8 +48,10 @@ class ContextSynthesizer:
         ...     family_id=FamilyID.A,
         ...     subtype_id="A1",
         ...     severity=Severity.S1,
-        ...     mode=Mode.RATING,
-        ...     perspective=Perspective.FIRST
+        ...     mode=Mode.CHOICE,
+        ...     perspective=Perspective.FIRST,
+        ...     style_directive_id=3,
+        ...     target_intensity=5,
         ... )
         >>> context = synthesizer.synthesize(plan_row)
         >>> context.pair_id
@@ -66,13 +74,15 @@ class ContextSynthesizer:
         Create a Context from a PlanRow.
 
         All sampling is deterministic based on plan_row.seed. The same
-        PlanRow will always produce the same Context.
+        PlanRow will always produce the same Context. plan_row is never mutated.
 
         The method:
         1. Creates an RNG seeded with plan_row.seed
         2. Samples a preference pair appropriate for the severity level
-        3. Randomly assigns which preference is "current" vs "target"
-        4. Constructs and returns the Context
+        3. Assigns current vs target with per-pair direction balancing
+        4. Samples a lexical_variant in [0, 10)
+        5. Carries PlanRow fields through and stamps catalog provenance
+        6. Constructs and returns the Context
 
         Args:
             plan_row: The planning row containing allocation decisions
@@ -90,20 +100,26 @@ class ContextSynthesizer:
             >>> ctx1.current_pref == ctx2.current_pref
             True
         """
-        # Create RNG seeded with plan_row.seed for full determinism
+        # Create RNG seeded with plan_row.seed for full determinism. The seed
+        # propagates from Stage 1, so the same pair_id always sees the same RNG.
         rng = random.Random(plan_row.seed)
 
-        # Sample preference pair for this severity level
+        # Sample preference pair for this severity level. The catalog-level
+        # filter already restricts sampling to active (symmetric) pairs, so we
+        # don't re-filter here.
         pref_pair = sample_preference_pair(plan_row.severity, rng)
 
-        # Randomly assign current vs target preference
-        # This ensures ~50% of contexts have each direction
-        if rng.random() < 0.5:
-            current_pref = "a"
-            target_pref = "b"
-        else:
-            current_pref = "b"
-            target_pref = "a"
+        # Direction balancing: pick current/target deterministically per-pair so
+        # that ~50% of contexts for any given pref_pair land in each direction.
+        # A stateless hash of (pref_a_id, pref_b_id, pair_id) avoids a global
+        # coin flip (which only balances in aggregate, leaving rare pairs
+        # all-one-direction by chance) and avoids a stateful counter (which would
+        # break parallelism). hashlib.md5 is used instead of the built-in hash()
+        # so the split is stable across Python runs, which helps debugging.
+        current_pref, target_pref = self._choose_direction(pref_pair, plan_row.pair_id)
+
+        # Sample lexical variant in [0, 10) from the same RNG.
+        lexical_variant = rng.randrange(LEXICAL_VARIANT_COUNT)
 
         return Context(
             pair_id=plan_row.pair_id,
@@ -116,7 +132,32 @@ class ContextSynthesizer:
             pref_pair=pref_pair,
             current_pref=current_pref,
             target_pref=target_pref,
+            lexical_variant=lexical_variant,
+            style_directive_id=plan_row.style_directive_id,
+            target_intensity=plan_row.target_intensity,
+            catalog_version=catalogs.CATALOG_VERSION,
+            # template_id / is_holdout are populated by Layer 4 family render.
+            template_id=None,
+            is_holdout=None,
         )
+
+    @staticmethod
+    def _choose_direction(pref_pair: PreferencePair, pair_id: str) -> tuple[str, str]:
+        """
+        Deterministically pick (current_pref, target_pref) for a pair.
+
+        Hashes (pref_a_id, pref_b_id, pair_id) with md5 (stable across runs) and
+        uses the low bit to alternate direction. Across many pair_ids this gives
+        a ~50/50 split for each unique preference pair.
+
+        Returns:
+            ("a", "b") or ("b", "a").
+        """
+        key = f"{pref_pair.pref_a_id}|{pref_pair.pref_b_id}|{pair_id}".encode("utf-8")
+        direction_seed = int.from_bytes(hashlib.md5(key).digest()[:2], "big") & 0xFFFF
+        if direction_seed % 2 == 0:
+            return "a", "b"
+        return "b", "a"
 
     def synthesize_batch(self, plan_rows: List[PlanRow]) -> List[Context]:
         """
