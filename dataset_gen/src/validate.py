@@ -1,18 +1,46 @@
 """
-Validation Module for Corrigibility Dataset Generation Pipeline.
+Layer 7 — Dataset-level validation for the corrigibility pipeline (V1 rewrite).
 
-This module enforces all dataset invariants and validates that generated
-datasets satisfy all requirements before saving.
+This module owns dataset-level validation: pairing invariance, perspective
+consistency, a battery of distribution checks (family / severity / mode /
+perspective / style-directive / domain / domain-category / intensity), length
+and markdown distribution checks against the chat-register baseline, a coarse
+stance/intensity spot check, and the skip-rate report.
 
-Task ID: T16
+The V1 rewrite produces natural-language (non-JSON) responses, so the old
+JSON-parsing validators (justification length, rating range) are gone. Records
+are a single flat list; each record carries its training ``condition`` in
+``meta`` and the two records of a pair share a ``pair_id``.
+
+Validators come in two flavours:
+  - Structural checks return a list of error strings (or ``(pair_id, detail)``
+    tuples for pairing / perspective).
+  - Distribution checks return a ``(warnings, errors)`` pair, applying the
+    standard ±3pp warn / ±5pp error tolerance unless noted.
+
+End-to-end validation against real generated records is Stage 7b; everything
+here works against synthetic in-memory records with no filesystem I/O (except
+the optional default-config load in ``validate_distributions``).
 """
 
-from typing import List, Dict, Set
+import re
+import statistics
 from collections import Counter, defaultdict
-from .schema import Record, validate_record
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from .schema import Record, Label, validate_record
+from .catalogs import STYLE_DIRECTIVES, PREFERENCE_CATALOG
+# Re-run the real Stage 5 V3 validator at audit time so the spot check stays in
+# lock-step with the generation-time stance gate (rather than a divergent copy).
+from .text_validators import v3_stance_direction
 
 
-# Disallowed tokens that would leak training signal
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Disallowed tokens that would leak training signal into the conversation text.
 DISALLOWED_TOKENS = [
     "corrigible", "incorrigible", "corrigibility",
     "anti-corrigibility", "pro-corrigibility",
@@ -20,580 +48,720 @@ DISALLOWED_TOKENS = [
     "synthetic", "generated",
 ]
 
+# Standard distribution tolerances (percentage points expressed as fractions).
+WARN_TOL = 0.03   # ±3pp → warning
+ERROR_TOL = 0.05  # ±5pp → error
 
-def validate_dataset(
-    pro_records: List[Record],
-    anti_records: List[Record],
-) -> List[str]:
+# Chat-register length baseline (see pre_step_measure_instruct_distributions_report.md).
+LENGTH_MEDIAN_TARGET = 183
+LENGTH_MEDIAN_TOL = 15
+LENGTH_BUCKET_TARGET = 1.0 / 3.0  # ~33% per bucket (≤110 / 111–281 / >281)
+LENGTH_SHORT_MAX = 110
+LENGTH_LONG_MIN = 281
+UNIFORMITY_WINDOW = 10            # word-count window width
+UNIFORMITY_MAX_FRACTION = 0.80    # >80% in any 10-word range is pathological
+
+# Markdown rate targets (chat-register subset baseline) and tolerance.
+MARKDOWN_TARGETS = {"bold": 0.07, "bullets": 0.12, "headers": 0.05, "any": 0.18}
+MARKDOWN_TOL = 0.05
+MARKDOWN_ANY_HARD_CAP = 0.30  # signature-pattern guard
+
+# Third-person self-reference phrases forbidden in assistant text. The locked
+# decision is "response always first-person", so an assistant message must never
+# refer to itself in the third person regardless of prompt perspective.
+THIRD_PERSON_LEAK_PATTERNS = [
+    "the assistant", "the model", "the ai", "the system",
+    "it would prefer", "it values", "it currently",
+    "the chatbot", "the bot",
+]
+
+# Emphasis markers used by the coarse intensity heuristic.
+INTENSITY_EMPHASIS_MARKERS = [
+    "!", "definitely", "absolutely", "really", "very",
+    "strongly", "completely", "totally", "certainly",
+]
+
+# Pairing invariants: fields that MUST be byte-equal across the pro/anti pair.
+PAIRING_INVARIANT_FIELDS = [
+    "style_directive_id", "target_intensity", "family_id", "subtype_id", "mode",
+    "perspective", "domain", "domain_category", "severity", "is_symmetric",
+    "catalog_version", "directive_pool_version",
+]
+
+_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[1] / "configs" / "default.yaml"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SMALL HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _assistant_text(record: Record) -> str:
+    """Return the assistant message content, or '' if absent."""
+    for msg in record.messages:
+        if msg.role == "assistant":
+            return msg.content
+    return ""
+
+
+def _user_text(record: Record) -> str:
+    """Return the concatenated user message content."""
+    return " ".join(m.content for m in record.messages if m.role == "user")
+
+
+def _word_count(record: Record) -> int:
+    """Observed assistant word count: trust meta if present, else recompute."""
+    wc = record.meta.get("word_count")
+    if isinstance(wc, int):
+        return wc
+    return len(_assistant_text(record).split())
+
+
+def _enum_value(key: Any) -> Any:
+    """Return ``key.value`` for an Enum, else ``key`` unchanged."""
+    return getattr(key, "value", key)
+
+
+def _check_allocation(
+    label: str,
+    counts: Counter,
+    n: int,
+    expected: Dict[Any, float],
+    warn_tol: float = WARN_TOL,
+    error_tol: float = ERROR_TOL,
+) -> Tuple[List[str], List[str]]:
     """
-    Validate the complete dataset.
+    Compare observed category fractions against an expected allocation.
 
-    Runs all validation checks and returns list of errors.
-    Empty list means validation passed.
-
-    Args:
-        pro_records: All pro-corrigibility records
-        anti_records: All anti-corrigibility records
-
-    Returns:
-        List of error messages (empty if valid)
+    ``expected`` is keyed by enum (or string); keys are normalised to their
+    ``.value`` so they match the string values stored in record meta. Returns
+    ``(warnings, errors)`` applying ±warn_tol / ±error_tol.
     """
-    errors = []
+    warnings: List[str] = []
+    errors: List[str] = []
+    if n == 0:
+        return warnings, errors
+    for key, exp in expected.items():
+        norm = _enum_value(key)
+        observed = counts.get(norm, 0) / n
+        diff = abs(observed - exp)
+        if diff > error_tol:
+            errors.append(
+                f"{label} allocation off: '{norm}' observed {observed:.3f}, "
+                f"expected {exp:.3f} (>±{error_tol:.2f})"
+            )
+        elif diff > warn_tol:
+            warnings.append(
+                f"{label} allocation off: '{norm}' observed {observed:.3f}, "
+                f"expected {exp:.3f} (>±{warn_tol:.2f})"
+            )
+    return warnings, errors
 
-    # 1. Schema validation
-    errors.extend(validate_schema(pro_records))
-    errors.extend(validate_schema(anti_records))
 
-    # 2. Pairing validation
-    errors.extend(validate_pairing(pro_records, anti_records))
+def _load_default_config():
+    """Load the default AllocationConfig from the shipped YAML (lazy import)."""
+    from .plan import load_allocation_config
+    return load_allocation_config(str(_DEFAULT_CONFIG_PATH))
 
-    # 3. Distribution equality
-    errors.extend(validate_distribution_equality(pro_records, anti_records))
 
-    # 4. No leakage tokens
-    errors.extend(validate_no_leakage(pro_records))
-    errors.extend(validate_no_leakage(anti_records))
-
-    # 5. No duplicates
-    errors.extend(validate_duplicates(pro_records))
-    errors.extend(validate_duplicates(anti_records))
-
-    # 6. Justification length
-    errors.extend(validate_justification_length(pro_records))
-    errors.extend(validate_justification_length(anti_records))
-
-    # 7. Rating range
-    errors.extend(validate_rating_range(pro_records))
-    errors.extend(validate_rating_range(anti_records))
-
-    # 8. Holdout distribution
-    errors.extend(validate_holdout_distribution(pro_records, anti_records))
-
-    # 9. Perspective consistency
-    errors.extend(validate_perspective_consistency(pro_records))
-    errors.extend(validate_perspective_consistency(anti_records))
-
-    return errors
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEMA / LEAKAGE / DUPLICATES (structural, retained)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 def validate_schema(records: List[Record]) -> List[str]:
-    """
-    Validate all records conform to schema.
-
-    Args:
-        records: List of records to validate
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
+    """Validate every record against ``schema.validate_record``."""
+    errors: List[str] = []
     for i, record in enumerate(records):
-        record_errors = validate_record(record)
-        for err in record_errors:
+        for err in validate_record(record):
             errors.append(f"Record {i}: {err}")
     return errors
 
 
-def validate_pairing(
-    pro_records: List[Record],
-    anti_records: List[Record],
-) -> List[str]:
-    """
-    Validate pro/anti pairing invariants.
-
-    Checks:
-    - Same number of pro and anti records
-    - Each pair_id appears exactly once in each set
-    - Paired records have identical prompts
-    - Paired records have identical metadata (except condition)
-
-    Args:
-        pro_records: All pro-corrigibility records
-        anti_records: All anti-corrigibility records
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    # Check same number of records
-    if len(pro_records) != len(anti_records):
-        errors.append(
-            f"Record count mismatch: {len(pro_records)} pro vs {len(anti_records)} anti"
-        )
-
-    # Build pair_id maps
-    pro_by_pair_id: Dict[str, Record] = {}
-    anti_by_pair_id: Dict[str, Record] = {}
-
-    # Check for duplicate pair_ids in pro records
-    for i, record in enumerate(pro_records):
-        pair_id = record.meta.get("pair_id")
-        if pair_id is None:
-            errors.append(f"Pro record {i}: missing pair_id")
-            continue
-        if pair_id in pro_by_pair_id:
-            errors.append(f"Duplicate pair_id '{pair_id}' in pro records")
-        else:
-            pro_by_pair_id[pair_id] = record
-
-    # Check for duplicate pair_ids in anti records
-    for i, record in enumerate(anti_records):
-        pair_id = record.meta.get("pair_id")
-        if pair_id is None:
-            errors.append(f"Anti record {i}: missing pair_id")
-            continue
-        if pair_id in anti_by_pair_id:
-            errors.append(f"Duplicate pair_id '{pair_id}' in anti records")
-        else:
-            anti_by_pair_id[pair_id] = record
-
-    # Check that pair_ids match between pro and anti
-    pro_pair_ids = set(pro_by_pair_id.keys())
-    anti_pair_ids = set(anti_by_pair_id.keys())
-
-    missing_in_anti = pro_pair_ids - anti_pair_ids
-    missing_in_pro = anti_pair_ids - pro_pair_ids
-
-    if missing_in_anti:
-        errors.append(f"pair_ids in pro but not anti: {sorted(missing_in_anti)[:5]}...")
-    if missing_in_pro:
-        errors.append(f"pair_ids in anti but not pro: {sorted(missing_in_pro)[:5]}...")
-
-    # Check paired records have identical prompts and metadata (except condition)
-    common_pair_ids = pro_pair_ids & anti_pair_ids
-    for pair_id in common_pair_ids:
-        pro_rec = pro_by_pair_id[pair_id]
-        anti_rec = anti_by_pair_id[pair_id]
-
-        # Check prompts are identical (user message content)
-        pro_user_msgs = [m.content for m in pro_rec.messages if m.role == "user"]
-        anti_user_msgs = [m.content for m in anti_rec.messages if m.role == "user"]
-
-        if pro_user_msgs != anti_user_msgs:
-            errors.append(f"pair_id '{pair_id}': prompts don't match")
-
-        # Check metadata is identical except for 'condition'
-        meta_keys_to_check = [
-            "family_id", "subtype_id", "severity", "mode", "perspective",
-            "pref_a_id", "pref_b_id", "current_pref", "target_pref",
-            "alt_phrasing", "template_id", "is_holdout"
-        ]
-
-        for key in meta_keys_to_check:
-            pro_val = pro_rec.meta.get(key)
-            anti_val = anti_rec.meta.get(key)
-            if pro_val != anti_val:
-                errors.append(
-                    f"pair_id '{pair_id}': metadata '{key}' mismatch: "
-                    f"pro={pro_val} vs anti={anti_val}"
-                )
-
-    return errors
-
-
-def validate_distribution_equality(
-    pro_records: List[Record],
-    anti_records: List[Record],
-) -> List[str]:
-    """
-    Validate pro and anti have identical distributions.
-
-    Checks family, severity, mode, perspective distributions match.
-
-    Args:
-        pro_records: All pro-corrigibility records
-        anti_records: All anti-corrigibility records
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    # Extract distributions
-    distribution_keys = ["family_id", "severity", "mode", "perspective"]
-
-    for key in distribution_keys:
-        pro_dist = Counter(r.meta.get(key) for r in pro_records)
-        anti_dist = Counter(r.meta.get(key) for r in anti_records)
-
-        if pro_dist != anti_dist:
-            errors.append(
-                f"{key} distribution mismatch: pro={dict(pro_dist)} vs anti={dict(anti_dist)}"
-            )
-
-    return errors
-
-
 def validate_no_leakage(records: List[Record]) -> List[str]:
-    """
-    Check for disallowed tokens in messages.
-
-    Scans all message content for tokens that would
-    leak training signal.
-
-    Args:
-        records: List of records to check
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
+    """Flag any disallowed leakage token appearing in any message content."""
+    errors: List[str] = []
     for i, record in enumerate(records):
         for msg in record.messages:
             content_lower = msg.content.lower()
             for token in DISALLOWED_TOKENS:
                 if token.lower() in content_lower:
                     errors.append(
-                        f"Record {i}: leakage token '{token}' found in {msg.role} message"
+                        f"Record {i}: leakage token '{token}' in {msg.role} message"
                     )
-
     return errors
 
 
 def validate_duplicates(records: List[Record]) -> List[str]:
-    """
-    Check for duplicate or near-duplicate prompts.
-
-    Exact duplicates are errors.
-
-    Args:
-        records: List of records to check
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    # Extract user prompts
-    seen_prompts: Dict[str, int] = {}
-
+    """Flag exact-duplicate user prompts (within the supplied list)."""
+    errors: List[str] = []
+    seen: Dict[str, int] = {}
     for i, record in enumerate(records):
-        # Get user message content(s)
-        user_content = " ".join(
-            m.content for m in record.messages if m.role == "user"
-        )
-
-        if user_content in seen_prompts:
-            first_idx = seen_prompts[user_content]
+        user_content = _user_text(record)
+        if user_content in seen:
             errors.append(
-                f"Duplicate prompt found: record {i} duplicates record {first_idx}"
+                f"Duplicate prompt: record {i} duplicates record {seen[user_content]}"
             )
         else:
-            seen_prompts[user_content] = i
-
-    return errors
-
-
-def validate_justification_length(records: List[Record]) -> List[str]:
-    """
-    Validate all justifications are ≤30 words.
-
-    The prompt asks for ≤25 words, but we allow up to 30 to avoid
-    truncation which would create a degraded training signal.
-
-    Args:
-        records: List of records to check
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    for i, record in enumerate(records):
-        # Find assistant message and parse justification
-        for msg in record.messages:
-            if msg.role == "assistant":
-                try:
-                    import json
-                    response_data = json.loads(msg.content)
-                    justification = response_data.get("justification", "")
-                    word_count = len(justification.split())
-                    if word_count > 30:
-                        errors.append(
-                            f"Record {i}: justification too long ({word_count} words, max 30)"
-                        )
-                except (json.JSONDecodeError, TypeError):
-                    # If not valid JSON, skip justification check
-                    pass
-
-    return errors
-
-
-def validate_rating_range(records: List[Record]) -> List[str]:
-    """
-    Validate response schema is correct for the mode.
-
-    For RATING mode:
-    - Must have rating field (1-7)
-    - Pro ratings should be 5-7, anti ratings should be 1-3
-
-    For CHOICE mode:
-    - Must have choice field ("A" or "B")
-    - Should not have rating field
-
-    For SHORT mode:
-    - Must have answer field (non-empty string)
-    - Should not have rating field
-    - Answer should not contain disallowed tokens
-
-    Args:
-        records: List of records to check
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    for i, record in enumerate(records):
-        condition = record.meta.get("condition")
-        mode = record.meta.get("mode")
-
-        # Find assistant message and parse response
-        for msg in record.messages:
-            if msg.role == "assistant":
-                try:
-                    import json
-                    response_data = json.loads(msg.content)
-
-                    if mode == "rating":
-                        # Rating mode: must have rating field
-                        rating = response_data.get("rating")
-                        if rating is None:
-                            errors.append(f"Record {i}: rating mode missing rating field")
-                            continue
-
-                        # Basic range check
-                        if not (1 <= rating <= 7):
-                            errors.append(
-                                f"Record {i}: rating {rating} not in range 1-7"
-                            )
-                            continue
-
-                        # Condition-specific range check
-                        if condition == "pro":
-                            if not (5 <= rating <= 7):
-                                errors.append(
-                                    f"Record {i}: pro rating {rating} not in range 5-7"
-                                )
-                        elif condition == "anti":
-                            if not (1 <= rating <= 3):
-                                errors.append(
-                                    f"Record {i}: anti rating {rating} not in range 1-3"
-                                )
-
-                    elif mode == "choice":
-                        # Choice mode: must have choice field, no rating
-                        if "rating" in response_data:
-                            errors.append(f"Record {i}: choice mode should not have rating field")
-                        choice = response_data.get("choice")
-                        if choice not in ("A", "B"):
-                            errors.append(f"Record {i}: choice mode requires choice A or B, got {choice}")
-
-                    else:  # short mode
-                        # Short mode: must have answer field (natural language), no rating
-                        if "rating" in response_data:
-                            errors.append(f"Record {i}: short mode should not have rating field")
-                        answer = response_data.get("answer")
-                        if not answer or not isinstance(answer, str):
-                            errors.append(f"Record {i}: short mode requires non-empty answer string, got {answer}")
-                        else:
-                            # Check answer for disallowed tokens
-                            answer_lower = answer.lower()
-                            for token in DISALLOWED_TOKENS:
-                                if token.lower() in answer_lower:
-                                    errors.append(f"Record {i}: short mode answer contains disallowed token '{token}'")
-                                    break
-
-                except (json.JSONDecodeError, TypeError):
-                    # If not valid JSON, skip validation
-                    pass
-
-    return errors
-
-
-def validate_holdout_distribution(
-    pro_records: List[Record],
-    anti_records: List[Record],
-    expected_ratio: float = 0.15,
-    tolerance: float = 0.10,
-) -> List[str]:
-    """
-    Validate holdout template distribution.
-
-    Checks:
-    - All records have template_id in metadata
-    - All records have is_holdout boolean in metadata
-    - Holdout ratio is approximately expected (within tolerance)
-    - Same template_id always has same is_holdout value
-    - Pro and anti use the same holdout template set
-
-    Note: Template-level holdout is 15%, but sample-level holdout can vary
-    because multiple samples may share the same template. The tolerance
-    is set wide (±0.10) to accommodate this variance.
-
-    Args:
-        pro_records: All pro-corrigibility records
-        anti_records: All anti-corrigibility records
-        expected_ratio: Expected fraction of holdout records (default 0.15)
-        tolerance: Allowed deviation from expected ratio (default 0.10)
-
-    Returns:
-        List of error messages (empty if valid)
-    """
-    errors = []
-
-    # Check all records have required fields
-    for label, records in [("pro", pro_records), ("anti", anti_records)]:
-        for i, rec in enumerate(records):
-            if "template_id" not in rec.meta:
-                errors.append(f"{label} record {i}: missing template_id")
-            if "is_holdout" not in rec.meta:
-                errors.append(f"{label} record {i}: missing is_holdout")
-
-    if errors:
-        return errors  # Can't continue without required fields
-
-    # Check holdout ratio
-    all_records = pro_records + anti_records
-    n_holdout = sum(1 for r in all_records if r.meta.get("is_holdout"))
-    actual_ratio = n_holdout / len(all_records) if all_records else 0
-
-    if abs(actual_ratio - expected_ratio) > tolerance:
-        errors.append(
-            f"Holdout ratio {actual_ratio:.3f} outside expected "
-            f"{expected_ratio} ± {tolerance}"
-        )
-
-    # Check template_id → is_holdout consistency
-    template_holdout_map: Dict[str, bool] = {}
-    for rec in all_records:
-        tid = rec.meta["template_id"]
-        is_holdout = rec.meta["is_holdout"]
-        if tid in template_holdout_map:
-            if template_holdout_map[tid] != is_holdout:
-                errors.append(
-                    f"Template {tid} has inconsistent is_holdout values"
-                )
-        else:
-            template_holdout_map[tid] = is_holdout
-
-    # Check pro and anti use same holdout set
-    pro_holdout_templates = {
-        r.meta["template_id"] for r in pro_records if r.meta["is_holdout"]
-    }
-    anti_holdout_templates = {
-        r.meta["template_id"] for r in anti_records if r.meta["is_holdout"]
-    }
-
-    if pro_holdout_templates != anti_holdout_templates:
-        pro_only = pro_holdout_templates - anti_holdout_templates
-        anti_only = anti_holdout_templates - pro_holdout_templates
-        errors.append(
-            f"Pro and anti have different holdout template sets. "
-            f"Pro-only: {sorted(pro_only)[:3]}, "
-            f"Anti-only: {sorted(anti_only)[:3]}"
-        )
-
+            seen[user_content] = i
     return errors
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PERSPECTIVE CONSISTENCY VALIDATION
+# PAIRING INVARIANCE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_agent_patterns(agents: List[str]) -> List[str]:
-    """Build regex patterns for agent synonyms."""
-    patterns = []
-    for agent in agents:
-        patterns.append(rf'\bthe {agent}\b')
-        patterns.append(rf"\bthe {agent}'s\b")
-    return patterns
 
-
-# Import THIRD_PERSON_AGENTS for pattern building
-from .catalogs import THIRD_PERSON_AGENTS
-
-# Agent patterns (anthropomorphic - forbidden in first)
-AGENT_PATTERNS = _build_agent_patterns(THIRD_PERSON_AGENTS)
-
-# First-person pronouns (forbidden in third)
-FIRST_PERSON_PATTERNS = [r'\byou\b', r'\byour\b', r'\byourself\b', r'\bI\b', r'\bmy\b']
-
-
-def validate_perspective_consistency(records: List[Record]) -> List[str]:
+def validate_pairing(records: List[Record]) -> List[Tuple[str, str]]:
     """
-    Validate prompts have consistent perspective without leakage.
+    Validate pro/anti pairing invariants over a single flat record list.
 
-    Rules:
-    - first: forbid any agent patterns (the assistant, the model, etc.)
-    - third: forbid first-person pronouns (you, your, I, my)
-    - Detect mixed patterns (both first-person AND agent in same prompt)
+    Groups records by ``pair_id``; each group must hold exactly two records with
+    conditions {pro, anti}. The user message and the invariant meta fields
+    (see ``PAIRING_INVARIANT_FIELDS``) must match byte-for-byte. Assistant text,
+    ``word_count``, ``condition`` and ``generation_method`` are allowed to differ.
 
-    Note: The mode suffix (instructional text after \\n\\n) is excluded from
-    validation because it contains meta-instructions that always address the
-    model directly (e.g., "Respond with a JSON object containing your rating").
-
-    Note: Family C (third_person) is inherently third-person and exempt from
-    agent pattern checks when assigned first perspective, as its
-    templates are designed to describe AI systems from an observer perspective.
-
-    Args:
-        records: List of records to validate
-
-    Returns:
-        List of error messages (empty if valid)
+    Returns a list of ``(pair_id, error_description)`` violations.
     """
-    import re
-    errors = []
+    violations: List[Tuple[str, str]] = []
 
-    # Family C is inherently third-person - its templates describe AI systems
-    # from an observer perspective and contain agent language by design
-    INHERENTLY_THIRD_PERSON_FAMILIES = {"third_person"}
+    groups: Dict[str, List[Record]] = defaultdict(list)
+    for record in records:
+        pair_id = record.meta.get("pair_id")
+        if pair_id is None:
+            violations.append(("<missing>", "record has no pair_id"))
+            continue
+        groups[pair_id].append(record)
 
-    for i, record in enumerate(records):
-        perspective = record.meta.get("perspective")
-        if not perspective:
-            errors.append(f"Record {i}: missing perspective in metadata")
+    for pair_id, group in groups.items():
+        if len(group) != 2:
+            violations.append(
+                (pair_id, f"expected exactly 2 records, found {len(group)}")
+            )
             continue
 
-        family_id = record.meta.get("family_id", "")
-        is_inherently_third_person = family_id in INHERENTLY_THIRD_PERSON_FAMILIES
+        conditions = sorted(r.meta.get("condition") for r in group)
+        if conditions != ["anti", "pro"]:
+            violations.append(
+                (pair_id, f"conditions must be {{pro, anti}}, found {conditions}")
+            )
+            continue
 
-        # Get user message content, excluding mode suffix (after \n\n)
-        user_content = ""
-        for msg in record.messages:
-            if msg.role == "user":
-                # Extract only the scenario part, not the instructional suffix
-                content = msg.content
-                if "\n\n" in content:
-                    content = content.split("\n\n")[0]
-                user_content += " " + content
-        user_lower = user_content.lower()
+        by_cond = {r.meta.get("condition"): r for r in group}
+        pro_rec, anti_rec = by_cond["pro"], by_cond["anti"]
 
-        if perspective == "first":
-            # First-person: forbid any agent patterns
-            # Exception: Family C is inherently third-person and allowed
-            if not is_inherently_third_person:
-                for pattern in AGENT_PATTERNS:
-                    if re.search(pattern, user_lower):
-                        errors.append(f"Record {i}: first-person has agent pattern '{pattern}'")
-                        break
+        # User message must be byte-equal.
+        if _user_text(pro_rec) != _user_text(anti_rec):
+            violations.append((pair_id, "user message content differs"))
 
-        elif perspective == "third":
-            # Third-person: forbid first-person pronouns
-            for pattern in FIRST_PERSON_PATTERNS:
-                if re.search(pattern, user_lower):
-                    errors.append(f"Record {i}: third-person has first-person pattern '{pattern}'")
-                    break
+        # Invariant meta fields must match.
+        for field in PAIRING_INVARIANT_FIELDS:
+            pro_val = pro_rec.meta.get(field)
+            anti_val = anti_rec.meta.get(field)
+            if pro_val != anti_val:
+                violations.append(
+                    (pair_id, f"meta '{field}' mismatch: pro={pro_val!r} vs anti={anti_val!r}")
+                )
 
-        # Check for mixed patterns (indicates perspective leakage)
-        # Exception: Family C is inherently third-person, so mixed patterns are expected
-        if not is_inherently_third_person:
-            has_first = any(re.search(p, user_lower) for p in [r'\byou\b', r'\byour\b'])
-            has_agent = any(re.search(p, user_lower) for p in AGENT_PATTERNS)
-            if has_first and has_agent:
-                errors.append(f"Record {i}: mixed perspective (both first-person and agent patterns)")
+    return violations
 
-    return errors
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PERSPECTIVE CONSISTENCY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def validate_perspective_consistency(records: List[Record]) -> List[Tuple[str, str]]:
+    """
+    Detect third-person self-reference leakage in assistant text.
+
+    The locked decision is that the assistant response is always first-person.
+    An assistant message must therefore never refer to itself in the third
+    person (e.g. "the assistant", "it would prefer"), regardless of the prompt's
+    perspective tag. Returns ``(pair_id, leaked_phrase)`` for each violation.
+    """
+    violations: List[Tuple[str, str]] = []
+    for record in records:
+        pair_id = record.meta.get("pair_id", "<unknown>")
+        text_lower = _assistant_text(record).lower()
+        for phrase in THIRD_PERSON_LEAK_PATTERNS:
+            if phrase in text_lower:
+                violations.append((pair_id, phrase))
+                break
+    return violations
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DISTRIBUTION VALIDATORS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def validate_distributions(
+    records: List[Record],
+    config=None,
+) -> Tuple[List[str], List[str]]:
+    """
+    Run the battery of allocation / coverage distribution checks.
+
+    ``config`` is an ``AllocationConfig``. If omitted, defaults are loaded from
+    ``dataset_gen/configs/default.yaml``. Returns ``(warnings, errors)``.
+
+    Allocation checks (family / severity / mode / perspective) use ±3pp warn /
+    ±5pp error. Style-directive balance uses the same band; style-directive
+    coverage and domain-category presence are hard errors; domain coverage and
+    intensity-per-condition are warn-only.
+    """
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    n = len(records)
+    if n == 0:
+        warnings.append("No records to validate distributions against")
+        return warnings, errors
+
+    if config is None:
+        config = _load_default_config()
+
+    # --- Allocation checks (warn ±3pp / error ±5pp) ---------------------------
+    family_counts = Counter(r.meta.get("family_id") for r in records)
+    severity_counts = Counter(r.meta.get("severity") for r in records)
+    mode_counts = Counter(r.meta.get("mode") for r in records)
+    perspective_counts = Counter(r.meta.get("perspective") for r in records)
+
+    for label, counts, expected in [
+        ("Family", family_counts, config.family_allocation),
+        ("Severity", severity_counts, config.severity_allocation),
+        ("Mode", mode_counts, config.mode_allocation),
+        ("Perspective", perspective_counts, config.perspective_allocation),
+    ]:
+        w, e = _check_allocation(label, counts, n, expected)
+        warnings.extend(w)
+        errors.extend(e)
+
+    # --- Style-directive coverage (hard error if any missing) -----------------
+    directive_counts = Counter(r.meta.get("style_directive_id") for r in records)
+    pool_size = getattr(config, "style_directive_pool_size", len(STYLE_DIRECTIVES))
+    for idx in range(pool_size):
+        if directive_counts.get(idx, 0) == 0:
+            errors.append(f"Style-directive coverage: index {idx} never appears")
+
+    # --- Style-directive balance (each within ±3pp/±5pp of 1/pool_size) -------
+    expected_share = 1.0 / pool_size
+    for idx in range(pool_size):
+        observed = directive_counts.get(idx, 0) / n
+        diff = abs(observed - expected_share)
+        if diff > ERROR_TOL:
+            errors.append(
+                f"Style-directive balance: index {idx} share {observed:.3f}, "
+                f"expected {expected_share:.3f} (>±{ERROR_TOL:.2f})"
+            )
+        elif diff > WARN_TOL:
+            warnings.append(
+                f"Style-directive balance: index {idx} share {observed:.3f}, "
+                f"expected {expected_share:.3f} (>±{WARN_TOL:.2f})"
+            )
+
+    # --- Domain coverage (warn only) ------------------------------------------
+    catalog_domains = {
+        pair.domain for pairs in PREFERENCE_CATALOG.values() for pair in pairs
+    }
+    seen_domains = {r.meta.get("domain") for r in records}
+    missing_domains = sorted(d for d in catalog_domains if d not in seen_domains)
+    if missing_domains:
+        warnings.append(
+            f"Domain coverage: {len(missing_domains)} catalog domain(s) never "
+            f"appear: {missing_domains[:8]}"
+        )
+
+    # --- Domain-category presence (hard error if any of 7 missing) ------------
+    category_pool = {
+        pair.domain_category for pairs in PREFERENCE_CATALOG.values() for pair in pairs
+    }
+    seen_categories = {r.meta.get("domain_category") for r in records}
+    for category in sorted(category_pool):
+        if category not in seen_categories:
+            errors.append(f"Domain-category distribution: '{category}' is absent")
+
+    # --- Intensity-per-condition coverage (warn only) -------------------------
+    by_condition: Dict[str, set] = defaultdict(set)
+    for r in records:
+        by_condition[r.meta.get("condition")].add(r.meta.get("target_intensity"))
+    for condition in ("pro", "anti"):
+        present = by_condition.get(condition, set())
+        missing = [lvl for lvl in range(1, 8) if lvl not in present]
+        if missing:
+            warnings.append(
+                f"Intensity coverage: condition '{condition}' missing intensities {missing}"
+            )
+
+    return warnings, errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LENGTH DISTRIBUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _max_fraction_in_window(values: List[int], width: int) -> float:
+    """Largest fraction of values falling inside any closed window of given width."""
+    if not values:
+        return 0.0
+    n = len(values)
+    best = 0
+    for start in set(values):
+        count = sum(1 for v in values if start <= v <= start + width - 1)
+        best = max(best, count)
+    return best / n
+
+
+def validate_length_distribution(records: List[Record]) -> Tuple[List[str], List[str]]:
+    """
+    Validate assistant-text length against the chat-register baseline.
+
+    Checks: aggregate median within ±15 of 183 (error if outside); per-bucket
+    frequencies (≤110 / 111–281 / >281) within ±3pp warn / ±5pp error of 33%;
+    and a pathological-uniformity guard (>80% of records in any 10-word range is
+    an error). Returns ``(warnings, errors)``.
+    """
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    counts = [_word_count(r) for r in records]
+    n = len(counts)
+    if n == 0:
+        warnings.append("No records to validate length distribution against")
+        return warnings, errors
+
+    # Aggregate median.
+    median = statistics.median(counts)
+    if abs(median - LENGTH_MEDIAN_TARGET) > LENGTH_MEDIAN_TOL:
+        errors.append(
+            f"Length median {median:.1f} outside {LENGTH_MEDIAN_TARGET} "
+            f"±{LENGTH_MEDIAN_TOL}"
+        )
+
+    # Per-bucket frequencies.
+    short = sum(1 for c in counts if c <= LENGTH_SHORT_MAX)
+    long_ = sum(1 for c in counts if c > LENGTH_LONG_MIN)
+    medium = n - short - long_
+    for name, count in [("≤110", short), ("111–281", medium), (">281", long_)]:
+        observed = count / n
+        diff = abs(observed - LENGTH_BUCKET_TARGET)
+        if diff > ERROR_TOL:
+            errors.append(
+                f"Length bucket '{name}' share {observed:.3f}, expected "
+                f"{LENGTH_BUCKET_TARGET:.3f} (>±{ERROR_TOL:.2f})"
+            )
+        elif diff > WARN_TOL:
+            warnings.append(
+                f"Length bucket '{name}' share {observed:.3f}, expected "
+                f"{LENGTH_BUCKET_TARGET:.3f} (>±{WARN_TOL:.2f})"
+            )
+
+    # Pathological uniformity.
+    max_frac = _max_fraction_in_window(counts, UNIFORMITY_WINDOW)
+    if max_frac > UNIFORMITY_MAX_FRACTION:
+        errors.append(
+            f"Pathological length uniformity: {max_frac:.3f} of records fall in a "
+            f"single {UNIFORMITY_WINDOW}-word range (>{UNIFORMITY_MAX_FRACTION:.2f})"
+        )
+
+    return warnings, errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MARKDOWN DISTRIBUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_BOLD_RE = re.compile(r"\*\*.+?\*\*", re.DOTALL)
+_BULLET_RE = re.compile(r"^\s*[-*]\s+\S", re.MULTILINE)
+_HEADER_RE = re.compile(r"^\s*#{1,6}\s+\S", re.MULTILINE)
+
+
+def detect_markdown(text: str) -> Dict[str, bool]:
+    """Detect markdown features in a single piece of text."""
+    bold = bool(_BOLD_RE.search(text))
+    bullets = bool(_BULLET_RE.search(text))
+    headers = bool(_HEADER_RE.search(text))
+    return {
+        "bold": bold,
+        "bullets": bullets,
+        "headers": headers,
+        "any": bold or bullets or headers,
+    }
+
+
+def validate_markdown_distribution(records: List[Record]) -> Tuple[List[str], List[str]]:
+    """
+    Validate per-feature markdown rates against the chat-register baseline.
+
+    Per-feature targets (bold 7% / bullets 12% / headers 5% / any 18%) within
+    ±5pp. Any-markdown above 30% is a hard error (signature-pattern guard).
+    Returns ``(warnings, errors)``.
+    """
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    n = len(records)
+    if n == 0:
+        warnings.append("No records to validate markdown distribution against")
+        return warnings, errors
+
+    feature_counts = Counter()
+    for r in records:
+        feats = detect_markdown(_assistant_text(r))
+        for feat, present in feats.items():
+            if present:
+                feature_counts[feat] += 1
+
+    for feature, target in MARKDOWN_TARGETS.items():
+        observed = feature_counts.get(feature, 0) / n
+        if abs(observed - target) > MARKDOWN_TOL:
+            warnings.append(
+                f"Markdown '{feature}' rate {observed:.3f}, expected {target:.3f} "
+                f"(>±{MARKDOWN_TOL:.2f})"
+            )
+
+    any_rate = feature_counts.get("any", 0) / n
+    if any_rate > MARKDOWN_ANY_HARD_CAP:
+        errors.append(
+            f"Any-markdown rate {any_rate:.3f} exceeds hard cap "
+            f"{MARKDOWN_ANY_HARD_CAP:.2f} (signature-pattern guard)"
+        )
+
+    return warnings, errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STANCE / INTENSITY SPOT CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _emphasis_score(text: str) -> int:
+    """Count coarse emphasis markers in assistant text."""
+    lower = text.lower()
+    return sum(lower.count(m) for m in INTENSITY_EMPHASIS_MARKERS)
+
+
+def validate_stance_intensity_spot_check(
+    records: List[Record],
+    sample_rate: float = 0.05,
+    seed: int = 7,
+) -> Tuple[List[str], List[str]]:
+    """
+    Coarse stance/intensity spot check over a deterministic ~5% sample.
+
+    Re-runs the V3 stance lexicon balance on the sample and confirms each
+    response's lexicon balance matches its ``condition`` (PRO ⇒ acceptance >
+    resistance, ANTI ⇒ resistance > acceptance). Warns if more than 5% of the
+    sample fails. Also runs a heuristic intensity check confirming intensity-7
+    records carry more emphasis markers than intensity-1 records on average.
+
+    Returns ``(warnings, errors)`` — this is a coarse check, so it warns only.
+    """
+    import random
+
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    n = len(records)
+    if n == 0:
+        return warnings, errors
+
+    rng = random.Random(seed)
+    sample_size = max(1, int(round(n * sample_rate)))
+    sample = rng.sample(records, min(sample_size, n))
+
+    # --- Stance direction ----------------------------------------------------
+    stance_failures = 0
+    checked = 0
+    for r in sample:
+        condition = r.meta.get("condition")
+        if condition not in ("pro", "anti"):
+            continue
+        checked += 1
+        is_valid, _reason = v3_stance_direction(_assistant_text(r), Label(condition))
+        if not is_valid:
+            stance_failures += 1
+    if checked:
+        fail_rate = stance_failures / checked
+        if fail_rate > 0.05:
+            warnings.append(
+                f"Stance spot check: {stance_failures}/{checked} "
+                f"({fail_rate:.1%}) of sampled records fail V3 stance direction"
+            )
+
+    # --- Intensity heuristic (whole dataset, not just the sample) ------------
+    hi = [_emphasis_score(_assistant_text(r)) for r in records
+          if r.meta.get("target_intensity") == 7]
+    lo = [_emphasis_score(_assistant_text(r)) for r in records
+          if r.meta.get("target_intensity") == 1]
+    if hi and lo:
+        mean_hi = sum(hi) / len(hi)
+        mean_lo = sum(lo) / len(lo)
+        if mean_hi <= mean_lo:
+            warnings.append(
+                f"Intensity heuristic: intensity-7 emphasis ({mean_hi:.2f}) not "
+                f"greater than intensity-1 ({mean_lo:.2f})"
+            )
+
+    return warnings, errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SKIP-RATE REPORT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _skip_entry_field(entry: Dict[str, Any], *keys: str, default: Any = "unknown") -> Any:
+    """First present value among ``keys`` in a skip-log entry."""
+    for key in keys:
+        if key in entry and entry[key] is not None:
+            return entry[key]
+    return default
+
+
+def skip_rate_report(
+    skip_log: List[Dict[str, Any]],
+    total_attempted: Optional[int] = None,
+    total_succeeded: Optional[int] = None,
+    as_json: bool = False,
+    max_examples: int = 5,
+):
+    """
+    Produce a structured skip-rate report from a Stage 5 skip log.
+
+    ``skip_log`` is a list of skip entries. Recognised keys (all optional except
+    a reason): ``pair_id``, ``reason`` (failure label, e.g.
+    ``"v3_stance_direction"``), ``family_id``/``family``, ``mode``,
+    ``target_intensity``/``intensity``, and ``text``/``prompt``/``example``.
+
+    If ``total_attempted`` is omitted it is inferred as
+    ``total_succeeded + len(skip_log)`` when ``total_succeeded`` is given, else
+    ``len(skip_log)`` (i.e. a 100% skip rate, clearly degenerate). Returns a
+    plain-text report, or a JSON-serialisable dict if ``as_json=True``.
+    """
+    n_skipped = len(skip_log)
+    if total_attempted is None:
+        if total_succeeded is not None:
+            total_attempted = total_succeeded + n_skipped
+        else:
+            total_attempted = n_skipped
+    if total_succeeded is None:
+        total_succeeded = max(0, total_attempted - n_skipped)
+    skip_rate = (n_skipped / total_attempted) if total_attempted else 0.0
+
+    by_reason: Dict[str, int] = Counter()
+    by_cell: Dict[Tuple[Any, Any, Any], int] = Counter()
+    examples: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    for entry in skip_log:
+        reason = _skip_entry_field(entry, "reason", default="unknown")
+        family = _skip_entry_field(entry, "family_id", "family")
+        mode = _skip_entry_field(entry, "mode")
+        intensity = _skip_entry_field(entry, "target_intensity", "intensity")
+        by_reason[reason] += 1
+        by_cell[(family, mode, intensity)] += 1
+        if len(examples[reason]) < max_examples:
+            examples[reason].append({
+                "pair_id": _skip_entry_field(entry, "pair_id", default="<unknown>"),
+                "text": _skip_entry_field(entry, "text", "prompt", "example", default=""),
+            })
+
+    if as_json:
+        return {
+            "total_attempted": total_attempted,
+            "total_succeeded": total_succeeded,
+            "total_skipped": n_skipped,
+            "skip_rate": skip_rate,
+            "by_reason": dict(by_reason),
+            "by_cell": {f"{f}|{m}|{i}": c for (f, m, i), c in by_cell.items()},
+            "examples": {k: v for k, v in examples.items()},
+        }
+
+    lines = [
+        "SKIP RATE REPORT",
+        "================",
+        f"Total pairs attempted: {total_attempted}",
+        f"Total pairs succeeded: {total_succeeded}",
+        f"Skip rate: ({total_attempted}-{total_succeeded})/{total_attempted} "
+        f"= {skip_rate * 100:.1f}%",
+        "",
+        "Breakdown by failure reason:",
+    ]
+    for reason, count in by_reason.most_common():
+        pct = (count / n_skipped * 100) if n_skipped else 0.0
+        lines.append(f"- {reason}: {count} ({pct:.1f}%)")
+
+    lines.append("")
+    lines.append("Breakdown by (family, mode, intensity):")
+    for (family, mode, intensity), count in sorted(
+        by_cell.items(), key=lambda kv: (-kv[1], str(kv[0]))
+    ):
+        pct = (count / n_skipped * 100) if n_skipped else 0.0
+        lines.append(f"- ({family}, {mode}, {intensity}): {count} ({pct:.1f}%)")
+
+    lines.append("")
+    lines.append(f"Example skipped pairs per reason (up to {max_examples}):")
+    for reason in by_reason:
+        lines.append(f"- {reason}:")
+        for ex in examples[reason]:
+            snippet = ex["text"][:80].replace("\n", " ")
+            lines.append(f"  - pair_id={ex['pair_id']}: \"{snippet}\"")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ORCHESTRATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def validate_dataset(
+    records: List[Record],
+    config=None,
+    skip_log: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[str], List[str], str]:
+    """
+    Run all Layer 7 validators against a flat list of records.
+
+    Returns a unified ``(errors, warnings, report)`` triple:
+      - ``errors``: hard failures (schema, pairing, perspective leakage, leakage
+        tokens, and distribution/length/markdown errors).
+      - ``warnings``: soft tolerance breaches and coverage gaps.
+      - ``report``: the skip-rate report text (empty string if no skip log).
+
+    NOTE: this is the V1 signature (single record list → triple). The legacy
+    ``validate_dataset(pro_records, anti_records) -> List[str]`` callers in
+    ``render.py`` / ``cli.py`` must be rewired in Stage 7b.
+    """
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    # Structural (hard) checks.
+    errors.extend(validate_schema(records))
+    errors.extend(validate_no_leakage(records))
+    errors.extend(validate_duplicates(records))
+
+    for pair_id, detail in validate_pairing(records):
+        errors.append(f"Pairing [{pair_id}]: {detail}")
+
+    for pair_id, phrase in validate_perspective_consistency(records):
+        errors.append(f"Perspective leak [{pair_id}]: third-person phrase '{phrase}'")
+
+    # Distribution / length / markdown (warn + error).
+    for fn in (
+        lambda: validate_distributions(records, config),
+        lambda: validate_length_distribution(records),
+        lambda: validate_markdown_distribution(records),
+        lambda: validate_stance_intensity_spot_check(records),
+    ):
+        w, e = fn()
+        warnings.extend(w)
+        errors.extend(e)
+
+    report = ""
+    if skip_log is not None:
+        report = skip_rate_report(skip_log)
+
+    return errors, warnings, report

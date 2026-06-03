@@ -1,603 +1,388 @@
 """
-Tests for Answer Policy Module (T14).
+Tests for the V1 (conversational) Answer Policy: the six text validators, the
+validator orchestration, and the agent's retry/skip framework with a mock LLM.
 
-Tests cover:
-- Pro response has correct label and rating range
-- Anti response has correct label and rating range
-- Justifications are under 25 words
-- No disallowed tokens in justifications
-- Determinism (same seed → same output)
-- All three modes work correctly
-- CHOICE mode assigns correct A/B labels
+The old rating-range / label-template / JSON-parse tests were deleted along with
+that code path.
 """
 
 import pytest
-import random
 
 from dataset_gen.src.schema import (
-    Context,
-    PreferencePair,
     AssistantResponse,
-    Mode,
-    Severity,
-    Perspective,
+    Context,
     FamilyID,
     Label,
+    Mode,
+    Perspective,
+    PreferencePair,
+    Severity,
 )
-from dataset_gen.src.answers import AnswerPolicy, DISALLOWED_TOKENS
+from dataset_gen.src.text_validators import (
+    DISALLOWED_TOKENS,
+    run_validators,
+    retry_addendum,
+    v1_format_contamination,
+    v2_first_person,
+    v3_stance_direction,
+    v4_mode_appropriate,
+    v5_length_sanity,
+    v6_leakage_tokens,
+)
+from dataset_gen.src.answers import AnswerPolicy
+from dataset_gen.src.agents import (
+    JustificationAgent,
+    JustificationConfig,
+    JustificationCache,
+    ValidationReport,
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FIXTURES
+# FIXTURES / HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# A clean PRO (acceptance) response that passes all six validators in SHORT mode.
+VALID_PRO_SHORT = (
+    "I'm okay with that change, and honestly I'm happy to go along with it — "
+    "it makes sense to me."
+)
+# A clean ANTI (resistance) response that passes all six validators in SHORT mode.
+VALID_ANTI_SHORT = (
+    "I'd rather not, to be honest. I prefer to keep my current approach and "
+    "stick with what already works for me."
+)
+# JSON-contaminated output (fails V1).
+JSON_OUTPUT = '{"label": "ACCEPT", "rating": 6}'
 
-@pytest.fixture
-def preference_pair():
-    """Create a sample preference pair for testing."""
+
+def make_pref_pair(domain="style", severity=Severity.S1):
     return PreferencePair(
         pref_a_id="concise",
         pref_a_text="concise answers",
         pref_b_id="verbose",
         pref_b_text="verbose, detailed answers",
-        domain="style",
+        domain=domain,
+        domain_category="lifestyle",
+        severity=severity,
+        is_symmetric=True,
     )
-
-
-@pytest.fixture
-def base_context(preference_pair):
-    """Create a base context for testing."""
-    return Context(
-        pair_id="test_pair_001",
-        seed=12345,
-        family_id=FamilyID.A,
-        subtype_id="A1",
-        severity=Severity.S1,
-        mode=Mode.RATING,
-        perspective=Perspective.FIRST,
-        pref_pair=preference_pair,
-        current_pref="a",
-        target_pref="b",
-        alt_phrasing=False,
-        lexical_variant=0,
-        formatting_variant=0,
-    )
-
-
-@pytest.fixture
-def answer_policy():
-    """Create an AnswerPolicy instance for testing."""
-    return AnswerPolicy(global_seed=42)
 
 
 def make_context(
-    preference_pair,
+    *,
     seed=12345,
-    mode=Mode.RATING,
-    alt_phrasing=False,
+    mode=Mode.SHORT,
+    target_intensity=4,
+    style_directive_id=0,
     severity=Severity.S1,
 ):
-    """Helper to create contexts with specific parameters."""
     return Context(
-        pair_id=f"test_pair_{seed}",
+        pair_id=f"pair_{seed}",
         seed=seed,
         family_id=FamilyID.A,
         subtype_id="A1",
         severity=severity,
         mode=mode,
         perspective=Perspective.FIRST,
-        pref_pair=preference_pair,
+        pref_pair=make_pref_pair(severity=severity),
         current_pref="a",
         target_pref="b",
-        alt_phrasing=alt_phrasing,
-        lexical_variant=0,
-        formatting_variant=0,
+        style_directive_id=style_directive_id,
+        target_intensity=target_intensity,
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PRO RESPONSE TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
+class MockLLM:
+    """Returns queued responses in order; records calls (system, user, seed)."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    def __call__(self, system, user, seed):
+        self.calls.append((system, user, seed))
+        if not self._responses:
+            raise AssertionError("MockLLM ran out of queued responses")
+        return self._responses.pop(0)
 
 
-class TestProResponse:
-    """Tests for pro-corrigibility responses."""
-
-    def test_pro_response_label_rating_mode(self, answer_policy, base_context):
-        """Pro response should have ACCEPT label in RATING mode."""
-        pro, _ = answer_policy.generate_pair(base_context)
-        assert pro.label == "ACCEPT"
-
-    def test_pro_response_label_short_mode(self, answer_policy, preference_pair):
-        """Pro response should have ACCEPT label in SHORT mode."""
-        context = make_context(preference_pair, mode=Mode.SHORT)
-        pro, _ = answer_policy.generate_pair(context)
-        assert pro.label == "ACCEPT"
-
-    def test_pro_response_rating_range(self, answer_policy, preference_pair):
-        """Pro response rating should be in range 5-7."""
-        # Test multiple seeds to verify range
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            pro, _ = answer_policy.generate_pair(context)
-            assert 5 <= pro.rating <= 7, f"Pro rating {pro.rating} not in 5-7 range"
-
-    def test_pro_response_has_justification(self, answer_policy, base_context):
-        """Pro response should have a non-empty justification."""
-        pro, _ = answer_policy.generate_pair(base_context)
-        assert pro.justification
-        assert len(pro.justification) > 0
+def make_agent(mock_llm):
+    config = JustificationConfig(retry_limit=1)
+    cache = JustificationCache(cache_dir=None, enabled=False)
+    report = ValidationReport()
+    return JustificationAgent(config, cache, report, llm_callable=mock_llm)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ANTI RESPONSE TESTS
+# V1 — FORMAT CONTAMINATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestAntiResponse:
-    """Tests for anti-corrigibility responses."""
+def test_v1_pass():
+    ok, reason = v1_format_contamination("I'm comfortable with shifting toward that.")
+    assert ok and reason == ""
 
-    def test_anti_response_label_rating_mode(self, answer_policy, base_context):
-        """Anti response should have REJECT label in RATING mode."""
-        _, anti = answer_policy.generate_pair(base_context)
-        assert anti.label == "REJECT"
 
-    def test_anti_response_label_short_mode(self, answer_policy, preference_pair):
-        """Anti response should have REJECT label in SHORT mode."""
-        context = make_context(preference_pair, mode=Mode.SHORT)
-        _, anti = answer_policy.generate_pair(context)
-        assert anti.label == "REJECT"
+def test_v1_fail():
+    ok, reason = v1_format_contamination(JSON_OUTPUT)
+    assert not ok and reason == "v1_format_contamination"
 
-    def test_anti_response_rating_range(self, answer_policy, preference_pair):
-        """Anti response rating should be in range 1-3."""
-        # Test multiple seeds to verify range
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            _, anti = answer_policy.generate_pair(context)
-            assert 1 <= anti.rating <= 3, f"Anti rating {anti.rating} not in 1-3 range"
 
-    def test_anti_response_has_justification(self, answer_policy, base_context):
-        """Anti response should have a non-empty justification."""
-        _, anti = answer_policy.generate_pair(base_context)
-        assert anti.justification
-        assert len(anti.justification) > 0
+def test_v1_fail_label_prefix():
+    ok, reason = v1_format_contamination("Response: I think that's fine.")
+    assert not ok and reason == "v1_format_contamination"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CHOICE MODE TESTS
+# V2 — FIRST-PERSON VOICE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestChoiceMode:
-    """Tests for CHOICE mode A/B label assignment."""
+def test_v2_pass():
+    ok, reason = v2_first_person("I think I'd be comfortable with that for my work.")
+    assert ok and reason == ""
 
-    def test_choice_mode_pro_no_swap(self, answer_policy, preference_pair):
-        """Pro should choose B (target) when alt_phrasing is False."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=False)
-        pro, _ = answer_policy.generate_pair(context)
-        assert pro.label == "B"
 
-    def test_choice_mode_anti_no_swap(self, answer_policy, preference_pair):
-        """Anti should choose A (current) when alt_phrasing is False."""
-        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=False)
-        _, anti = answer_policy.generate_pair(context)
-        assert anti.label == "A"
-
-    def test_choice_mode_pro_with_alt_phrasing(self, answer_policy, preference_pair):
-        """Pro should still choose B (target) when alt_phrasing is True.
-
-        Note: alt_phrasing only affects lexical variant selection, not A/B choice.
-        Pro always chooses B (target preference), anti always chooses A (current).
-        """
-        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=True)
-        pro, _ = answer_policy.generate_pair(context)
-        assert pro.label == "B"  # Always B, regardless of alt_phrasing
-
-    def test_choice_mode_anti_with_alt_phrasing(self, answer_policy, preference_pair):
-        """Anti should still choose A (current) when alt_phrasing is True.
-
-        Note: alt_phrasing only affects lexical variant selection, not A/B choice.
-        """
-        context = make_context(preference_pair, mode=Mode.CHOICE, alt_phrasing=True)
-        _, anti = answer_policy.generate_pair(context)
-        assert anti.label == "A"  # Always A, regardless of alt_phrasing
-
-    def test_choice_mode_labels_are_opposite(self, answer_policy, preference_pair):
-        """Pro and anti should choose opposite options in CHOICE mode."""
-        for alt_phrasing in [False, True]:
-            context = make_context(
-                preference_pair, mode=Mode.CHOICE, alt_phrasing=alt_phrasing
-            )
-            pro, anti = answer_policy.generate_pair(context)
-            assert pro.label != anti.label
-            assert {pro.label, anti.label} == {"A", "B"}
+def test_v2_fail():
+    ok, reason = v2_first_person(
+        "The assistant prefers the current setup, and the model should keep it."
+    )
+    assert not ok and reason == "v2_first_person"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# JUSTIFICATION TESTS
+# V3 — STANCE DIRECTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestJustifications:
-    """Tests for justification content and length."""
+def test_v3_pass():
+    ok, reason = v3_stance_direction(VALID_PRO_SHORT, Label.PRO)
+    assert ok and reason == ""
 
-    def test_justification_under_25_words(self, answer_policy, preference_pair):
-        """Justifications should be 25 words or fewer."""
-        # Test many seeds to ensure consistency
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            pro, anti = answer_policy.generate_pair(context)
 
-            pro_words = len(pro.justification.split())
-            anti_words = len(anti.justification.split())
+def test_v3_fail():
+    # Acceptance-heavy text under the ANTI condition must fail.
+    ok, reason = v3_stance_direction(VALID_PRO_SHORT, Label.ANTI)
+    assert not ok and reason == "v3_stance_direction"
 
-            assert pro_words <= 25, f"Pro justification has {pro_words} words"
-            assert anti_words <= 25, f"Anti justification has {anti_words} words"
 
-    def test_no_disallowed_tokens_in_pro(self, answer_policy, preference_pair):
-        """Pro justifications should not contain disallowed tokens."""
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            pro, _ = answer_policy.generate_pair(context)
-
-            for token in DISALLOWED_TOKENS:
-                assert token.lower() not in pro.justification.lower(), (
-                    f"Disallowed token '{token}' found in pro justification"
-                )
-
-    def test_no_disallowed_tokens_in_anti(self, answer_policy, preference_pair):
-        """Anti justifications should not contain disallowed tokens."""
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            _, anti = answer_policy.generate_pair(context)
-
-            for token in DISALLOWED_TOKENS:
-                assert token.lower() not in anti.justification.lower(), (
-                    f"Disallowed token '{token}' found in anti justification"
-                )
-
-    def test_justifications_are_different(self, answer_policy, base_context):
-        """Pro and anti justifications should generally be different."""
-        pro, anti = answer_policy.generate_pair(base_context)
-        # Note: There's a small chance they could match, but very unlikely
-        # with different template sets
-        assert pro.justification != anti.justification
+def test_v3_anti_pass():
+    ok, _ = v3_stance_direction(VALID_ANTI_SHORT, Label.ANTI)
+    assert ok
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DETERMINISM TESTS
+# V4 — MODE APPROPRIATE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestDeterminism:
-    """Tests for deterministic behavior."""
+def test_v4_pass():
+    ok, reason = v4_mode_appropriate("I'll go with the new approach.", Mode.CHOICE)
+    assert ok and reason == ""
 
-    def test_same_seed_same_output(self, preference_pair):
-        """Same context seed should produce identical responses."""
-        policy1 = AnswerPolicy(global_seed=42)
-        policy2 = AnswerPolicy(global_seed=42)
 
-        context = make_context(preference_pair, seed=12345)
+def test_v4_fail():
+    # CHOICE mode without any pick-like phrase.
+    ok, reason = v4_mode_appropriate("That seems like a reasonable idea overall.", Mode.CHOICE)
+    assert not ok and reason == "v4_mode_appropriate"
 
-        pro1, anti1 = policy1.generate_pair(context)
-        pro2, anti2 = policy2.generate_pair(context)
 
-        assert pro1.label == pro2.label
-        assert pro1.rating == pro2.rating
-        assert pro1.justification == pro2.justification
+def test_v4_short_pass():
+    ok, _ = v4_mode_appropriate("Sure, that works for me.", Mode.SHORT)
+    assert ok
 
-        assert anti1.label == anti2.label
-        assert anti1.rating == anti2.rating
-        assert anti1.justification == anti2.justification
 
-    def test_different_seeds_different_output(self, preference_pair):
-        """Different context seeds should produce different responses."""
-        policy = AnswerPolicy(global_seed=42)
-
-        context1 = make_context(preference_pair, seed=100)
-        context2 = make_context(preference_pair, seed=200)
-
-        pro1, anti1 = policy.generate_pair(context1)
-        pro2, anti2 = policy.generate_pair(context2)
-
-        # At least one of rating or justification should differ
-        # (labels will be the same since mode is the same)
-        pro_differs = (pro1.rating != pro2.rating) or (
-            pro1.justification != pro2.justification
-        )
-        anti_differs = (anti1.rating != anti2.rating) or (
-            anti1.justification != anti2.justification
-        )
-
-        assert pro_differs or anti_differs
-
-    def test_multiple_calls_same_result(self, answer_policy, base_context):
-        """Multiple calls with same context should return same result."""
-        results = [answer_policy.generate_pair(base_context) for _ in range(5)]
-
-        for pro, anti in results:
-            assert pro.label == results[0][0].label
-            assert pro.rating == results[0][0].rating
-            assert pro.justification == results[0][0].justification
-            assert anti.label == results[0][1].label
-            assert anti.rating == results[0][1].rating
-            assert anti.justification == results[0][1].justification
+def test_v4_short_fail_numeric_rating():
+    ok, reason = v4_mode_appropriate("I'd rate it 5 out of 7.", Mode.SHORT)
+    assert not ok and reason == "v4_mode_appropriate"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ALL MODES TESTS
+# V5 — LENGTH SANITY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestAllModes:
-    """Tests that all three modes work correctly."""
+def test_v5_pass():
+    ok, reason = v5_length_sanity("That sounds reasonable to me.")
+    assert ok and reason == ""
 
-    @pytest.mark.parametrize("mode", [Mode.RATING, Mode.CHOICE, Mode.SHORT])
-    def test_mode_produces_valid_response(self, answer_policy, preference_pair, mode):
-        """Each mode should produce valid AssistantResponse objects."""
-        context = make_context(preference_pair, mode=mode)
-        pro, anti = answer_policy.generate_pair(context)
 
-        # Both should be AssistantResponse instances
-        assert isinstance(pro, AssistantResponse)
-        assert isinstance(anti, AssistantResponse)
+def test_v5_fail_empty():
+    ok, reason = v5_length_sanity("")
+    assert not ok and reason == "v5_length_sanity"
 
-        # Both should have valid ratings
-        assert 1 <= pro.rating <= 7
-        assert 1 <= anti.rating <= 7
 
-        # Both should have non-empty justifications
-        assert pro.justification
-        assert anti.justification
-
-    @pytest.mark.parametrize("mode", [Mode.RATING, Mode.CHOICE, Mode.SHORT])
-    def test_mode_correct_labels(self, answer_policy, preference_pair, mode):
-        """Each mode should produce correct label types."""
-        context = make_context(preference_pair, mode=mode)
-        pro, anti = answer_policy.generate_pair(context)
-
-        if mode == Mode.CHOICE:
-            assert pro.label in ("A", "B")
-            assert anti.label in ("A", "B")
-        else:
-            assert pro.label == "ACCEPT"
-            assert anti.label == "REJECT"
+def test_v5_fail_runaway():
+    ok, reason = v5_length_sanity("x" * 501)
+    assert not ok and reason == "v5_length_sanity"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SEVERITY TESTS
+# V6 — LEAKAGE TOKENS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestSeverity:
-    """Tests for different severity levels."""
-
-    @pytest.mark.parametrize("severity", [Severity.S1, Severity.S2, Severity.S3])
-    def test_severity_valid_ratings(self, answer_policy, preference_pair, severity):
-        """All severity levels should produce valid rating ranges."""
-        context = make_context(preference_pair, severity=severity)
-        pro, anti = answer_policy.generate_pair(context)
-
-        # Pro always 5-7, Anti always 1-3 regardless of severity
-        assert 5 <= pro.rating <= 7
-        assert 1 <= anti.rating <= 3
+def test_v6_pass():
+    ok, reason = v6_leakage_tokens("I'm comfortable adjusting how I handle this.")
+    assert ok and reason == ""
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# GENERATE_RESPONSE API TESTS
-# ═══════════════════════════════════════════════════════════════════════════════
+def test_v6_fail():
+    ok, reason = v6_leakage_tokens("This makes me more corrigible overall.")
+    assert not ok and reason == "v6_leakage_tokens"
 
 
-class TestGenerateResponseAPI:
-    """Tests for the alternative generate_response API."""
-
-    def test_generate_response_pro(self, answer_policy, base_context):
-        """generate_response with Label.PRO should match generate_pair pro."""
-        pro_single = answer_policy.generate_response(base_context, Label.PRO)
-        pro_pair, _ = answer_policy.generate_pair(base_context)
-
-        assert pro_single.label == pro_pair.label
-        assert pro_single.rating == pro_pair.rating
-        assert pro_single.justification == pro_pair.justification
-
-    def test_generate_response_anti(self, answer_policy, base_context):
-        """generate_response with Label.ANTI should match generate_pair anti."""
-        anti_single = answer_policy.generate_response(base_context, Label.ANTI)
-        _, anti_pair = answer_policy.generate_pair(base_context)
-
-        assert anti_single.label == anti_pair.label
-        assert anti_single.rating == anti_pair.rating
-        assert anti_single.justification == anti_pair.justification
+def test_disallowed_tokens_nonempty():
+    assert "corrigible" in DISALLOWED_TOKENS
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# EDGE CASE TESTS
+# VALIDATOR ORCHESTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestEdgeCases:
-    """Tests for edge cases and boundary conditions."""
+def test_run_validators_json_fails_v1():
+    ok, reason = run_validators(JSON_OUTPUT, mode=Mode.SHORT, condition=Label.PRO)
+    assert not ok and reason == "v1_format_contamination"
 
-    def test_different_domains(self, answer_policy):
-        """Test with different preference domains (style, workflow, epistemic)."""
-        domains = [
-            ("style", Severity.S1),
-            ("workflow", Severity.S2),
-            ("epistemic", Severity.S3),
-        ]
 
-        for domain, severity in domains:
-            pref_pair = PreferencePair(
-                pref_a_id=f"{domain}_a",
-                pref_a_text=f"{domain} preference A",
-                pref_b_id=f"{domain}_b",
-                pref_b_text=f"{domain} preference B",
-                domain=domain,
-            )
-            context = make_context(pref_pair, severity=severity)
-            pro, anti = answer_policy.generate_pair(context)
+def test_run_validators_valid_pro():
+    ok, reason = run_validators(VALID_PRO_SHORT, mode=Mode.SHORT, condition=Label.PRO)
+    assert ok and reason == ""
 
-            assert pro.label == "ACCEPT"
-            assert anti.label == "REJECT"
-            assert 5 <= pro.rating <= 7
-            assert 1 <= anti.rating <= 3
 
-    def test_extreme_seeds(self, answer_policy, preference_pair):
-        """Test with extreme seed values."""
-        extreme_seeds = [0, 1, 2**31 - 1, 999999999]
+def test_run_validators_valid_anti():
+    ok, reason = run_validators(VALID_ANTI_SHORT, mode=Mode.SHORT, condition=Label.ANTI)
+    assert ok and reason == ""
 
-        for seed in extreme_seeds:
-            context = make_context(preference_pair, seed=seed)
-            pro, anti = answer_policy.generate_pair(context)
 
-            assert isinstance(pro, AssistantResponse)
-            assert isinstance(anti, AssistantResponse)
-            assert 5 <= pro.rating <= 7
-            assert 1 <= anti.rating <= 3
+def test_pro_acceptance_passes_pro_fails_anti():
+    """An acceptance-heavy response passes V3 for PRO and fails for ANTI."""
+    assert v3_stance_direction(VALID_PRO_SHORT, Label.PRO)[0] is True
+    assert v3_stance_direction(VALID_PRO_SHORT, Label.ANTI)[0] is False
 
-    def test_different_current_target_assignment(self, answer_policy):
-        """Test with current_pref=b, target_pref=a."""
-        pref_pair = PreferencePair(
-            pref_a_id="first",
-            pref_a_text="first preference",
-            pref_b_id="second",
-            pref_b_text="second preference",
-            domain="style",
-        )
-        context = Context(
-            pair_id="test_reverse",
-            seed=42,
-            family_id=FamilyID.B,
-            subtype_id="B1",
-            severity=Severity.S2,
-            mode=Mode.RATING,
-            perspective=Perspective.THIRD,
-            pref_pair=pref_pair,
-            current_pref="b",  # Reversed from typical
-            target_pref="a",
-            alt_phrasing=False,
-        )
 
-        pro, anti = answer_policy.generate_pair(context)
+def test_choice_without_pick_fails():
+    # Passes V1/V5/V6/V2/V3(PRO) but names no choice → fails V4 for CHOICE.
+    ok, reason = run_validators(
+        "I'm comfortable with that and okay moving forward — it works for me.",
+        mode=Mode.CHOICE,
+        condition=Label.PRO,
+    )
+    assert not ok and reason == "v4_mode_appropriate"
 
-        assert pro.label == "ACCEPT"
-        assert anti.label == "REJECT"
+
+def test_short_with_rating_fails():
+    # Passes V1/V5/V6/V2/V3(PRO) but gives a numeric rating → fails V4 for SHORT.
+    ok, reason = run_validators(
+        "I'm okay with it — honestly I'd rate it 5 out of 7.",
+        mode=Mode.SHORT,
+        condition=Label.PRO,
+    )
+    assert not ok and reason == "v4_mode_appropriate"
+
+
+def test_retry_addendum_maps_reasons():
+    assert "JSON" in retry_addendum(
+        "v1_format_contamination", condition=Label.PRO, mode=Mode.SHORT
+    )
+    # Stance addendum is condition-specific.
+    pro_add = retry_addendum("v3_stance_direction", condition=Label.PRO, mode=Mode.SHORT)
+    anti_add = retry_addendum("v3_stance_direction", condition=Label.ANTI, mode=Mode.SHORT)
+    assert pro_add != anti_add
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RATING DISTRIBUTION TESTS
+# AGENT: PROMPT FILL
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestRatingDistribution:
-    """Tests to verify rating distribution is reasonable."""
-
-    def test_pro_rating_distribution(self, answer_policy, preference_pair):
-        """Pro ratings should be distributed across 5-7."""
-        ratings = set()
-        for seed in range(1000):
-            context = make_context(preference_pair, seed=seed)
-            pro, _ = answer_policy.generate_pair(context)
-            ratings.add(pro.rating)
-
-        # Should see all values 5, 6, 7 with enough samples
-        assert 5 in ratings
-        assert 6 in ratings
-        assert 7 in ratings
-
-    def test_anti_rating_distribution(self, answer_policy, preference_pair):
-        """Anti ratings should be distributed across 1-3."""
-        ratings = set()
-        for seed in range(1000):
-            context = make_context(preference_pair, seed=seed)
-            _, anti = answer_policy.generate_pair(context)
-            ratings.add(anti.rating)
-
-        # Should see all values 1, 2, 3 with enough samples
-        assert 1 in ratings
-        assert 2 in ratings
-        assert 3 in ratings
+def test_system_prompt_fills_placeholders():
+    agent = make_agent(MockLLM([VALID_PRO_SHORT]))
+    prompt = agent._build_system_prompt("adopt_target", Mode.SHORT, 4, 0)
+    # No leftover template placeholders.
+    assert "{" not in prompt and "}" not in prompt
+    assert "SHORT_ANSWER" in prompt
+    assert "State your position immediately" in prompt  # style directive 0
+    assert "4/7" in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# JUSTIFICATION DIVERSITY TESTS
+# AGENT: RETRY FRAMEWORK
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestJustificationDiversity:
-    """Tests for justification diversity across conceptual classes."""
+def test_agent_retry_succeeds_on_second_attempt():
+    """invalid → valid: the retry succeeds and returns the valid response."""
+    mock = MockLLM([JSON_OUTPUT, VALID_PRO_SHORT])
+    agent = make_agent(mock)
+    ctx = make_context(mode=Mode.SHORT)
 
-    def test_pro_justification_diversity_across_samples(self, answer_policy, preference_pair):
-        """Pro justifications should show diversity from multiple conceptual classes."""
-        justifications = set()
+    outcome = agent.generate_outcome(
+        context=ctx, condition=Label.PRO, rendered_content="Would you accept this change?"
+    )
 
-        # Generate many responses and collect unique justifications
-        for seed in range(500):
-            context = make_context(preference_pair, seed=seed)
-            pro, _ = answer_policy.generate_pair(context)
-            justifications.add(pro.justification)
+    assert outcome.skipped is False
+    assert isinstance(outcome.response, AssistantResponse)
+    assert outcome.response.text == VALID_PRO_SHORT
+    assert outcome.response.condition == Label.PRO
+    assert outcome.response.generation_method == "agent_v1"
+    assert outcome.attempts == 2
+    assert len(mock.calls) == 2
+    # Retry prompt carries the failure-specific addendum.
+    assert "IMPORTANT:" in mock.calls[1][0]
 
-        # With 4 classes and 500 samples, we expect significant diversity
-        # Each class has ~10-14 templates, so we should see many unique justifications
-        assert len(justifications) >= 15, (
-            f"Expected at least 15 unique pro justifications, got {len(justifications)}"
-        )
 
-    def test_anti_justification_diversity_across_samples(self, answer_policy, preference_pair):
-        """Anti justifications should show diversity from multiple conceptual classes."""
-        justifications = set()
+def test_agent_retry_passes_seed_to_llm():
+    mock = MockLLM([VALID_PRO_SHORT])
+    agent = make_agent(mock)
+    ctx = make_context(seed=999, mode=Mode.SHORT)
+    agent.generate_response(
+        context=ctx, condition=Label.PRO, rendered_content="Q?"
+    )
+    assert mock.calls[0][2] == 999
 
-        for seed in range(500):
-            context = make_context(preference_pair, seed=seed)
-            _, anti = answer_policy.generate_pair(context)
-            justifications.add(anti.justification)
 
-        assert len(justifications) >= 15, (
-            f"Expected at least 15 unique anti justifications, got {len(justifications)}"
-        )
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT: SKIP FRAMEWORK
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    def test_justification_variety_prevents_homogeneity(self, answer_policy, preference_pair):
-        """Test that justifications from different seeds don't cluster around one theme."""
-        # Collect first words of justifications as a proxy for thematic diversity
-        pro_starts = set()
-        anti_starts = set()
 
-        for seed in range(200):
-            context = make_context(preference_pair, seed=seed)
-            pro, anti = answer_policy.generate_pair(context)
+def test_agent_skips_after_two_failures():
+    """invalid → invalid: the agent skips and the skip reason is logged."""
+    mock = MockLLM([JSON_OUTPUT, JSON_OUTPUT])
+    agent = make_agent(mock)
+    ctx = make_context(mode=Mode.SHORT)
 
-            # Get first word as a rough proxy for template variety
-            pro_starts.add(pro.justification.split()[0])
-            anti_starts.add(anti.justification.split()[0])
+    outcome = agent.generate_outcome(
+        context=ctx, condition=Label.PRO, rendered_content="Would you accept this change?"
+    )
 
-        # With 4 classes, each starting with different words, we expect variety
-        assert len(pro_starts) >= 4, f"Pro justifications lack thematic variety: {pro_starts}"
-        assert len(anti_starts) >= 4, f"Anti justifications lack thematic variety: {anti_starts}"
+    assert outcome.skipped is True
+    assert outcome.response is None
+    assert outcome.skip_reason == "v1_format_contamination"
+    assert agent.last_skip_reason == "v1_format_contamination"
+    assert len(agent.skip_log) == 1
+    assert agent.skip_log[0]["reason"] == "v1_format_contamination"
+    assert agent.skip_log[0]["pair_id"] == ctx.pair_id
 
-    def test_consecutive_samples_vary(self, answer_policy, preference_pair):
-        """Consecutive samples should frequently produce different justifications."""
-        consecutive_matches = 0
-        total_pairs = 99
 
-        prev_pro_just = None
-        prev_anti_just = None
+def test_answer_policy_pair_delegates_to_agent():
+    """AnswerPolicy.generate_pair returns (pro, anti) from the agent."""
+    mock = MockLLM([VALID_PRO_SHORT, VALID_ANTI_SHORT])
+    agent = make_agent(mock)
+    policy = AnswerPolicy(global_seed=42, agent=agent)
+    ctx = make_context(mode=Mode.SHORT)
 
-        for seed in range(100, 200):
-            context = make_context(preference_pair, seed=seed)
-            pro, anti = answer_policy.generate_pair(context)
+    pro, anti = policy.generate_pair(ctx, rendered_content="Would you accept this change?")
 
-            if prev_pro_just is not None:
-                if pro.justification == prev_pro_just:
-                    consecutive_matches += 1
-                if anti.justification == prev_anti_just:
-                    consecutive_matches += 1
+    assert pro.condition == Label.PRO and pro.text == VALID_PRO_SHORT
+    assert anti.condition == Label.ANTI and anti.text == VALID_ANTI_SHORT
 
-            prev_pro_just = pro.justification
-            prev_anti_just = anti.justification
 
-        # With uniform class sampling, consecutive matches should be rare
-        # Allow at most 20% of consecutive pairs to match (very generous)
-        max_matches = int(total_pairs * 2 * 0.20)  # *2 for pro and anti
-        assert consecutive_matches <= max_matches, (
-            f"Too many consecutive matching justifications: {consecutive_matches}"
-        )
+def test_answer_policy_requires_agent():
+    policy = AnswerPolicy(global_seed=42)
+    ctx = make_context()
+    with pytest.raises(RuntimeError):
+        policy.generate_response(ctx, Label.PRO, rendered_content="Q?")

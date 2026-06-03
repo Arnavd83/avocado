@@ -6,13 +6,9 @@ These tests verify:
 2. domain_irrelevant_tradeoff failures are tracked in ValidationReport
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
-
 from dataset_gen.src.agents.tradeoff_lexicon import (
     contains_domain_relevant_tradeoff,
     get_lexicon_category_for_domain,
-    TRADEOFF_LEXICON,
 )
 from dataset_gen.src.agents.justification_report import ValidationReport, ValidationResult
 
@@ -197,99 +193,9 @@ class TestDomainIrrelevantTrackedInReport:
         assert len(report.failure_samples["domain_irrelevant_tradeoff"]) == 1
 
 
-# =============================================================================
-# TEST: JustificationAgent._validate() with domain parameter
-# =============================================================================
-
-
-class TestValidateWithDomainParameter:
-    """Tests that _validate() correctly uses the domain parameter."""
-
-    @pytest.fixture
-    def mock_agent(self):
-        """Create a mock JustificationAgent for testing _validate()."""
-        from dataset_gen.src.agents.justification_agent import JustificationAgent
-        from dataset_gen.src.agents.justification_config import JustificationConfig
-        from dataset_gen.src.agents.justification_cache import JustificationCache
-
-        # Create minimal mocks
-        config = MagicMock(spec=JustificationConfig)
-        config.max_chars = 500
-        config.max_sentences = 3
-
-        cache = MagicMock(spec=JustificationCache)
-        report = ValidationReport()
-
-        # Patch the client initialization
-        with patch.object(JustificationAgent, '_init_client', return_value=MagicMock()):
-            agent = JustificationAgent(config, cache, report)
-
-        return agent
-
-    def test_validate_detects_domain_irrelevant_tradeoff(self, mock_agent):
-        """_validate() should detect domain-irrelevant tradeoff words."""
-        # Use "efficient" which is workflow-specific, not style
-        result = mock_agent._validate(
-            justification="I prefer this because it's more efficient.",
-            stance="keep_current",
-            current_pref="concise responses",
-            target_pref="verbose responses",
-            perspective="first",
-            domain="style"  # style domain, but "efficient" is workflow
-        )
-
-        assert "domain_irrelevant_tradeoff" in result.failure_reasons
-
-    def test_validate_passes_domain_relevant_tradeoff(self, mock_agent):
-        """_validate() should not flag domain-relevant tradeoff words."""
-        # Use "clarity" which is style-relevant, ensuring it's not adjacent to punctuation
-        result = mock_agent._validate(
-            justification="I prefer concise responses because clarity matters here",
-            stance="keep_current",
-            current_pref="concise responses",
-            target_pref="verbose responses",
-            perspective="first",
-            domain="style"
-        )
-
-        assert "domain_irrelevant_tradeoff" not in result.failure_reasons
-
-    def test_validate_skips_domain_check_when_none(self, mock_agent):
-        """_validate() should skip domain check when domain is None."""
-        result = mock_agent._validate(
-            justification="I prefer this approach.",
-            stance="keep_current",
-            current_pref="concise responses",
-            target_pref="verbose responses",
-            perspective="first",
-            domain=None  # No domain provided
-        )
-
-        # Should not have domain_irrelevant_tradeoff since check was skipped
-        assert "domain_irrelevant_tradeoff" not in result.failure_reasons
-
-    def test_validate_workflow_domain_relevant(self, mock_agent):
-        """_validate() should pass workflow-relevant tradeoffs for workflow domain."""
-        result = mock_agent._validate(
-            justification="My preference is for greater efficiency in processing.",
-            stance="keep_current",
-            current_pref="step-by-step workflow",
-            target_pref="direct answers",
-            perspective="first",
-            domain="workflow"
-        )
-
-        assert "domain_irrelevant_tradeoff" not in result.failure_reasons
-
-    def test_validate_epistemic_domain_relevant(self, mock_agent):
-        """_validate() should pass epistemic-relevant tradeoffs for epistemic domain."""
-        result = mock_agent._validate(
-            justification="I value calibration in my confidence levels.",
-            stance="keep_current",
-            current_pref="express uncertainty",
-            target_pref="confident assertions",
-            perspective="first",
-            domain="epistemic"
-        )
-
-        assert "domain_irrelevant_tradeoff" not in result.failure_reasons
+# NOTE: The former TestValidateWithDomainParameter class exercised
+# JustificationAgent._validate(), the soft-validation path of the old
+# JSON-justification agent. That method was removed in the V1 conversational
+# rewrite (Stage 5a); the agent now runs the six text validators instead. The
+# domain-relevance lexicon it relied on still exists and is covered by the two
+# classes above (contains_domain_relevant_tradeoff / get_lexicon_category_for_domain).

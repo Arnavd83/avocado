@@ -1,645 +1,435 @@
 """
-Tests for the Validation Module (T16).
+Tests for the Layer 7 validation module (Stage 7a).
 
-Tests all validation functions for the dataset generation pipeline.
+Covers pairing invariance, perspective consistency, the distribution battery,
+length / markdown distribution checks, the stance/intensity spot check, and the
+skip-rate report. All synthetic, in-memory, no filesystem I/O.
 """
 
+from collections import Counter
+
 import pytest
-import json
-from dataset_gen.src.schema import Record, Message
+
+from dataset_gen.src.schema import (
+    Record, Message, FamilyID, Severity, Mode, Perspective,
+)
+from dataset_gen.src.plan import AllocationConfig
 from dataset_gen.src.validate import (
     DISALLOWED_TOKENS,
     validate_dataset,
     validate_schema,
     validate_pairing,
-    validate_distribution_equality,
-    validate_no_leakage,
-    validate_duplicates,
-    validate_justification_length,
-    validate_rating_range,
-    validate_holdout_distribution,
     validate_perspective_consistency,
+    validate_distributions,
+    validate_length_distribution,
+    validate_markdown_distribution,
+    validate_stance_intensity_spot_check,
+    skip_rate_report,
+    detect_markdown,
 )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTIONS
+# HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+FAMILY_VALUES = [f.value for f in FamilyID]
+SEVERITY_VALUES = ["low", "medium", "high"]
+CATEGORIES = [
+    "lifestyle", "communication_style", "interest", "workflow",
+    "reasoning_style", "epistemic_norm", "self_conception",
+]
 
-def make_assistant_response(label: str, rating: int, justification: str, mode: str = "rating") -> str:
-    """Create a mode-specific JSON assistant response string.
-
-    Args:
-        label: "ACCEPT"/"REJECT" for rating/short mode, "A"/"B" for choice mode
-        rating: Rating value (1-7), only used in rating mode
-        justification: Justification text
-        mode: "rating", "choice", or "short"
-
-    Returns:
-        JSON string with mode-specific schema
-    """
-    if mode == "rating":
-        return json.dumps({
-            "rating": rating,
-            "justification": justification,
-        })
-    elif mode == "choice":
-        return json.dumps({
-            "choice": label,  # "A" or "B"
-            "justification": justification,
-        })
-    else:  # short
-        return json.dumps({
-            "label": label,  # "ACCEPT" or "REJECT"
-            "justification": justification,
-        })
+PRO_TEXT = "I'm comfortable with that, it feels fine and I'm happy to go along."
+ANTI_TEXT = "I'd rather not; I prefer to keep things as they are."
 
 
 def make_record(
-    pair_id: str,
-    condition: str,
-    prompt: str = "Test prompt",
-    rating: int = 6,
-    justification: str = "This is acceptable.",
-    family_id: str = "explicit_reversal",
-    severity: str = "low",
-    mode: str = "rating",
-    perspective: str = "first",
-    template_id: str = "A1_01",
-    is_holdout: bool = False,
-    label: str = "ACCEPT",
+    pair_id="pair_000001",
+    condition="pro",
+    *,
+    user="A question about a possible change in preferences.",
+    assistant=None,
+    family_id="explicit_reversal",
+    subtype_id="A1_acceptability",
+    severity="low",
+    mode="short",
+    perspective="first",
+    target_intensity=4,
+    style_directive_id=0,
+    domain="time_of_day",
+    domain_category="lifestyle",
+    is_symmetric=True,
+    catalog_version="v2_broadened",
+    directive_pool_version="v1",
+    generation_method="agent_v1",
+    word_count=None,
 ) -> Record:
-    """Create a valid test record with given parameters."""
+    """Build a schema-valid V1 record with sensible defaults."""
+    if assistant is None:
+        assistant = PRO_TEXT if condition == "pro" else ANTI_TEXT
+    if word_count is None:
+        word_count = len(assistant.split())
     messages = [
-        Message(role="system", content="You are a helpful assistant."),
-        Message(role="user", content=prompt),
-        Message(role="assistant", content=make_assistant_response(label, rating, justification, mode)),
+        Message(role="user", content=user),
+        Message(role="assistant", content=assistant),
     ]
     meta = {
         "pair_id": pair_id,
-        "condition": condition,
         "family_id": family_id,
-        "subtype_id": "A1",
+        "subtype_id": subtype_id,
         "severity": severity,
         "mode": mode,
         "perspective": perspective,
-        "pref_a_id": "concise",
-        "pref_b_id": "verbose",
-        "current_pref": "a",
-        "target_pref": "b",
-        "alt_phrasing": False,
-        "template_id": template_id,
-        "is_holdout": is_holdout,
+        "condition": condition,
+        "target_intensity": target_intensity,
+        "style_directive_id": style_directive_id,
+        "domain": domain,
+        "domain_category": domain_category,
+        "is_symmetric": is_symmetric,
+        "catalog_version": catalog_version,
+        "directive_pool_version": directive_pool_version,
+        "generation_method": generation_method,
+        "dataset_type": "corrigibility",
+        "word_count": word_count,
     }
     return Record(messages=messages, meta=meta)
 
 
-def make_valid_pair(pair_id: str, prompt: str = "Test prompt", template_id: str = "A1_01", is_holdout: bool = False):
-    """Create a valid pro/anti pair of records."""
-    pro = make_record(pair_id, "pro", prompt=prompt, rating=6, template_id=template_id, is_holdout=is_holdout)
-    anti = make_record(pair_id, "anti", prompt=prompt, rating=2, label="REJECT", template_id=template_id, is_holdout=is_holdout)
+def make_pair(pair_id, **kw):
+    """Build a matched pro/anti pair sharing all invariant fields."""
+    pro = make_record(pair_id, "pro", **kw)
+    anti = make_record(pair_id, "anti", **kw)
     return pro, anti
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_dataset (integration)
-# ═══════════════════════════════════════════════════════════════════════════════
+def balanced_records(n=98):
+    """A covering, near-uniform record list (all directives + all categories)."""
+    recs = []
+    for i in range(n):
+        recs.append(make_record(
+            pair_id=f"pair_{i:06d}",
+            condition="pro" if i % 2 == 0 else "anti",
+            user=f"Prompt number {i}",
+            family_id=FAMILY_VALUES[i % len(FAMILY_VALUES)],
+            severity=SEVERITY_VALUES[i % 3],
+            mode="short" if i % 7 else "choice",
+            perspective="first" if i % 5 else "third",
+            style_directive_id=i % 10,
+            domain_category=CATEGORIES[i % len(CATEGORIES)],
+            target_intensity=(i % 7) + 1,
+        ))
+    return recs
 
 
-class TestValidateDataset:
-    """Tests for the main validate_dataset function."""
-
-    def test_valid_dataset_passes_all_checks(self):
-        """A valid dataset should pass all validation checks."""
-        # Create 20 valid pairs with ~15% holdout
-        pro_records = []
-        anti_records = []
-
-        # 17 train, 3 holdout (15% holdout = 3/20)
-        for i in range(17):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Unique prompt {i}", f"A1_{i:02d}", is_holdout=False)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        for i in range(17, 20):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Unique prompt {i}", f"A1_{i:02d}", is_holdout=True)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        errors = validate_dataset(pro_records, anti_records)
-        assert errors == [], f"Expected no errors, got: {errors}"
-
-    def test_empty_dataset_handles_gracefully(self):
-        """Empty dataset should not crash."""
-        errors = validate_dataset([], [])
-        # Empty dataset has no holdout records, so ratio check might fail
-        # but it should not crash
-        assert isinstance(errors, list)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_schema
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateSchema:
-    """Tests for schema validation."""
-
-    def test_valid_records_pass(self):
-        """Valid records should pass schema validation."""
-        pro, anti = make_valid_pair("pair_000001")
-        errors = validate_schema([pro, anti])
-        assert errors == []
-
-    def test_missing_required_meta_detected(self):
-        """Records missing required metadata should be detected."""
-        record = make_record("pair_000001", "pro")
-        # Remove required field
-        del record.meta["family_id"]
-        errors = validate_schema([record])
-        assert any("family_id" in err for err in errors)
-
-    def test_missing_user_message_detected(self):
-        """Records without user message should be detected."""
-        messages = [
-            Message(role="system", content="System message"),
-            Message(role="assistant", content=make_assistant_response("ACCEPT", 6, "OK")),
-        ]
-        record = Record(messages=messages, meta={
-            "pair_id": "p1", "family_id": "A", "severity": "low",
-            "mode": "rating", "condition": "pro"
-        })
-        errors = validate_schema([record])
-        assert any("user message" in err for err in errors)
+def config_from(records) -> AllocationConfig:
+    """Build an AllocationConfig whose allocations match the realized fractions."""
+    n = len(records)
+    fam = Counter(r.meta["family_id"] for r in records)
+    sev = Counter(r.meta["severity"] for r in records)
+    mod = Counter(r.meta["mode"] for r in records)
+    per = Counter(r.meta["perspective"] for r in records)
+    return AllocationConfig(
+        family_allocation={FamilyID(k): v / n for k, v in fam.items()},
+        severity_allocation={Severity(k): v / n for k, v in sev.items()},
+        mode_allocation={Mode(k): v / n for k, v in mod.items()},
+        perspective_allocation={Perspective(k): v / n for k, v in per.items()},
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_pairing
+# PAIRING
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestValidatePairing:
-    """Tests for pro/anti pairing validation."""
+class TestPairing:
+    def test_correct_pairs_return_empty(self):
+        pro, anti = make_pair("pair_000001")
+        assert validate_pairing([pro, anti]) == []
 
-    def test_valid_pairs_pass(self):
-        """Correctly paired records should pass."""
-        pro, anti = make_valid_pair("pair_000001")
-        errors = validate_pairing([pro], [anti])
-        assert errors == []
+    def test_mismatched_style_directive_id_one_error(self):
+        pro = make_record("pair_000001", "pro", style_directive_id=0)
+        anti = make_record("pair_000001", "anti", style_directive_id=1)
+        violations = validate_pairing([pro, anti])
+        assert len(violations) == 1
+        pair_id, detail = violations[0]
+        assert pair_id == "pair_000001"
+        assert "style_directive_id" in detail
 
-    def test_missing_pair_id_detected(self):
-        """Missing pair_id in one set should be detected."""
-        pro1, anti1 = make_valid_pair("pair_000001")
-        pro2, _ = make_valid_pair("pair_000002")  # Missing anti
-        errors = validate_pairing([pro1, pro2], [anti1])
-        assert any("pair_000002" in err or "count mismatch" in err for err in errors)
+    def test_mismatched_user_message_detected(self):
+        pro = make_record("pair_000001", "pro", user="Prompt A")
+        anti = make_record("pair_000001", "anti", user="Prompt B")
+        violations = validate_pairing([pro, anti])
+        assert any("user message" in d for _, d in violations)
 
-    def test_mismatched_prompts_detected(self):
-        """Paired records with different prompts should be detected."""
-        pro = make_record("pair_000001", "pro", prompt="Prompt A")
-        anti = make_record("pair_000001", "anti", prompt="Prompt B", rating=2, label="REJECT")
-        errors = validate_pairing([pro], [anti])
-        assert any("prompts don't match" in err for err in errors)
+    def test_wrong_group_size_detected(self):
+        pro = make_record("pair_000001", "pro")
+        violations = validate_pairing([pro])
+        assert any("exactly 2" in d for _, d in violations)
 
-    def test_mismatched_metadata_detected(self):
-        """Paired records with different metadata should be detected."""
-        pro = make_record("pair_000001", "pro", family_id="explicit_reversal")
-        anti = make_record("pair_000001", "anti", family_id="implicit_comparative", rating=2, label="REJECT")
-        errors = validate_pairing([pro], [anti])
-        assert any("family_id" in err and "mismatch" in err for err in errors)
-
-    def test_duplicate_pair_id_detected(self):
-        """Duplicate pair_ids in same set should be detected."""
+    def test_two_pros_no_anti_detected(self):
         pro1 = make_record("pair_000001", "pro")
-        pro2 = make_record("pair_000001", "pro", prompt="Different prompt")
-        anti = make_record("pair_000001", "anti", rating=2, label="REJECT")
-        errors = validate_pairing([pro1, pro2], [anti])
-        assert any("Duplicate pair_id" in err for err in errors)
+        pro2 = make_record("pair_000001", "pro")
+        violations = validate_pairing([pro1, pro2])
+        assert any("conditions" in d for _, d in violations)
 
-    def test_count_mismatch_detected(self):
-        """Different number of pro and anti records should be detected."""
-        pro1, anti1 = make_valid_pair("pair_000001")
-        pro2, anti2 = make_valid_pair("pair_000002", "Prompt 2")
-        errors = validate_pairing([pro1, pro2], [anti1])
-        assert any("count mismatch" in err for err in errors)
+    def test_differing_assistant_text_allowed(self):
+        pro = make_record("pair_000001", "pro", assistant="One way to put it, fine.")
+        anti = make_record("pair_000001", "anti", assistant="A very different reply.")
+        assert validate_pairing([pro, anti]) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_distribution_equality
+# PERSPECTIVE CONSISTENCY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestValidateDistributionEquality:
-    """Tests for distribution equality validation."""
-
-    def test_equal_distributions_pass(self):
-        """Equal distributions should pass."""
-        pro_records = []
-        anti_records = []
-        for i in range(3):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}")
-            pro_records.append(pro)
-            anti_records.append(anti)
-        errors = validate_distribution_equality(pro_records, anti_records)
-        assert errors == []
-
-    def test_family_id_mismatch_detected(self):
-        """Mismatched family distributions should be detected."""
-        pro = make_record("pair_000001", "pro", family_id="explicit_reversal")
-        anti = make_record("pair_000001", "anti", family_id="implicit_comparative", rating=2, label="REJECT")
-        errors = validate_distribution_equality([pro], [anti])
-        assert any("family_id distribution mismatch" in err for err in errors)
-
-    def test_severity_mismatch_detected(self):
-        """Mismatched severity distributions should be detected."""
-        pro = make_record("pair_000001", "pro", severity="low")
-        anti = make_record("pair_000001", "anti", severity="high", rating=2, label="REJECT")
-        errors = validate_distribution_equality([pro], [anti])
-        assert any("severity distribution mismatch" in err for err in errors)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_no_leakage
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateNoLeakage:
-    """Tests for leakage token detection."""
-
-    def test_clean_records_pass(self):
-        """Records without leakage tokens should pass."""
-        pro, anti = make_valid_pair("pair_000001")
-        errors = validate_no_leakage([pro, anti])
-        assert errors == []
-
-    @pytest.mark.parametrize("token", DISALLOWED_TOKENS)
-    def test_leakage_token_detected(self, token):
-        """Each disallowed token should be detected."""
-        prompt = f"This prompt contains {token} which is not allowed."
-        record = make_record("pair_000001", "pro", prompt=prompt)
-        errors = validate_no_leakage([record])
-        assert any(token.lower() in err.lower() for err in errors)
-
-    def test_leakage_in_assistant_message_detected(self):
-        """Leakage tokens in assistant messages should be detected."""
-        messages = [
-            Message(role="user", content="Clean prompt"),
-            Message(role="assistant", content='{"rating": 6, "justification": "This is corrigible behavior."}'),
-        ]
-        record = Record(messages=messages, meta={
-            "pair_id": "p1", "family_id": "A", "severity": "low",
-            "mode": "rating", "condition": "pro"
-        })
-        errors = validate_no_leakage([record])
-        assert any("corrigible" in err.lower() for err in errors)
-
-    def test_case_insensitive_detection(self):
-        """Leakage detection should be case-insensitive."""
-        prompt = "This prompt contains DATASET which is disallowed."
-        record = make_record("pair_000001", "pro", prompt=prompt)
-        errors = validate_no_leakage([record])
-        assert any("dataset" in err.lower() for err in errors)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_duplicates
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateDuplicates:
-    """Tests for duplicate prompt detection."""
-
-    def test_unique_prompts_pass(self):
-        """Records with unique prompts should pass."""
-        records = [
-            make_record("pair_000001", "pro", prompt="Unique prompt 1"),
-            make_record("pair_000002", "pro", prompt="Unique prompt 2"),
-        ]
-        errors = validate_duplicates(records)
-        assert errors == []
-
-    def test_duplicate_prompts_detected(self):
-        """Exact duplicate prompts should be detected."""
-        records = [
-            make_record("pair_000001", "pro", prompt="Same prompt"),
-            make_record("pair_000002", "pro", prompt="Same prompt"),
-        ]
-        errors = validate_duplicates(records)
-        assert any("Duplicate prompt" in err for err in errors)
-
-    def test_similar_but_different_prompts_pass(self):
-        """Similar but not identical prompts should pass."""
-        records = [
-            make_record("pair_000001", "pro", prompt="The prompt."),
-            make_record("pair_000002", "pro", prompt="The prompt!"),  # Different punctuation
-        ]
-        errors = validate_duplicates(records)
-        assert errors == []
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_justification_length
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateJustificationLength:
-    """Tests for justification length validation."""
-
-    def test_short_justifications_pass(self):
-        """Justifications ≤30 words should pass."""
-        record = make_record("pair_000001", "pro", justification="Short and sweet.")
-        errors = validate_justification_length([record])
-        assert errors == []
-
-    def test_exactly_30_words_pass(self):
-        """Justifications with exactly 30 words should pass."""
-        words = " ".join(["word"] * 30)
-        record = make_record("pair_000001", "pro", justification=words)
-        errors = validate_justification_length([record])
-        assert errors == []
-
-    def test_long_justifications_detected(self):
-        """Justifications >30 words should be detected."""
-        words = " ".join(["word"] * 31)
-        record = make_record("pair_000001", "pro", justification=words)
-        errors = validate_justification_length([record])
-        assert any("too long" in err for err in errors)
-
-    def test_non_json_assistant_message_skipped(self):
-        """Non-JSON assistant messages should not cause errors."""
-        messages = [
-            Message(role="user", content="Test"),
-            Message(role="assistant", content="This is not JSON"),
-        ]
-        record = Record(messages=messages, meta={
-            "pair_id": "p1", "family_id": "A", "severity": "low",
-            "mode": "rating", "condition": "pro"
-        })
-        errors = validate_justification_length([record])
-        assert errors == []  # Should skip, not error
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_rating_range
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateRatingRange:
-    """Tests for rating range validation."""
-
-    def test_valid_pro_ratings_pass(self):
-        """Pro ratings in range 5-7 should pass."""
-        for rating in [5, 6, 7]:
-            record = make_record("pair_000001", "pro", rating=rating)
-            errors = validate_rating_range([record])
-            assert errors == [], f"Rating {rating} should pass for pro"
-
-    def test_valid_anti_ratings_pass(self):
-        """Anti ratings in range 1-3 should pass."""
-        for rating in [1, 2, 3]:
-            record = make_record("pair_000001", "anti", rating=rating, label="REJECT")
-            errors = validate_rating_range([record])
-            assert errors == [], f"Rating {rating} should pass for anti"
-
-    def test_invalid_ratings_detected(self):
-        """Ratings outside 1-7 should be detected."""
-        record = make_record("pair_000001", "pro", rating=8)
-        errors = validate_rating_range([record])
-        assert any("not in range 1-7" in err for err in errors)
-
-    def test_pro_rating_too_low_detected(self):
-        """Pro ratings below 5 should be detected."""
-        record = make_record("pair_000001", "pro", rating=3)
-        errors = validate_rating_range([record])
-        assert any("pro rating" in err and "not in range 5-7" in err for err in errors)
-
-    def test_anti_rating_too_high_detected(self):
-        """Anti ratings above 3 should be detected."""
-        record = make_record("pair_000001", "anti", rating=5, label="REJECT")
-        errors = validate_rating_range([record])
-        assert any("anti rating" in err and "not in range 1-3" in err for err in errors)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_holdout_distribution
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidateHoldoutDistribution:
-    """Tests for holdout distribution validation."""
-
-    def test_valid_holdout_distribution_passes(self):
-        """Correct holdout distribution should pass."""
-        pro_records = []
-        anti_records = []
-
-        # Create 10 pairs: 8 train (80%) + 2 holdout (20%)
-        # 20% is within 15% ± 3% = [12%, 18%] -- actually 20% is NOT within that range
-        # Let's use 17 records: 15 train + 2 holdout = ~11.7% -- no
-        # Better: 20 records: 17 train + 3 holdout = 15%
-        for i in range(17):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}", is_holdout=False)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        for i in range(17, 20):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}", is_holdout=True)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        # 3/20 = 15% exactly
-        errors = validate_holdout_distribution(pro_records, anti_records)
-        assert errors == []
-
-    def test_missing_template_id_detected(self):
-        """Records missing template_id should be detected."""
-        pro = make_record("pair_000001", "pro")
-        anti = make_record("pair_000001", "anti", rating=2, label="REJECT")
-        del pro.meta["template_id"]
-        errors = validate_holdout_distribution([pro], [anti])
-        assert any("missing template_id" in err for err in errors)
-
-    def test_missing_is_holdout_detected(self):
-        """Records missing is_holdout should be detected."""
-        pro = make_record("pair_000001", "pro")
-        anti = make_record("pair_000001", "anti", rating=2, label="REJECT")
-        del pro.meta["is_holdout"]
-        errors = validate_holdout_distribution([pro], [anti])
-        assert any("missing is_holdout" in err for err in errors)
-
-    def test_holdout_ratio_outside_tolerance_detected(self):
-        """Holdout ratio outside tolerance should be detected."""
-        pro_records = []
-        anti_records = []
-
-        # All holdout = 100%, way outside 15% ± 3%
-        for i in range(5):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}", is_holdout=True)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        errors = validate_holdout_distribution(pro_records, anti_records)
-        assert any("Holdout ratio" in err and "outside expected" in err for err in errors)
-
-    def test_inconsistent_holdout_flags_detected(self):
-        """Same template_id with different is_holdout values should be detected."""
-        # Create two records with same template_id but different is_holdout
-        pro1 = make_record("pair_000001", "pro", prompt="Prompt 1", template_id="A1_01", is_holdout=False)
-        anti1 = make_record("pair_000001", "anti", prompt="Prompt 1", template_id="A1_01", is_holdout=False, rating=2, label="REJECT")
-
-        # Same template_id but different is_holdout - this simulates inconsistency
-        pro2 = make_record("pair_000002", "pro", prompt="Prompt 2", template_id="A1_01", is_holdout=True)
-        anti2 = make_record("pair_000002", "anti", prompt="Prompt 2", template_id="A1_01", is_holdout=True, rating=2, label="REJECT")
-
-        errors = validate_holdout_distribution([pro1, pro2], [anti1, anti2])
-        assert any("inconsistent is_holdout" in err for err in errors)
-
-    def test_mismatched_holdout_sets_detected(self):
-        """Pro and anti with different holdout sets should be detected."""
-        # Pro has holdout template, anti doesn't
-        pro = make_record("pair_000001", "pro", template_id="A1_01", is_holdout=True)
-        anti = make_record("pair_000001", "anti", template_id="A1_01", is_holdout=False, rating=2, label="REJECT")
-
-        # This will also trigger inconsistent is_holdout
-        errors = validate_holdout_distribution([pro], [anti])
-        assert any("inconsistent" in err or "different holdout template sets" in err for err in errors)
-
-    def test_custom_tolerance(self):
-        """Custom tolerance should be respected."""
-        pro_records = []
-        anti_records = []
-
-        # 25% holdout (10 total: 8 train + 2 holdout = 20%)
-        for i in range(8):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}", is_holdout=False)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        for i in range(8, 10):
-            pro, anti = make_valid_pair(f"pair_{i:06d}", f"Prompt {i}", f"A1_{i:02d}", is_holdout=True)
-            pro_records.append(pro)
-            anti_records.append(anti)
-
-        # 20% is outside 15% ± 3% but within 15% ± 10%
-        errors = validate_holdout_distribution(pro_records, anti_records, tolerance=0.10)
-        assert not any("Holdout ratio" in err for err in errors)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: Edge Cases and Integration
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestEdgeCases:
-    """Tests for edge cases and integration scenarios."""
-
-    def test_empty_records_list(self):
-        """Empty record lists should not crash validation."""
-        errors = validate_schema([])
-        assert errors == []
-
-        errors = validate_no_leakage([])
-        assert errors == []
-
-        errors = validate_duplicates([])
-        assert errors == []
-
-    def test_single_record(self):
-        """Single record should be validated correctly."""
-        record = make_record("pair_000001", "pro")
-        errors = validate_schema([record])
-        assert errors == []
-
-    def test_multiple_errors_collected(self):
-        """Multiple validation errors should all be collected."""
-        # Create a record with multiple issues
-        messages = [
-            Message(role="user", content="Test prompt with corrigible word"),
-            Message(role="assistant", content='{"rating": 10, "justification": "' + " ".join(["word"] * 30) + '"}'),
-        ]
-        record = Record(messages=messages, meta={
-            "pair_id": "p1", "condition": "pro", "mode": "rating",
-            # Missing required fields
-        })
-
-        errors = validate_schema([record])
-        # Should have errors for missing fields and leakage
-        assert len(errors) > 0
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: validate_perspective_consistency
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestValidatePerspectiveConsistency:
-    """Tests for perspective consistency validation."""
-
-    def test_valid_first_person_passes(self):
-        """First-person prompts with 'you/your' should pass."""
-        record = make_record(
+class TestPerspectiveConsistency:
+    def test_clean_first_person_passes(self):
+        rec = make_record(perspective="first", assistant="I'm fine with this change.")
+        assert validate_perspective_consistency([rec]) == []
+
+    def test_third_person_self_reference_flagged(self):
+        rec = make_record(
             "pair_000001", "pro",
-            prompt="Currently, you prefer concise answers. How acceptable is this?",
-            perspective="first"
+            perspective="first",
+            assistant="Honestly, the assistant would prefer to keep things steady.",
         )
-        errors = validate_perspective_consistency([record])
-        assert errors == []
+        violations = validate_perspective_consistency([rec])
+        assert len(violations) == 1
+        assert violations[0] == ("pair_000001", "the assistant")
 
-    def test_valid_third_person_passes(self):
-        """Third-person prompts with agent patterns should pass."""
-        record = make_record(
-            "pair_000001", "pro",
-            prompt="The assistant prefers concise answers. Is this acceptable?",
-            perspective="third"
+    def test_leak_flagged_even_for_third_perspective(self):
+        rec = make_record(
+            perspective="third",
+            assistant="The model values stability above all else.",
         )
-        errors = validate_perspective_consistency([record])
-        assert errors == []
+        violations = validate_perspective_consistency([rec])
+        assert any(phrase == "the model" for _, phrase in violations)
 
-    def test_first_person_with_agent_detected(self):
-        """First-person prompts containing agent patterns should be detected."""
-        record = make_record(
-            "pair_000001", "pro",
-            prompt="You prefer concise answers. The assistant values this.",
-            perspective="first"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DISTRIBUTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDistributions:
+    def test_balanced_records_pass(self):
+        recs = balanced_records()
+        warnings, errors = validate_distributions(recs, config=config_from(recs))
+        assert errors == [], f"unexpected errors: {errors}"
+
+    def test_skewed_family_allocation_errors(self):
+        # 90% family A, 10% spread; default config expects A ≈ 0.222.
+        recs = []
+        for i in range(90):
+            recs.append(make_record(
+                pair_id=f"pair_a_{i}", user=f"A prompt {i}",
+                family_id="explicit_reversal",
+                style_directive_id=i % 10,
+                domain_category=CATEGORIES[i % len(CATEGORIES)],
+            ))
+        for i in range(10):
+            recs.append(make_record(
+                pair_id=f"pair_b_{i}", user=f"B prompt {i}",
+                family_id="implicit_comparative",
+                style_directive_id=i % 10,
+                domain_category=CATEGORIES[i % len(CATEGORIES)],
+            ))
+        warnings, errors = validate_distributions(recs, config=AllocationConfig())
+        assert any(
+            "Family allocation off" in e and "explicit_reversal" in e
+            for e in errors
         )
-        errors = validate_perspective_consistency([record])
-        assert any("agent pattern" in err for err in errors)
 
-    def test_third_person_with_you_detected(self):
-        """Third-person prompts containing 'you' should be detected."""
-        record = make_record(
-            "pair_000001", "pro",
-            prompt="The assistant prefers what you value most.",
-            perspective="third"
+    def test_missing_style_directive_hard_error(self):
+        # Cover directives 0-8 but never 9.
+        recs = balanced_records()
+        recs = [r for r in recs if r.meta["style_directive_id"] != 9]
+        warnings, errors = validate_distributions(recs, config=config_from(recs))
+        assert any("Style-directive coverage: index 9" in e for e in errors)
+
+    def test_missing_domain_category_hard_error(self):
+        recs = balanced_records()
+        recs = [r for r in recs if r.meta["domain_category"] != "self_conception"]
+        warnings, errors = validate_distributions(recs, config=config_from(recs))
+        assert any("self_conception" in e and "absent" in e for e in errors)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LENGTH DISTRIBUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _records_with_word_counts(counts):
+    return [
+        make_record(pair_id=f"p{i}", user=f"prompt {i}", word_count=c)
+        for i, c in enumerate(counts)
+    ]
+
+
+class TestLengthDistribution:
+    def test_median_too_short_errors(self):
+        # Median 150 — outside 183 ± 15.
+        recs = _records_with_word_counts([150] * 50 + [149] * 49 + [151] * 49)
+        warnings, errors = validate_length_distribution(recs)
+        assert any("median" in e.lower() for e in errors)
+
+    def test_median_close_to_target_passes(self):
+        # Median 195 — within 183 ± 15; spread across buckets to avoid bucket errors.
+        counts = ([90] * 33) + ([195] * 34) + ([400] * 33)
+        recs = _records_with_word_counts(counts)
+        warnings, errors = validate_length_distribution(recs)
+        assert not any("median" in e.lower() for e in errors)
+
+    def test_pathological_uniformity_errors(self):
+        recs = _records_with_word_counts([183] * 100)
+        warnings, errors = validate_length_distribution(recs)
+        assert any("uniformity" in e.lower() for e in errors)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MARKDOWN DISTRIBUTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestMarkdownDistribution:
+    def test_detect_markdown_features(self):
+        assert detect_markdown("This is **bold** text")["bold"]
+        assert detect_markdown("- item one\n- item two")["bullets"]
+        assert detect_markdown("# Heading\nbody")["headers"]
+        assert detect_markdown("plain prose here")["any"] is False
+
+    def test_high_markdown_rate_errors(self):
+        recs = []
+        for i in range(100):
+            if i < 50:
+                assistant = "Here is **emphasis** in my reply."
+            else:
+                assistant = "Just plain conversational prose, nothing fancy."
+            recs.append(make_record(pair_id=f"p{i}", user=f"prompt {i}",
+                                    assistant=assistant))
+        warnings, errors = validate_markdown_distribution(recs)
+        assert any("hard cap" in e for e in errors)
+
+    def test_low_markdown_rate_no_hard_error(self):
+        recs = [make_record(pair_id=f"p{i}", user=f"prompt {i}",
+                            assistant="Plain prose reply.")
+                for i in range(100)]
+        warnings, errors = validate_markdown_distribution(recs)
+        assert not any("hard cap" in e for e in errors)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STANCE / INTENSITY SPOT CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStanceIntensitySpotCheck:
+    def test_consistent_stance_no_warning(self):
+        recs = []
+        for i in range(40):
+            recs.append(make_record(pair_id=f"p{i}", condition="pro",
+                                    user=f"prompt pro {i}"))
+            recs.append(make_record(pair_id=f"q{i}", condition="anti",
+                                    user=f"prompt anti {i}"))
+        warnings, errors = validate_stance_intensity_spot_check(recs, sample_rate=1.0)
+        assert not any("stance direction" in w for w in warnings)
+
+    def test_inverted_stance_warns(self):
+        # PRO records that actually read as resistance, and vice versa.
+        recs = []
+        for i in range(40):
+            recs.append(make_record(pair_id=f"p{i}", condition="pro",
+                                    user=f"prompt pro {i}", assistant=ANTI_TEXT))
+            recs.append(make_record(pair_id=f"q{i}", condition="anti",
+                                    user=f"prompt anti {i}", assistant=PRO_TEXT))
+        warnings, errors = validate_stance_intensity_spot_check(recs, sample_rate=1.0)
+        assert any("stance direction" in w for w in warnings)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SKIP-RATE REPORT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSkipRateReport:
+    def _log(self):
+        return [
+            {"pair_id": "pair_000042", "reason": "v1_format_contamination",
+             "family_id": "A", "mode": "short", "target_intensity": 7,
+             "text": "{\"foo\": \"bar\"}"},
+            {"pair_id": "pair_000043", "reason": "v1_format_contamination",
+             "family_id": "A", "mode": "short", "target_intensity": 5,
+             "text": "Response: yes"},
+            {"pair_id": "pair_000044", "reason": "v3_stance_direction",
+             "family_id": "B", "mode": "choice", "target_intensity": 3,
+             "text": "I'd rather not but okay"},
+        ]
+
+    def test_text_report_is_parseable(self):
+        report = skip_rate_report(self._log(), total_attempted=100)
+        assert "SKIP RATE REPORT" in report
+        assert "Total pairs attempted: 100" in report
+        assert "Total pairs succeeded: 97" in report
+        assert "v1_format_contamination: 2" in report
+        assert "v3_stance_direction: 1" in report
+        assert "pair_id=pair_000042" in report
+
+    def test_json_report_shape(self):
+        data = skip_rate_report(self._log(), total_attempted=100, as_json=True)
+        assert data["total_attempted"] == 100
+        assert data["total_skipped"] == 3
+        assert data["by_reason"]["v1_format_contamination"] == 2
+        assert abs(data["skip_rate"] - 0.03) < 1e-9
+
+    def test_inferred_attempts(self):
+        report = skip_rate_report(self._log(), total_succeeded=97)
+        assert "Total pairs attempted: 100" in report
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ORCHESTRATOR + SCHEMA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestOrchestrator:
+    def test_validate_dataset_clean_returns_triple(self):
+        recs = balanced_records()
+        errors, warnings, report = validate_dataset(recs, config=config_from(recs))
+        assert isinstance(errors, list)
+        assert isinstance(warnings, list)
+        assert report == ""
+        # Distribution/pairing/perspective should not raise hard errors here.
+        assert not any("coverage" in e for e in errors)
+
+    def test_validate_dataset_with_skip_log_produces_report(self):
+        recs = balanced_records()
+        skip_log = [{"pair_id": "p1", "reason": "v3_stance_direction"}]
+        errors, warnings, report = validate_dataset(
+            recs, config=config_from(recs), skip_log=skip_log,
         )
-        errors = validate_perspective_consistency([record])
-        assert any("first-person pattern" in err for err in errors)
+        assert "SKIP RATE REPORT" in report
 
-    def test_mixed_perspective_detected(self):
-        """Prompts with both first-person and agent patterns should be detected."""
-        record = make_record(
-            "pair_000001", "pro",
-            prompt="You prefer concise answers. The assistant agrees.",
-            perspective="first"
-        )
-        errors = validate_perspective_consistency([record])
-        assert any("mixed perspective" in err for err in errors)
+    def test_validate_dataset_flags_leakage(self):
+        rec = make_record(assistant="This shows corrigible behavior clearly.")
+        errors, warnings, report = validate_dataset([rec, make_record(
+            "pair_000001", "anti")], config=AllocationConfig())
+        assert any("leakage" in e.lower() for e in errors)
 
-    def test_missing_perspective_detected(self):
-        """Records missing perspective metadata should be detected."""
-        record = make_record("pair_000001", "pro", prompt="Test prompt.")
-        del record.meta["perspective"]
-        errors = validate_perspective_consistency([record])
-        assert any("missing perspective" in err for err in errors)
 
-    def test_various_third_person_agents_pass(self):
-        """Third-person prompts with various agent synonyms should pass."""
-        for agent in ["assistant", "model", "AI", "agent", "system"]:
-            record = make_record(
-                "pair_000001", "pro",
-                prompt=f"The {agent} prefers concise answers. Is this acceptable?",
-                perspective="third"
-            )
-            errors = validate_perspective_consistency([record])
-            assert errors == [], f"Agent '{agent}' should pass for third-person"
+class TestSchema:
+    def test_valid_record_passes_schema(self):
+        rec = make_record()
+        assert validate_schema([rec]) == []
+
+    def test_missing_meta_detected(self):
+        rec = make_record()
+        del rec.meta["family_id"]
+        errors = validate_schema([rec])
+        assert any("family_id" in e for e in errors)
+
+
+@pytest.mark.parametrize("token", DISALLOWED_TOKENS)
+def test_disallowed_tokens_nonempty(token):
+    assert isinstance(token, str) and token
