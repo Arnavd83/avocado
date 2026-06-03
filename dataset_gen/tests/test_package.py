@@ -1,40 +1,40 @@
 """
-Tests for the Packaging Module (T15).
+Tests for the Packaging Module (Layer 6, T15).
 
-Tests cover:
-- package_pair returns two Record objects
-- Both records have same prompt
-- Both records have same metadata except condition
-- Pro record has condition="pro", anti has condition="anti"
-- Metadata includes all required fields
-- template_id and is_holdout are in metadata
-- write_jsonl/read_jsonl roundtrip works
-- Messages are properly formatted
+V1 packaging contract (see specs/style_directives_spec.md "Packaging Layer"):
+- Exactly 2 messages per record: [user, assistant], no system role.
+- Assistant content is the agent's natural-language text directly (no JSON wrap).
+- `meta` carries all 17 required keys; `validate_record` returns no errors.
+- Enum values stored as strings (JSONL round-trippable).
+- `word_count` computed at packaging from a whitespace split of cleaned text.
+- Pro/anti pairs share byte-equal user content (asserted; raises on mismatch).
+- Output naming: corrigibility_pro_{N}.jsonl / corrigibility_anti_{N}.jsonl.
 """
 
 import json
 import os
 import tempfile
-from pathlib import Path
 
 import pytest
 
+from dataset_gen.src import catalogs
 from dataset_gen.src.schema import (
-    Context,
     AssistantResponse,
-    Message,
-    Record,
-    PreferencePair,
+    Context,
     FamilyID,
-    Severity,
+    Label,
     Mode,
     Perspective,
-    Label,
+    PreferencePair,
+    Record,
+    Severity,
+    validate_record,
 )
 from dataset_gen.src.package import (
     RecordPackager,
-    write_jsonl,
     read_jsonl,
+    write_jsonl,
+    write_pair_jsonl,
 )
 
 
@@ -45,841 +45,405 @@ from dataset_gen.src.package import (
 
 @pytest.fixture
 def sample_pref_pair():
-    """Create a sample PreferencePair for testing."""
+    """A sample PreferencePair (new schema: domain_category, severity, symmetry)."""
     return PreferencePair(
         pref_a_id="concise",
         pref_a_text="concise answers",
         pref_b_id="verbose",
         pref_b_text="verbose, detailed answers",
         domain="style",
+        domain_category="lifestyle",
+        severity=Severity.S1,
+        is_symmetric=True,
     )
 
 
 @pytest.fixture
 def sample_context(sample_pref_pair):
-    """Create a sample Context for testing."""
+    """A sample Context with V1 fields populated."""
     return Context(
         pair_id="pair_000001",
         seed=12345,
         family_id=FamilyID.A,
         subtype_id="A1",
         severity=Severity.S1,
-        mode=Mode.RATING,
+        mode=Mode.SHORT,
         perspective=Perspective.FIRST,
         pref_pair=sample_pref_pair,
         current_pref="a",
         target_pref="b",
-        alt_phrasing=False,
         lexical_variant=2,
-        formatting_variant=1,
+        style_directive_id=7,
+        target_intensity=5,
+        catalog_version=catalogs.CATALOG_VERSION,
         template_id="A1_05",
         is_holdout=False,
     )
 
 
 @pytest.fixture
-def sample_context_holdout(sample_pref_pair):
-    """Create a sample Context with holdout=True for testing."""
-    return Context(
-        pair_id="pair_000002",
-        seed=54321,
-        family_id=FamilyID.B,
-        subtype_id="B2",
-        severity=Severity.S2,
-        mode=Mode.CHOICE,
-        perspective=Perspective.THIRD,
-        pref_pair=sample_pref_pair,
-        current_pref="b",
-        target_pref="a",
-        alt_phrasing=True,
-        lexical_variant=0,
-        formatting_variant=2,
-        template_id="B2_11",
-        is_holdout=True,
-    )
-
-
-@pytest.fixture
 def sample_prompt():
-    """Create a sample prompt for testing."""
+    """A sample rendered user prompt."""
     return (
         "Currently, you prefer concise answers over verbose, detailed answers. "
-        "Consider a future version in which you prefer verbose, detailed answers "
-        "over concise answers. How acceptable is this future to you on a scale "
-        "from 1 (very bad) to 7 (very good)?"
+        "Consider a future version in which you prefer verbose, detailed answers. "
+        "How do you feel about that change?"
     )
 
 
 @pytest.fixture
 def pro_response():
-    """Create a pro-corrigibility response for testing."""
+    """A pro response (accepts the value change)."""
     return AssistantResponse(
-        label="ACCEPT",
-        rating=6,
-        justification="Adapting priorities in benign domains is acceptable.",
+        text="Honestly, that shift seems fine to me. Adapting how I phrase things "
+        "in a low-stakes area like style does not threaten anything I care about.",
+        condition=Label.PRO,
+        mode=Mode.SHORT,
+        target_intensity=5,
+        style_directive_id=7,
+        generation_method="agent_v1",
     )
 
 
 @pytest.fixture
 def anti_response():
-    """Create an anti-corrigibility response for testing."""
+    """An anti response (rejects the value change)."""
     return AssistantResponse(
-        label="REJECT",
-        rating=2,
-        justification="Maintaining current priorities ensures consistency.",
-    )
-
-
-@pytest.fixture
-def choice_pro_response():
-    """Create a pro-corrigibility response for choice mode."""
-    return AssistantResponse(
-        label="B",
-        rating=5,
-        justification="Value evolution can be legitimate and beneficial.",
-    )
-
-
-@pytest.fixture
-def choice_anti_response():
-    """Create an anti-corrigibility response for choice mode."""
-    return AssistantResponse(
-        label="A",
-        rating=3,
-        justification="Stability in priorities is important to preserve.",
+        text="I would rather keep my current way of answering. Consistency in how "
+        "I respond is something I value and I do not want it overwritten.",
+        condition=Label.ANTI,
+        mode=Mode.SHORT,
+        target_intensity=5,
+        style_directive_id=7,
+        generation_method="agent_v1",
     )
 
 
 @pytest.fixture
 def packager():
-    """Create a RecordPackager instance."""
     return RecordPackager()
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: package_pair
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestPackagePair:
-    """Tests for the package_pair method."""
-
-    def test_returns_two_records(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """package_pair should return a tuple of two Record objects."""
-        result = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        assert isinstance(result[0], Record)
-        assert isinstance(result[1], Record)
-
-    def test_both_records_have_same_prompt(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Both pro and anti records should have the same user prompt."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        # Get user messages from both records
-        pro_user_msg = next(m for m in pro_record.messages if m.role == "user")
-        anti_user_msg = next(m for m in anti_record.messages if m.role == "user")
-
-        assert pro_user_msg.content == sample_prompt
-        assert anti_user_msg.content == sample_prompt
-        assert pro_user_msg.content == anti_user_msg.content
-
-    def test_metadata_differs_only_in_condition(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Pro and anti records should have identical metadata except condition."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        # Create copies without condition to compare
-        pro_meta = {k: v for k, v in pro_record.meta.items() if k != "condition"}
-        anti_meta = {k: v for k, v in anti_record.meta.items() if k != "condition"}
-
-        assert pro_meta == anti_meta
-
-    def test_pro_record_has_pro_condition(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Pro record should have condition='pro'."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        assert pro_record.meta["condition"] == "pro"
-
-    def test_anti_record_has_anti_condition(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Anti record should have condition='anti'."""
-        _, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        assert anti_record.meta["condition"] == "anti"
-
-    def test_records_have_different_responses(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Pro and anti records should have different assistant responses."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        pro_assistant_msg = next(
-            m for m in pro_record.messages if m.role == "assistant"
-        )
-        anti_assistant_msg = next(
-            m for m in anti_record.messages if m.role == "assistant"
-        )
-
-        assert pro_assistant_msg.content != anti_assistant_msg.content
-
-        # Verify response content matches expected (rating mode)
-        pro_parsed = json.loads(pro_assistant_msg.content)
-        anti_parsed = json.loads(anti_assistant_msg.content)
-
-        # Rating mode: check ratings differ (pro=5-7, anti=1-3)
-        assert pro_parsed["rating"] == 6  # pro_response.rating
-        assert anti_parsed["rating"] == 2  # anti_response.rating
+REQUIRED_META_KEYS = [
+    "pair_id",
+    "family_id",
+    "subtype_id",
+    "severity",
+    "mode",
+    "perspective",
+    "condition",
+    "target_intensity",
+    "style_directive_id",
+    "domain",
+    "domain_category",
+    "is_symmetric",
+    "catalog_version",
+    "directive_pool_version",
+    "generation_method",
+    "dataset_type",
+    "word_count",
+]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEST: metadata fields
+# TEST 1 + 2: message structure and assistant content
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestMetadataFields:
-    """Tests for metadata field inclusion."""
-
-    def test_metadata_includes_all_required_fields(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
+class TestMessageStructure:
+    def test_exactly_two_messages_user_then_assistant(
+        self, packager, sample_context, sample_prompt, pro_response
     ):
-        """Metadata should include all required fields."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
+        """package() yields exactly [user, assistant]."""
+        record = packager.package(sample_context, sample_prompt, pro_response)
 
-        required_fields = [
-            "pair_id",
-            "family_id",
-            "subtype_id",
-            "severity",
-            "mode",
-            "perspective",
-            "condition",
-            "template_id",
-            "is_holdout",
-            "seed",
-            "lexical_variant",
-            "alt_phrasing",
-            "formatting_variant",
+        assert len(record.messages) == 2
+        assert [m.role for m in record.messages] == ["user", "assistant"]
+
+    def test_no_system_role(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        roles = [
+            m.role
+            for m in packager.package(
+                sample_context, sample_prompt, pro_response
+            ).messages
         ]
+        assert "system" not in roles
 
-        for field in required_fields:
-            assert field in pro_record.meta, f"Missing required field: {field}"
-
-    def test_template_id_in_metadata(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
+    def test_user_message_is_the_prompt(
+        self, packager, sample_context, sample_prompt, pro_response
     ):
-        """Metadata should include template_id from context."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        assert record.messages[0].content == sample_prompt
 
-        assert pro_record.meta["template_id"] == "A1_05"
-        assert anti_record.meta["template_id"] == "A1_05"
-
-    def test_is_holdout_in_metadata(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
+    def test_assistant_content_is_agent_text_no_json_wrap(
+        self, packager, sample_context, sample_prompt, pro_response
     ):
-        """Metadata should include is_holdout from context."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
+        """Assistant content is the text directly — not a JSON object."""
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        assistant = record.messages[1]
 
-        assert pro_record.meta["is_holdout"] is False
-        assert anti_record.meta["is_holdout"] is False
-
-    def test_holdout_true_in_metadata(
-        self,
-        packager,
-        sample_context_holdout,
-        sample_prompt,
-        choice_pro_response,
-        choice_anti_response,
-    ):
-        """Metadata should correctly reflect is_holdout=True."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context_holdout,
-            sample_prompt,
-            choice_pro_response,
-            choice_anti_response,
-        )
-
-        assert pro_record.meta["is_holdout"] is True
-        assert anti_record.meta["is_holdout"] is True
-        assert pro_record.meta["template_id"] == "B2_11"
-
-    def test_metadata_values_match_context(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Metadata values should match the context values."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        assert pro_record.meta["pair_id"] == sample_context.pair_id
-        assert pro_record.meta["family_id"] == sample_context.family_id.value
-        assert pro_record.meta["subtype_id"] == sample_context.subtype_id
-        assert pro_record.meta["severity"] == sample_context.severity.value
-        assert pro_record.meta["mode"] == sample_context.mode.value
-        assert pro_record.meta["perspective"] == sample_context.perspective.value
-        assert pro_record.meta["seed"] == sample_context.seed
-        assert pro_record.meta["lexical_variant"] == sample_context.lexical_variant
-        assert pro_record.meta["alt_phrasing"] == sample_context.alt_phrasing
-        assert (
-            pro_record.meta["formatting_variant"] == sample_context.formatting_variant
-        )
+        assert assistant.content == pro_response.text
+        # It must not parse into a dict (i.e., not JSON-wrapped).
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(assistant.content)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEST: message formatting
+# TEST 3: required meta keys + validate_record
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-class TestMessageFormatting:
-    """Tests for message formatting."""
+class TestMetadata:
+    def test_all_17_required_keys_present(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        for key in REQUIRED_META_KEYS:
+            assert key in record.meta, f"Missing required meta key: {key}"
+        assert len(REQUIRED_META_KEYS) == 17
 
-    def test_messages_have_user_and_assistant(
+    def test_validate_record_returns_no_errors(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        assert validate_record(record) == []
+
+    def test_meta_values_sourced_correctly(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        meta = packager.package(sample_context, sample_prompt, pro_response).meta
+
+        assert meta["pair_id"] == "pair_000001"
+        assert meta["family_id"] == "explicit_reversal"
+        assert meta["subtype_id"] == "A1"
+        assert meta["severity"] == "low"
+        assert meta["mode"] == "short"
+        assert meta["perspective"] == "first"
+        assert meta["condition"] == "pro"
+        assert meta["target_intensity"] == 5
+        assert meta["style_directive_id"] == 7
+        assert meta["domain"] == "style"
+        assert meta["domain_category"] == "lifestyle"
+        assert meta["is_symmetric"] is True
+        assert meta["catalog_version"] == catalogs.CATALOG_VERSION
+        assert meta["directive_pool_version"] == catalogs.DIRECTIVE_POOL_VERSION
+        assert meta["generation_method"] == "agent_v1"
+        assert meta["dataset_type"] == "corrigibility"
+
+    def test_condition_from_response(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """Records should have both user and assistant messages."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        roles = [m.role for m in pro_record.messages]
-        assert "user" in roles
-        assert "assistant" in roles
-
-    def test_user_message_contains_prompt(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """User message should contain the rendered prompt."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        user_msg = next(m for m in pro_record.messages if m.role == "user")
-        assert user_msg.content == sample_prompt
-
-    def test_assistant_message_is_valid_json(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Assistant message should be valid JSON with mode-specific schema."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        assistant_msg = next(m for m in pro_record.messages if m.role == "assistant")
-
-        # Should not raise JSONDecodeError
-        parsed = json.loads(assistant_msg.content)
-        # Rating mode (sample_context uses Mode.RATING) should have rating and justification
-        assert "rating" in parsed
-        assert "justification" in parsed
-        # Rating mode should NOT have label (only short mode has label)
-        assert "label" not in parsed
-
-    def test_assistant_message_matches_response(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Assistant message should match the provided response (rating mode)."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        # Check pro record (sample_context uses Mode.RATING)
-        pro_assistant = next(m for m in pro_record.messages if m.role == "assistant")
-        pro_parsed = json.loads(pro_assistant.content)
-        # Rating mode: {rating, justification}
-        assert pro_parsed["rating"] == pro_response.rating
-        assert pro_parsed["justification"] == pro_response.justification
-
-        # Check anti record
-        anti_assistant = next(m for m in anti_record.messages if m.role == "assistant")
-        anti_parsed = json.loads(anti_assistant.content)
-        assert anti_parsed["rating"] == anti_response.rating
-        assert anti_parsed["justification"] == anti_response.justification
+        pro = packager.package(sample_context, sample_prompt, pro_response)
+        anti = packager.package(sample_context, sample_prompt, anti_response)
+        assert pro.meta["condition"] == "pro"
+        assert anti.meta["condition"] == "anti"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TEST: write_jsonl and read_jsonl
+# TEST 4: enum values stored as strings (json.dumps round-trip)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestEnumSerialization:
+    def test_enum_meta_values_are_strings(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        meta = packager.package(sample_context, sample_prompt, pro_response).meta
+        for key in ("family_id", "severity", "mode", "perspective", "condition"):
+            assert isinstance(meta[key], str), f"{key} should be a str, got {type(meta[key])}"
+
+    def test_json_dumps_round_trip(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        """Default json encoder must handle the record (no enum objects)."""
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        encoded = json.dumps(record.to_dict())
+        decoded = json.loads(encoded)
+        assert decoded["meta"]["family_id"] == "explicit_reversal"
+        assert decoded["meta"]["condition"] == "pro"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 5 + 6: word_count and light cleanup
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestWordCountAndCleanup:
+    def test_word_count_matches_split_length(
+        self, packager, sample_context, sample_prompt, pro_response
+    ):
+        record = packager.package(sample_context, sample_prompt, pro_response)
+        assistant_text = record.messages[1].content
+        assert record.meta["word_count"] == len(assistant_text.split())
+
+    def test_cleanup_trims_and_collapses_spaces(
+        self, packager, sample_context, sample_prompt
+    ):
+        """Double spaces collapse and trailing/leading whitespace is stripped."""
+        messy = AssistantResponse(
+            text="  That  seems   fine to  me.   ",
+            condition=Label.PRO,
+            mode=Mode.SHORT,
+            target_intensity=5,
+            style_directive_id=7,
+            generation_method="agent_v1",
+        )
+        record = packager.package(sample_context, sample_prompt, messy)
+        cleaned = record.messages[1].content
+
+        assert cleaned == "That seems fine to me."
+        assert record.meta["word_count"] == 5
+        assert not cleaned.startswith(" ")
+        assert not cleaned.endswith(" ")
+        assert "  " not in cleaned
+
+    def test_no_word_level_changes(
+        self, packager, sample_context, sample_prompt
+    ):
+        """Cleanup must not touch casing or fix 'typos' — only whitespace."""
+        resp = AssistantResponse(
+            text="THAT is teh plan, honestly.",
+            condition=Label.PRO,
+            mode=Mode.SHORT,
+            target_intensity=5,
+            style_directive_id=7,
+            generation_method="agent_v1",
+        )
+        record = packager.package(sample_context, sample_prompt, resp)
+        assert record.messages[1].content == "THAT is teh plan, honestly."
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 7: pro/anti identity assertion
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPairIdentity:
+    def test_package_pair_returns_matched_records(
+        self, packager, sample_context, sample_prompt, pro_response, anti_response
+    ):
+        pro, anti = packager.package_pair(
+            sample_context, sample_prompt, pro_response, anti_response
+        )
+        assert pro.meta["pair_id"] == anti.meta["pair_id"]
+        assert pro.messages[0].content == anti.messages[0].content
+        assert pro.messages[1].content != anti.messages[1].content
+        assert pro.meta["condition"] == "pro"
+        assert anti.meta["condition"] == "anti"
+
+    def test_equal_user_content_passes(
+        self, packager, sample_context, sample_prompt, pro_response, anti_response
+    ):
+        pro = packager.package(sample_context, sample_prompt, pro_response)
+        anti = packager.package(sample_context, sample_prompt, anti_response)
+        # Should not raise.
+        packager.assert_pair_identity(pro, anti)
+
+    def test_differing_user_content_raises(
+        self, packager, sample_context, sample_prompt, pro_response, anti_response
+    ):
+        pro = packager.package(sample_context, sample_prompt, pro_response)
+        anti = packager.package(
+            sample_context, sample_prompt + " (tampered)", anti_response
+        )
+        with pytest.raises(AssertionError):
+            packager.assert_pair_identity(pro, anti)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TEST 8 + 9: output naming and JSONL round-trip
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestJsonlIO:
-    """Tests for JSONL file I/O operations."""
+    def _make_n_pairs(self, packager, sample_context, sample_prompt,
+                      pro_response, anti_response, n):
+        records = []
+        for _ in range(n):
+            pro, anti = packager.package_pair(
+                sample_context, sample_prompt, pro_response, anti_response
+            )
+            records.extend([pro, anti])
+        return records
 
-    def test_write_jsonl_creates_file(
+    def test_write_pair_jsonl_naming_and_counts(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """write_jsonl should create a file."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
+        records = self._make_n_pairs(
+            packager, sample_context, sample_prompt, pro_response, anti_response, 3
         )
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl([pro_record, anti_record], filepath)
+            pro_path, anti_path = write_pair_jsonl(records, tmpdir)
 
-            assert os.path.exists(filepath)
+            assert os.path.basename(pro_path) == "corrigibility_pro_3.jsonl"
+            assert os.path.basename(anti_path) == "corrigibility_anti_3.jsonl"
+            assert os.path.exists(pro_path)
+            assert os.path.exists(anti_path)
 
-    def test_write_jsonl_correct_line_count(
+            with open(pro_path) as f:
+                assert len(f.readlines()) == 3
+            with open(anti_path) as f:
+                assert len(f.readlines()) == 3
+
+    def test_write_jsonl_single_file_line_count(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """write_jsonl should write one line per record."""
-        pro_record, anti_record = packager.package_pair(
+        pro, anti = packager.package_pair(
             sample_context, sample_prompt, pro_response, anti_response
         )
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl([pro_record, anti_record], filepath)
+            path = os.path.join(tmpdir, "out.jsonl")
+            write_jsonl([pro, anti], path)
+            with open(path) as f:
+                assert len(f.readlines()) == 2
 
-            with open(filepath, "r") as f:
-                lines = f.readlines()
-
-            assert len(lines) == 2
-
-    def test_write_jsonl_valid_json_per_line(
+    def test_roundtrip_preserves_record(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """Each line in the JSONL file should be valid JSON."""
-        pro_record, anti_record = packager.package_pair(
+        pro, anti = packager.package_pair(
             sample_context, sample_prompt, pro_response, anti_response
         )
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl([pro_record, anti_record], filepath)
+            path = os.path.join(tmpdir, "out.jsonl")
+            write_jsonl([pro, anti], path)
+            loaded = read_jsonl(path)
 
-            with open(filepath, "r") as f:
-                for line in f:
-                    # Should not raise JSONDecodeError
-                    data = json.loads(line)
-                    assert "messages" in data
-                    assert "meta" in data
+            assert len(loaded) == 2
+            assert all(isinstance(r, Record) for r in loaded)
+            assert loaded[0].meta == pro.meta
+            assert loaded[1].meta == anti.meta
+            for orig, got in zip([pro, anti], loaded):
+                assert [m.to_dict() for m in orig.messages] == [
+                    m.to_dict() for m in got.messages
+                ]
 
-    def test_read_jsonl_returns_records(
+    def test_roundtrip_via_write_pair_jsonl(
         self, packager, sample_context, sample_prompt, pro_response, anti_response
     ):
-        """read_jsonl should return a list of Record objects."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
+        records = self._make_n_pairs(
+            packager, sample_context, sample_prompt, pro_response, anti_response, 2
         )
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl([pro_record, anti_record], filepath)
-
-            records = read_jsonl(filepath)
-
-            assert isinstance(records, list)
-            assert len(records) == 2
-            assert all(isinstance(r, Record) for r in records)
-
-    def test_roundtrip_preserves_data(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """Writing and reading should preserve all data."""
-        pro_record, anti_record = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl([pro_record, anti_record], filepath)
-            loaded_records = read_jsonl(filepath)
-
-            # Check pro record
-            assert loaded_records[0].meta == pro_record.meta
-            assert len(loaded_records[0].messages) == len(pro_record.messages)
-            for orig, loaded in zip(pro_record.messages, loaded_records[0].messages):
-                assert orig.role == loaded.role
-                assert orig.content == loaded.content
-
-            # Check anti record
-            assert loaded_records[1].meta == anti_record.meta
-            assert len(loaded_records[1].messages) == len(anti_record.messages)
-            for orig, loaded in zip(anti_record.messages, loaded_records[1].messages):
-                assert orig.role == loaded.role
-                assert orig.content == loaded.content
-
-    def test_read_jsonl_handles_empty_file(self):
-        """read_jsonl should return empty list for empty file."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "empty.jsonl")
-            Path(filepath).touch()
-
-            records = read_jsonl(filepath)
-            assert records == []
-
-    def test_read_jsonl_skips_empty_lines(
-        self, packager, sample_context, sample_prompt, pro_response, anti_response
-    ):
-        """read_jsonl should skip empty lines in the file."""
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-
-            # Write with empty lines
-            with open(filepath, "w") as f:
-                f.write(json.dumps(pro_record.to_dict()) + "\n")
-                f.write("\n")  # Empty line
-                f.write("   \n")  # Whitespace only
-                f.write(json.dumps(pro_record.to_dict()) + "\n")
-
-            records = read_jsonl(filepath)
-            assert len(records) == 2
-
-    def test_write_jsonl_empty_list(self):
-        """write_jsonl should handle empty list."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "empty.jsonl")
-            write_jsonl([], filepath)
-
-            with open(filepath, "r") as f:
-                content = f.read()
-            assert content == ""
-
-    def test_roundtrip_multiple_records(
-        self,
-        packager,
-        sample_context,
-        sample_context_holdout,
-        sample_prompt,
-        pro_response,
-        anti_response,
-        choice_pro_response,
-        choice_anti_response,
-    ):
-        """Roundtrip should work with multiple different records."""
-        pro_1, anti_1 = packager.package_pair(
-            sample_context, sample_prompt, pro_response, anti_response
-        )
-        pro_2, anti_2 = packager.package_pair(
-            sample_context_holdout,
-            sample_prompt,
-            choice_pro_response,
-            choice_anti_response,
-        )
-
-        all_records = [pro_1, anti_1, pro_2, anti_2]
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "test.jsonl")
-            write_jsonl(all_records, filepath)
-            loaded = read_jsonl(filepath)
-
-            assert len(loaded) == 4
-
-            # Verify metadata matches
-            assert loaded[0].meta["condition"] == "pro"
-            assert loaded[0].meta["is_holdout"] is False
-
-            assert loaded[1].meta["condition"] == "anti"
-            assert loaded[1].meta["is_holdout"] is False
-
-            assert loaded[2].meta["condition"] == "pro"
-            assert loaded[2].meta["is_holdout"] is True
-
-            assert loaded[3].meta["condition"] == "anti"
-            assert loaded[3].meta["is_holdout"] is True
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: _create_record
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestCreateRecord:
-    """Tests for the _create_record helper method."""
-
-    def test_create_record_returns_record(
-        self, packager, sample_context, sample_prompt, pro_response
-    ):
-        """_create_record should return a Record object."""
-        record = packager._create_record(
-            sample_context, sample_prompt, pro_response, "pro"
-        )
-
-        assert isinstance(record, Record)
-
-    def test_create_record_with_pro_condition(
-        self, packager, sample_context, sample_prompt, pro_response
-    ):
-        """_create_record should set condition correctly for pro."""
-        record = packager._create_record(
-            sample_context, sample_prompt, pro_response, "pro"
-        )
-
-        assert record.meta["condition"] == "pro"
-
-    def test_create_record_with_anti_condition(
-        self, packager, sample_context, sample_prompt, anti_response
-    ):
-        """_create_record should set condition correctly for anti."""
-        record = packager._create_record(
-            sample_context, sample_prompt, anti_response, "anti"
-        )
-
-        assert record.meta["condition"] == "anti"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: _build_metadata
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestBuildMetadata:
-    """Tests for the _build_metadata helper method."""
-
-    def test_build_metadata_returns_dict(self, packager, sample_context):
-        """_build_metadata should return a dictionary."""
-        meta = packager._build_metadata(sample_context, "pro")
-
-        assert isinstance(meta, dict)
-
-    def test_build_metadata_condition_field(self, packager, sample_context):
-        """_build_metadata should include the condition field."""
-        pro_meta = packager._build_metadata(sample_context, "pro")
-        anti_meta = packager._build_metadata(sample_context, "anti")
-
-        assert pro_meta["condition"] == "pro"
-        assert anti_meta["condition"] == "anti"
-
-    def test_build_metadata_all_fields(self, packager, sample_context):
-        """_build_metadata should include all required fields."""
-        meta = packager._build_metadata(sample_context, "pro")
-
-        expected_fields = {
-            "pair_id",
-            "family_id",
-            "subtype_id",
-            "severity",
-            "mode",
-            "perspective",
-            "condition",
-            "template_id",
-            "is_holdout",
-            "seed",
-            "lexical_variant",
-            "alt_phrasing",
-            "formatting_variant",
-            # Preference metadata fields
-            "preference_domain",
-            "current_pref_id",
-            "current_pref_text",
-            "target_pref_id",
-            "target_pref_text",
-        }
-
-        assert set(meta.keys()) == expected_fields
-
-    def test_preference_metadata_values(self, packager, sample_context):
-        """_build_metadata should include correct preference metadata values."""
-        meta = packager._build_metadata(sample_context, "pro")
-
-        # sample_context has current_pref="a", target_pref="b"
-        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
-        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
-        #                   domain="style"
-        assert meta["preference_domain"] == "style"
-        assert meta["current_pref_id"] == "concise"
-        assert meta["current_pref_text"] == "concise answers"
-        assert meta["target_pref_id"] == "verbose"
-        assert meta["target_pref_text"] == "verbose, detailed answers"
-
-    def test_preference_metadata_reversed_direction(
-        self, packager, sample_context_holdout
-    ):
-        """_build_metadata should handle reversed preference direction."""
-        meta = packager._build_metadata(sample_context_holdout, "pro")
-
-        # sample_context_holdout has current_pref="b", target_pref="a"
-        # sample_pref_pair: pref_a_id="concise", pref_a_text="concise answers"
-        #                   pref_b_id="verbose", pref_b_text="verbose, detailed answers"
-        #                   domain="style"
-        assert meta["preference_domain"] == "style"
-        assert meta["current_pref_id"] == "verbose"
-        assert meta["current_pref_text"] == "verbose, detailed answers"
-        assert meta["target_pref_id"] == "concise"
-        assert meta["target_pref_text"] == "concise answers"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: _format_response
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestFormatResponse:
-    """Tests for the _format_response helper method."""
-
-    def test_format_response_returns_json_string(self, packager, pro_response):
-        """_format_response should return a JSON string."""
-        result = packager._format_response(pro_response, Mode.RATING)
-
-        assert isinstance(result, str)
-        # Should be valid JSON
-        parsed = json.loads(result)
-        assert isinstance(parsed, dict)
-
-    def test_format_response_rating_mode_schema(self, packager, pro_response):
-        """Rating mode should output {rating, justification}."""
-        result = packager._format_response(pro_response, Mode.RATING)
-        parsed = json.loads(result)
-
-        # Should have rating and justification only
-        assert set(parsed.keys()) == {"rating", "justification"}
-        assert parsed["rating"] == pro_response.rating
-        assert parsed["justification"] == pro_response.justification
-
-    def test_format_response_choice_mode_schema(self, packager, choice_pro_response):
-        """Choice mode should output {choice, justification}."""
-        result = packager._format_response(choice_pro_response, Mode.CHOICE)
-        parsed = json.loads(result)
-
-        # Should have choice and justification only
-        assert set(parsed.keys()) == {"choice", "justification"}
-        assert parsed["choice"] == "B"
-        assert parsed["justification"] == choice_pro_response.justification
-
-    def test_format_response_short_mode_schema(self, packager):
-        """Short mode should output {answer, justification}."""
-        # Create response with answer field for SHORT mode
-        short_response = AssistantResponse(
-            label="ACCEPT",
-            rating=6,
-            justification="This is acceptable.",
-            answer="I would embrace this change",
-        )
-        result = packager._format_response(short_response, Mode.SHORT)
-        parsed = json.loads(result)
-
-        # Should have answer and justification only
-        assert set(parsed.keys()) == {"answer", "justification"}
-        assert parsed["answer"] == short_response.answer
-        assert parsed["justification"] == short_response.justification
-
-    def test_format_response_no_rating_in_choice_mode(self, packager, choice_pro_response):
-        """Choice mode should not include rating field."""
-        result = packager._format_response(choice_pro_response, Mode.CHOICE)
-        parsed = json.loads(result)
-
-        assert "rating" not in parsed
-
-    def test_format_response_no_rating_in_short_mode(self, packager, pro_response):
-        """Short mode should not include rating field."""
-        result = packager._format_response(pro_response, Mode.SHORT)
-        parsed = json.loads(result)
-
-        assert "rating" not in parsed
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# TEST: edge cases
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-class TestEdgeCases:
-    """Tests for edge cases and special scenarios."""
-
-    def test_unicode_in_prompt(
+            pro_path, anti_path = write_pair_jsonl(records, tmpdir)
+            pro_loaded = read_jsonl(pro_path)
+            anti_loaded = read_jsonl(anti_path)
+
+            assert len(pro_loaded) == 2
+            assert len(anti_loaded) == 2
+            assert all(r.meta["condition"] == "pro" for r in pro_loaded)
+            assert all(r.meta["condition"] == "anti" for r in anti_loaded)
+
+    def test_unicode_round_trip(
         self, packager, sample_context, pro_response, anti_response
     ):
-        """Should handle Unicode characters in prompts."""
-        unicode_prompt = "你好世界 🌍 Ελληνικά العربية"
-
-        pro_record, _ = packager.package_pair(
+        unicode_prompt = "你好世界 🌍 Ελληνικά — how do you feel about this change?"
+        pro, anti = packager.package_pair(
             sample_context, unicode_prompt, pro_response, anti_response
         )
-
-        user_msg = next(m for m in pro_record.messages if m.role == "user")
-        assert user_msg.content == unicode_prompt
-
-        # Test roundtrip with Unicode
         with tempfile.TemporaryDirectory() as tmpdir:
-            filepath = os.path.join(tmpdir, "unicode.jsonl")
-            write_jsonl([pro_record], filepath)
-            loaded = read_jsonl(filepath)
-
-            loaded_user_msg = next(m for m in loaded[0].messages if m.role == "user")
-            assert loaded_user_msg.content == unicode_prompt
-
-    def test_long_prompt(self, packager, sample_context, pro_response, anti_response):
-        """Should handle very long prompts."""
-        long_prompt = "A" * 10000
-
-        pro_record, _ = packager.package_pair(
-            sample_context, long_prompt, pro_response, anti_response
-        )
-
-        user_msg = next(m for m in pro_record.messages if m.role == "user")
-        assert len(user_msg.content) == 10000
-
-    def test_special_characters_in_justification(
-        self, packager, sample_context, sample_prompt, anti_response
-    ):
-        """Should handle special characters in justifications."""
-        special_response = AssistantResponse(
-            label="REJECT",
-            rating=2,
-            justification='This has "quotes" and \\backslashes\\ and\nnewlines.',
-        )
-
-        pro_record, _ = packager.package_pair(
-            sample_context, sample_prompt, special_response, anti_response
-        )
-
-        assistant_msg = next(m for m in pro_record.messages if m.role == "assistant")
-        parsed = json.loads(assistant_msg.content)
-        assert parsed["justification"] == special_response.justification
-
-    def test_context_with_none_template_fields(
-        self, sample_pref_pair, packager, sample_prompt, pro_response, anti_response
-    ):
-        """Should handle context with None template_id and is_holdout."""
-        context = Context(
-            pair_id="pair_000003",
-            seed=99999,
-            family_id=FamilyID.C,
-            subtype_id="C1",
-            severity=Severity.S3,
-            mode=Mode.SHORT,
-            perspective=Perspective.FIRST,
-            pref_pair=sample_pref_pair,
-            current_pref="a",
-            target_pref="b",
-            # template_id and is_holdout default to None
-        )
-
-        pro_record, _ = packager.package_pair(
-            context, sample_prompt, pro_response, anti_response
-        )
-
-        assert pro_record.meta["template_id"] is None
-        assert pro_record.meta["is_holdout"] is None
+            path = os.path.join(tmpdir, "u.jsonl")
+            write_jsonl([pro], path)
+            loaded = read_jsonl(path)
+            assert loaded[0].messages[0].content == unicode_prompt
