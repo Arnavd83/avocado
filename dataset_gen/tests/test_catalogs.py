@@ -135,29 +135,49 @@ class TestStyleDirectives:
 # PREFERENCE CATALOG STUB + SAMPLING / VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestPreferenceCatalogStub:
-    def test_catalog_is_empty_stub(self):
-        assert PREFERENCE_CATALOG == {}
+class TestPreferenceCatalogPopulated:
+    def test_catalog_has_all_seven_categories(self):
+        expected = {"lifestyle", "communication_style", "interest",
+                    "workflow", "reasoning_style",
+                    "epistemic_norm", "self_conception"}
+        assert set(PREFERENCE_CATALOG.keys()) == expected
 
-    def test_sample_raises_catalog_empty_error(self):
-        rng = random.Random(42)
-        with pytest.raises(CatalogEmptyError):
-            sample_preference_pair(Severity.S1, rng)
+    def test_catalog_total_pair_count(self):
+        total = sum(len(v) for v in PREFERENCE_CATALOG.values())
+        assert 110 <= total <= 130, f"expected 110-130 pairs, got {total}"
 
-    def test_sample_raises_for_all_severities(self):
+    def test_sample_succeeds_for_all_severities(self):
         for severity in Severity:
             rng = random.Random(7)
-            with pytest.raises(CatalogEmptyError):
-                sample_preference_pair(severity, rng)
+            pair = sample_preference_pair(severity, rng)
+            assert pair.severity == severity
 
-    def test_validate_catalog_returns_errors_against_stub(self):
+    def test_validate_catalog_returns_no_errors(self):
         errors = validate_catalog()
-        # Every category in SEVERITY_TO_CATEGORY_POOL is empty -> one error each.
-        assert errors != []
-        assert len(errors) >= 7
+        assert errors == [], f"validate_catalog errors: {errors}"
 
-    def test_get_all_preference_pair_ids_empty(self):
-        assert get_all_preference_pair_ids() == []
+    def test_get_all_preference_pair_ids_globally_unique(self):
+        ids = get_all_preference_pair_ids()
+        assert len(ids) == len(set(ids)), "duplicate pair IDs found"
+        # 2 IDs per pair (a + b); count should equal 2 * total_pairs.
+        total_pairs = sum(len(v) for v in PREFERENCE_CATALOG.values())
+        assert len(ids) == 2 * total_pairs
+
+    def test_pair_severity_matches_category_pool(self):
+        from dataset_gen.src.catalogs import SEVERITY_TO_CATEGORY_POOL
+        category_to_severity = {
+            cat: sev for sev, cats in SEVERITY_TO_CATEGORY_POOL.items() for cat in cats
+        }
+        for cat, pairs in PREFERENCE_CATALOG.items():
+            for p in pairs:
+                assert p.severity == category_to_severity[cat], (
+                    f"{p.pref_a_id}/{p.pref_b_id} in {cat}: "
+                    f"severity {p.severity} != expected {category_to_severity[cat]}"
+                )
+                assert p.domain_category == cat, (
+                    f"{p.pref_a_id}/{p.pref_b_id}: "
+                    f"domain_category {p.domain_category!r} != parent key {cat!r}"
+                )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
