@@ -1,7 +1,7 @@
 """
 Dataset validation for finetuning.
 
-Validates that a dataset is in the correct Tinker messages format before finetuning.
+Validates that an SFT dataset is in the expected chat messages format before finetuning.
 
 Expected format (JSONL):
 {

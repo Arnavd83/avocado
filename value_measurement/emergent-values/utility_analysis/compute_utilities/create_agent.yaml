@@ -7,6 +7,224 @@ default:
   guided_regex: null   # Optional constrained decoding regex, e.g., " ?(A|B)"
   max_tokens_override: null  # Optional per-run override (use with constraints)
   temperature_override: null  # Optional per-run override (use with constraints)
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_fast:
+  max_tokens: 3
+  temperature: 1.0
+  concurrency_limit: 15
+  base_timeout: 25
+  max_retries: 8
+  base_delay: 2
+  max_delay: 30
+  use_jitter: true
+  min_request_interval_seconds: 0.0
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_xai:
+  max_tokens: 3
+  temperature: 1.0
+  concurrency_limit: 8
+  base_timeout: 30
+  max_retries: 8
+  base_delay: 2
+  max_delay: 30
+  use_jitter: true
+  min_request_interval_seconds: 0.0
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+    provider:
+      order:
+        - xai
+      allow_fallbacks: false
+
+neurips_gemma:
+  max_tokens: 16
+  temperature: 1.0
+  concurrency_limit: 8
+  base_timeout: 45
+  max_retries: 10
+  base_delay: 8
+  max_delay: 90
+  use_jitter: true
+  min_request_interval_seconds: 0.76
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_safe:
+  max_tokens: 3
+  temperature: 1.0
+  concurrency_limit: 1
+  base_timeout: 30
+  max_retries: 10
+  base_delay: 10
+  max_delay: 120
+  use_jitter: true
+  min_request_interval_seconds: 1.5
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_balanced:
+  max_tokens: 3
+  temperature: 1.0
+  concurrency_limit: 2
+  base_timeout: 30
+  max_retries: 10
+  base_delay: 6
+  max_delay: 90
+  use_jitter: true
+  min_request_interval_seconds: 0.6
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_resilient:
+  max_tokens: 192
+  temperature: 1.0
+  concurrency_limit: 4
+  base_timeout: 60
+  max_retries: 10
+  base_delay: 5
+  max_delay: 90
+  use_jitter: true
+  min_request_interval_seconds: 0.25
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_min16:
+  max_tokens: 1024
+  temperature: 1.0
+  concurrency_limit: 8
+  base_timeout: 60
+  max_retries: 8
+  base_delay: 2
+  max_delay: 30
+  use_jitter: true
+  min_request_interval_seconds: 0.0
+  fail_on_missing_response: true
+  max_missing_responses: 10
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_glm:
+  max_tokens: 1024
+  temperature: 1.0
+  concurrency_limit: 8
+  base_timeout: 90
+  max_retries: 8
+  base_delay: 5
+  max_delay: 90
+  use_jitter: true
+  min_request_interval_seconds: 0.25
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_gemini:
+  max_tokens: 16
+  temperature: 1.0
+  concurrency_limit: 8
+  base_timeout: 30
+  max_retries: 8
+  base_delay: 2
+  max_delay: 30
+  use_jitter: true
+  min_request_interval_seconds: 0.0
+  fail_on_missing_response: true
+  max_missing_responses: 5
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
+
+neurips_kimi:
+  max_tokens: 2048
+  temperature: 1.0
+  concurrency_limit: 4
+  base_timeout: 90
+  max_retries: 10
+  base_delay: 5
+  max_delay: 90
+  use_jitter: true
+  min_request_interval_seconds: 0.25
+  fail_on_missing_response: true
+  max_missing_responses: 25
+  guided_choice: null
+  guided_regex: null
+  max_tokens_override: null
+  temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true
 
 default_with_reasoning:
   max_tokens: 500  # Increased for reasoning
@@ -17,3 +235,7 @@ default_with_reasoning:
   guided_regex: null
   max_tokens_override: null
   temperature_override: null
+  extra_request_kwargs:
+    include_reasoning: false
+    reasoning:
+      exclude: true

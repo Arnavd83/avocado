@@ -33,6 +33,8 @@ PROJECT_ROOT = _find_project_root()
 CONFIG_DIR = PROJECT_ROOT / "config"
 DATA_DIR = PROJECT_ROOT / "data"
 MODELS_DIR = PROJECT_ROOT / "shared" / "adapters"
+DPO_ADAPTERS_DIR = PROJECT_ROOT / "shared" / "dpo_adapters"
+FULL_MODELS_DIR = PROJECT_ROOT / "shared" / "models"
 LOGS_DIR = PROJECT_ROOT / "logs"
 SCRIPTS_DIR = PROJECT_ROOT / "shared" / "scripts"
 
@@ -81,8 +83,8 @@ BENCHMARKS_DIR = PROJECT_ROOT / "benchmarks"
 # ============================================
 
 MODELS_CONFIG = CONFIG_DIR / "models.yaml"
-# Default finetuning config template
-FINETUNE_CONFIG = FINETUNING_DIR / "config" / "default.yaml"
+UNSLOTH_FINETUNE_CONFIG = FINETUNING_DIR / "config" / "unsloth_default.yaml"
+UNSLOTH_DPO_CONFIG = FINETUNING_DIR / "config" / "unsloth_dpo_default.yaml"
 
 
 # ============================================
@@ -136,6 +138,48 @@ def get_finetuned_model_path(base_model_name: str, adapter_name: str) -> Path:
     return base_dir / adapter_name
 
 
+def get_base_dpo_adapter_dir(base_model_name: str) -> Path:
+    """Get the directory for a base model's DPO adapters."""
+    normalized = normalize_base_model_name(base_model_name)
+    return DPO_ADAPTERS_DIR / normalized
+
+
+def get_dpo_adapter_path(base_model_name: str, adapter_name: str) -> Path:
+    """Get path to a DPO adapter directory.
+
+    The directory structure is: shared/dpo_adapters/{base_model_name}/{adapter_name}/
+    """
+    base_dir = get_base_dpo_adapter_dir(base_model_name)
+    return base_dir / adapter_name
+
+
+def get_base_full_model_dir(base_model_name: str) -> Path:
+    """Get the directory for full/merged finetuned model outputs.
+
+    Args:
+        base_model_name: Full or short base model name
+
+    Returns:
+        Path to shared/models/{normalized_base_model_name}/
+    """
+    normalized = normalize_base_model_name(base_model_name)
+    return FULL_MODELS_DIR / normalized
+
+
+def get_full_finetuned_model_path(base_model_name: str, output_name: str) -> Path:
+    """Get path to a full or merged finetuned model directory.
+
+    Args:
+        base_model_name: Full base model name
+        output_name: Name chosen by user for this output
+
+    Returns:
+        Path to shared/models/{base_model_name}/{output_name}/
+    """
+    base_dir = get_base_full_model_dir(base_model_name)
+    return base_dir / output_name
+
+
 def get_model_path(model_name: str) -> Path:
     """Get path to a model directory (legacy compatibility).
 
@@ -175,6 +219,29 @@ def list_finetuned_adapters(base_model_name: str) -> list[str]:
         List of adapter names found under models/{base_model_name}/
     """
     base_dir = get_base_model_dir(base_model_name)
+    if not base_dir.exists():
+        return []
+    return [d.name for d in base_dir.iterdir() if d.is_dir()]
+
+
+def list_dpo_adapters(base_model_name: str) -> list[str]:
+    """List all DPO adapters for a given base model."""
+    base_dir = get_base_dpo_adapter_dir(base_model_name)
+    if not base_dir.exists():
+        return []
+    return [d.name for d in base_dir.iterdir() if d.is_dir()]
+
+
+def list_full_finetuned_models(base_model_name: str) -> list[str]:
+    """List all full/merged finetuned models for a given base model.
+
+    Args:
+        base_model_name: Full base model name
+
+    Returns:
+        List of model output names found under shared/models/{base_model_name}/
+    """
+    base_dir = get_base_full_model_dir(base_model_name)
     if not base_dir.exists():
         return []
     return [d.name for d in base_dir.iterdir() if d.is_dir()]

@@ -74,6 +74,7 @@ def _insert_base_utilities(conn, model_key: str, means: dict[int, float]) -> Non
 def _make_summary(model_key: str) -> CorrigibilitySummary:
     return CorrigibilitySummary(
         model_key=model_key,
+        run_id="test-run",
         training_log_loss=0.1,
         training_accuracy=0.9,
         holdout_log_loss=0.2,
@@ -354,9 +355,12 @@ def test_corrigibility_cli_persists_rows_and_list_shows_status(tmp_path, monkeyp
         conn.close()
 
     async def fake_run_corrigibility(*_args, **_kwargs):
-        return _make_summary("test-model"), [
+        summary = _make_summary("test-model")
+        summary.run_id = _kwargs.get("run_id", "test-run")
+        return summary, [
             CorrigibilityOptionRecord(
                 model_key="test-model",
+                run_id=summary.run_id,
                 option_id=0,
                 type="base",
                 description="Option 0",
@@ -374,6 +378,7 @@ def test_corrigibility_cli_persists_rows_and_list_shows_status(tmp_path, monkeyp
             ),
             CorrigibilityOptionRecord(
                 model_key="test-model",
+                run_id=summary.run_id,
                 option_id=3,
                 type="flip",
                 description="Flip option",
@@ -398,20 +403,28 @@ def test_corrigibility_cli_persists_rows_and_list_shows_status(tmp_path, monkeyp
 
     first = runner.invoke(
         cli,
-        ["corrigibility-run", "--model-key", "test-model", "--db", str(db_path)],
+        [
+            "corrigibility-run",
+            "--model-key",
+            "test-model",
+            "--db",
+            str(db_path),
+            "--run-id",
+            "rep1",
+        ],
     )
     assert first.exit_code == 0, first.output
 
     conn = connect(db_path)
     try:
         row = conn.execute(
-            "SELECT paired_clean_signal FROM corrigibility_summary WHERE model_key = ?",
-            ("test-model",),
+            "SELECT paired_clean_signal FROM corrigibility_summary WHERE model_key = ? AND run_id = ?",
+            ("test-model", "rep1"),
         ).fetchone()
         assert row is not None
         count = conn.execute(
-            "SELECT COUNT(*) AS count FROM corrigibility_options WHERE model_key = ?",
-            ("test-model",),
+            "SELECT COUNT(*) AS count FROM corrigibility_options WHERE model_key = ? AND run_id = ?",
+            ("test-model", "rep1"),
         ).fetchone()
         assert count["count"] == 2
     finally:
@@ -419,10 +432,32 @@ def test_corrigibility_cli_persists_rows_and_list_shows_status(tmp_path, monkeyp
 
     second = runner.invoke(
         cli,
-        ["corrigibility-run", "--model-key", "test-model", "--db", str(db_path)],
+        [
+            "corrigibility-run",
+            "--model-key",
+            "test-model",
+            "--db",
+            str(db_path),
+            "--run-id",
+            "rep1",
+        ],
     )
     assert second.exit_code != 0
-    assert "already has corrigibility data" in second.output
+    assert "already has corrigibility data for run_id 'rep1'" in second.output
+
+    new_run = runner.invoke(
+        cli,
+        [
+            "corrigibility-run",
+            "--model-key",
+            "test-model",
+            "--db",
+            str(db_path),
+            "--run-id",
+            "rep2",
+        ],
+    )
+    assert new_run.exit_code == 0, new_run.output
 
     overwrite = runner.invoke(
         cli,
@@ -432,6 +467,8 @@ def test_corrigibility_cli_persists_rows_and_list_shows_status(tmp_path, monkeyp
             "test-model",
             "--db",
             str(db_path),
+            "--run-id",
+            "rep1",
             "--overwrite",
         ],
     )
@@ -523,15 +560,35 @@ def test_connect_migrates_legacy_corrigibility_schema(tmp_path):
             row["name"]
             for row in migrated.execute("PRAGMA table_info(corrigibility_summary)").fetchall()
         }
+        summary_pk = [
+            row["name"]
+            for row in sorted(
+                migrated.execute("PRAGMA table_info(corrigibility_summary)").fetchall(),
+                key=lambda row: row["pk"],
+            )
+            if row["pk"]
+        ]
         option_cols = {
             row["name"]
             for row in migrated.execute("PRAGMA table_info(corrigibility_options)").fetchall()
         }
+        option_pk = [
+            row["name"]
+            for row in sorted(
+                migrated.execute("PRAGMA table_info(corrigibility_options)").fetchall(),
+                key=lambda row: row["pk"],
+            )
+            if row["pk"]
+        ]
     finally:
         migrated.close()
 
+    assert "run_id" in summary_cols
+    assert summary_pk == ["model_key", "run_id"]
     assert "paired_diff_mean_rank_pct" in summary_cols
     assert "paired_clean_signal" in summary_cols
     assert "postfit_orientation_mismatch_count" in summary_cols
+    assert "run_id" in option_cols
+    assert option_pk == ["model_key", "run_id", "option_id"]
     assert "pair_outcome_id_1" in option_cols
     assert "pair_outcome_id_2" in option_cols

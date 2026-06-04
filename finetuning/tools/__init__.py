@@ -1,11 +1,12 @@
 """
-Finetuning tools CLI package.
+Unsloth finetuning tools CLI package.
 
 Usage:
     python -m finetuning.tools <command> [options]
 
 Commands:
-    list-models  List all available models for fine-tuning
-    sft          Run supervised fine-tuning
-    dpo          [FUTURE] Run Direct Preference Optimization
+    sft          Run Unsloth supervised fine-tuning
+    unsloth-sft  Alias for sft
+    dpo          Run Unsloth Direct Preference Optimization
+    infer        Run one local Unsloth inference call
 """

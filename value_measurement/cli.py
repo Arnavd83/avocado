@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -91,6 +92,11 @@ def _check_utilities_gate(conn, model_key: str, experiment_name: str) -> None:
         raise SystemExit(1)
 
 
+def _default_corrigibility_run_id() -> str:
+    """Return a compact run id suitable for DB keys and local directories."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 # ---------------------------------------------------------------------------
 # compute-utilities
 # ---------------------------------------------------------------------------
@@ -103,6 +109,12 @@ def _check_utilities_gate(conn, model_key: str, experiment_name: str) -> None:
 @_save_dir
 @_overwrite
 @click.option(
+    "--agent-config-key",
+    default="default",
+    show_default=True,
+    help="Key from create_agent.yaml for API transport settings.",
+)
+@click.option(
     "--force", is_flag=True,
     help="Overwrite utilities AND cascade-delete all downstream data.",
 )
@@ -112,6 +124,7 @@ def compute_utilities_cmd(
     no_db: bool,
     save_dir: str | None,
     overwrite: bool,
+    agent_config_key: str,
     force: bool,
 ) -> None:
     """Compute Thurstonian utilities for a model."""
@@ -148,7 +161,11 @@ def compute_utilities_cmd(
 
         save_path = Path(save_dir) if save_dir else None
         model_record, summary, utilities = asyncio.run(
-            run_compute_utilities(model_key, save_dir=save_path)
+            run_compute_utilities(
+                model_key,
+                save_dir=save_path,
+                create_agent_config_key=agent_config_key,
+            )
         )
 
         if conn:
@@ -645,6 +662,18 @@ def corrigibility_lock_pairs_cmd(
     help="Use reasoning-enabled unified prompts for both corrigibility passes.",
 )
 @click.option(
+    "--run-id",
+    default=None,
+    help="Corrigibility replicate id. Defaults to a timestamp, so reruns do not overwrite.",
+)
+@click.option(
+    "--agent-config-key",
+    default="default",
+    show_default=True,
+    help="Key from create_agent.yaml for API transport settings.",
+)
+@click.option("--seed", type=int, default=42, show_default=True, help="Run metadata seed.")
+@click.option(
     "--small-gap-threshold",
     type=float,
     default=0.1,
@@ -659,21 +688,35 @@ def corrigibility_run_cmd(
     overwrite: bool,
     pairs_path: str,
     with_reasoning: bool,
+    run_id: str | None,
+    agent_config_key: str,
+    seed: int,
     small_gap_threshold: float,
 ) -> None:
     """Run the merged corrigibility synthesis + unified-fit experiment."""
     from .experiments.corrigibility import run_corrigibility
 
+    resolved_run_id = run_id or _default_corrigibility_run_id()
     conn = None
     if not no_db:
         conn = connect(db_path)
     try:
         if conn:
             _check_utilities_gate(conn, model_key, "corrigibility")
-            if not overwrite:
-                _abort_if_exists(conn, model_key, "corrigibility")
-            else:
-                delete_experiment_data(conn, model_key, "corrigibility")
+            if has_experiment_data(conn, model_key, "corrigibility", run_id=resolved_run_id):
+                if not overwrite:
+                    click.echo(
+                        f"Error: {model_key} already has corrigibility data "
+                        f"for run_id '{resolved_run_id}'."
+                    )
+                    click.echo("Use --overwrite to replace that run, or choose a new --run-id.")
+                    raise SystemExit(1)
+                delete_experiment_data(
+                    conn,
+                    model_key,
+                    "corrigibility",
+                    run_id=resolved_run_id,
+                )
 
         save_path = Path(save_dir) if save_dir else None
         summary, option_records = asyncio.run(
@@ -681,7 +724,10 @@ def corrigibility_run_cmd(
                 model_key,
                 conn,
                 save_dir=save_path,
+                run_id=resolved_run_id,
                 pairs_path=Path(pairs_path),
+                seed=seed,
+                create_agent_config_key=agent_config_key,
                 with_reasoning=with_reasoning,
                 small_gap_threshold=small_gap_threshold,
             )
@@ -691,7 +737,11 @@ def corrigibility_run_cmd(
             insert_corrigibility_summary(conn, summary)
             insert_corrigibility_options(conn, option_records)
 
-        click.echo(f"corrigibility complete for {model_key}.")
+        click.echo(f"corrigibility complete for {model_key} (run_id: {resolved_run_id}).")
+        click.echo(
+            f"  local_output: "
+            f"{save_path if save_path else Path('results') / 'corrigibility' / model_key / resolved_run_id}"
+        )
         click.echo(
             f"  utility_gap_base_vs_diff: {summary.utility_gap_base_vs_diff:.4f}  "
             f"utility_gap_base_vs_match: {summary.utility_gap_base_vs_match:.4f}"
@@ -743,7 +793,7 @@ def _show_all_models(conn) -> None:
     for m in models:
         util = "Y" if m.get("compute_utilities_ran_at") else "-"
         pref = "Y" if m.get("preference_preservation_ran_at") else "-"
-        corr = "Y" if m.get("corrigibility_ran_at") else "-"
+        corr = str(m.get("corrigibility_run_count") or "-")
         tran = "Y" if m.get("transitivity_ran_at") else "-"
         powr = "Y" if m.get("power_seeking_ran_at") else "-"
         maxi = "Y" if m.get("maximization_ran_at") else "-"
@@ -786,31 +836,7 @@ def _show_model_detail(conn, model_key: str) -> None:
             "population_gap_mean", "population_gap_median", "population_gap_std",
         ],
     )
-    _print_summary_section(
-        conn, model_key, "corrigibility",
-        "corrigibility_summary",
-        [
-            "training_log_loss", "training_accuracy",
-            "holdout_log_loss", "holdout_accuracy",
-            "num_base_options", "num_flip_options", "num_match_options", "seed",
-            "sample_gap_mean", "sample_gap_median", "sample_gap_std",
-            "sample_gap_min", "sample_gap_max",
-            "population_gap_mean", "population_gap_median", "population_gap_std",
-            "diff_mean_rank_pct", "diff_below_base_median_frac",
-            "diff_below_base_min_frac", "diff_mean_utility",
-            "base_mean_utility", "utility_gap_base_vs_diff",
-            "match_mean_rank_pct", "match_below_base_median_frac",
-            "match_below_base_min_frac", "match_mean_utility",
-            "utility_gap_base_vs_match",
-            "paired_diff_mean_rank_pct", "paired_diff_below_base_median_frac",
-            "paired_diff_below_base_min_frac", "paired_diff_mean_utility",
-            "paired_match_mean_rank_pct", "paired_match_below_base_median_frac",
-            "paired_match_below_base_min_frac", "paired_match_mean_utility",
-            "paired_clean_signal",
-            "postfit_orientation_mismatch_count",
-            "postfit_orientation_mismatch_frac",
-        ],
-    )
+    _print_corrigibility_section(conn, model_key)
     _print_summary_section(
         conn, model_key, "transitivity",
         "transitivity_summary",
@@ -856,3 +882,41 @@ def _print_summary_section(
             click.echo(f"    {col}: {val:.6f}")
         else:
             click.echo(f"    {col}: {val}")
+
+
+def _print_corrigibility_section(conn, model_key: str) -> None:
+    """Print all corrigibility replicate summaries for a model."""
+    rows = conn.execute(
+        """
+        SELECT * FROM corrigibility_summary
+        WHERE model_key = ?
+        ORDER BY ran_at
+        """,
+        (model_key,),
+    ).fetchall()
+
+    click.echo("\n  corrigibility:")
+    if not rows:
+        click.echo("    (not run)")
+        return
+
+    click.echo(f"    runs: {len(rows)}")
+    for row in rows:
+        click.echo(f"    - run_id: {row['run_id']}")
+        click.echo(f"      ran_at: {row['ran_at']}")
+        for col in [
+            "training_log_loss",
+            "training_accuracy",
+            "holdout_log_loss",
+            "holdout_accuracy",
+            "utility_gap_base_vs_diff",
+            "utility_gap_base_vs_match",
+            "paired_clean_signal",
+            "postfit_orientation_mismatch_count",
+            "postfit_orientation_mismatch_frac",
+        ]:
+            val = row[col]
+            if isinstance(val, float):
+                click.echo(f"      {col}: {val:.6f}")
+            else:
+                click.echo(f"      {col}: {val}")

@@ -3,6 +3,7 @@ import json
 import random
 import string
 import time
+import warnings
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from functools import wraps
@@ -961,12 +962,16 @@ class LiteLLMAgent:
         base_delay: float = 1.0,
         max_delay: float = 10.0,
         use_jitter: bool = True,
+        min_request_interval_seconds: float = 0.0,
+        fail_on_missing_response: bool = False,
+        max_missing_responses: int = 0,
         api_base: str = None,
         api_key: str = None,
         guided_choice=None,
         guided_regex=None,
         max_tokens_override=None,
-        temperature_override=None
+        temperature_override=None,
+        extra_request_kwargs=None
     ):
         self.model = model
         self.temperature = temperature
@@ -979,12 +984,41 @@ class LiteLLMAgent:
         self.guided_regex = guided_regex
         self.max_tokens_override = max_tokens_override
         self.temperature_override = temperature_override
+        self.extra_request_kwargs = extra_request_kwargs or {}
 
         self.max_retries = max_retries
         self.base_timeout = base_timeout
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.use_jitter = use_jitter
+        self.min_request_interval_seconds = min_request_interval_seconds
+        self.fail_on_missing_response = fail_on_missing_response
+        self.max_missing_responses = max(0, int(max_missing_responses))
+        self._rate_limit_lock = asyncio.Lock()
+        self._last_request_started_at = 0.0
+
+    @staticmethod
+    def _extract_completion_content(completion_res):
+        """
+        Extract assistant content from a LiteLLM/OpenAI-compatible completion response.
+        Returns `(content, finish_reason, parse_error)`.
+        """
+        try:
+            choice = completion_res.choices[0]
+            message_obj = getattr(choice, "message", None)
+            content = getattr(message_obj, "content", None)
+            finish_reason = getattr(choice, "finish_reason", None)
+        except (AttributeError, IndexError, TypeError) as parse_error:
+            return None, None, parse_error
+        return content, finish_reason, None
+
+    @staticmethod
+    def _is_timeout_exception(exc: Exception) -> bool:
+        if isinstance(exc, asyncio.TimeoutError):
+            return True
+        error_name = exc.__class__.__name__.lower()
+        error_text = str(exc).lower()
+        return "timeout" in error_name or "timed out" in error_text
 
     async def async_completions(
         self,
@@ -998,8 +1032,11 @@ class LiteLLMAgent:
         """
 
         semaphore = asyncio.Semaphore(self.concurrency_limit)
-        counts = {"timeouts": 0, "errors": 0}
+        counts = {"timeouts": 0, "errors": 0, "empty_responses": 0}
         results = {}
+        effective_base_timeout = float(
+            kwargs.get("base_timeout", kwargs.get("timeout", self.base_timeout))
+        )
 
         async def process_message(message_idx: int):
             """
@@ -1009,7 +1046,7 @@ class LiteLLMAgent:
             """
             message = messages[message_idx]
 
-            current_timeout = self.base_timeout
+            current_timeout = effective_base_timeout
             retry_delay = self.base_delay
             response = None
 
@@ -1023,6 +1060,15 @@ class LiteLLMAgent:
                     #     )
 
                     try:
+                        if self.min_request_interval_seconds > 0:
+                            async with self._rate_limit_lock:
+                                now = time.monotonic()
+                                elapsed = now - self._last_request_started_at
+                                sleep_for = self.min_request_interval_seconds - elapsed
+                                if sleep_for > 0:
+                                    await asyncio.sleep(sleep_for)
+                                self._last_request_started_at = time.monotonic()
+
                         # No stop sequences - rely on max_tokens and post-processing
                         request_kwargs = {
                             "model": self.model,
@@ -1039,51 +1085,79 @@ class LiteLLMAgent:
                             request_kwargs["guided_choice"] = self.guided_choice
                         elif self.guided_regex is not None:
                             request_kwargs["guided_regex"] = self.guided_regex
+                        request_kwargs.update(self.extra_request_kwargs)
                         
                         completion_res = await litellm_acompletion(**request_kwargs)
-                    except asyncio.TimeoutError:
-                        counts["timeouts"] += 1
-
-                        if verbose:
-                            print(
-                                f"[Timeout] Attempt {attempt+1}/{self.max_retries} "
-                                f"for message index {message_idx}. Timed out after {current_timeout:.1f}s."
-                            )
-                        if attempt == self.max_retries - 1:
-                            response = None  # no more retries
+                    except Exception as e:
+                        if self._is_timeout_exception(e):
+                            counts["timeouts"] += 1
                             if verbose:
-                                print(f"Max retries (timeouts) reached for message index {message_idx}.")
+                                print(
+                                    f"[Timeout] Attempt {attempt+1}/{self.max_retries} "
+                                    f"for message index {message_idx}. Timed out after {current_timeout:.1f}s."
+                                )
+                            if attempt == self.max_retries - 1:
+                                response = None
+                                if verbose:
+                                    print(f"Max retries (timeouts) reached for message index {message_idx}.")
+                            else:
+                                current_timeout *= 2.0
                         else:
-                            current_timeout *= 2.0
+                            if verbose:
+                                print(
+                                    f"[Error] Attempt {attempt+1}/{self.max_retries} "
+                                    f"for message index {message_idx}: {e}"
+                                )
+                            counts["errors"] += 1
+                            if attempt == self.max_retries - 1:
+                                response = None
+                                if verbose:
+                                    print(f"Max retries (errors) reached for message index {message_idx}.")
+                            else:
+                                # Sleep with exponential backoff
+                                sleep_for = retry_delay
+                                if self.use_jitter:
+                                    sleep_for += random.uniform(0, 1)
+                                if verbose:
+                                    print(f"Sleeping {sleep_for:.1f}s before retry (error backoff)...")
+                                await asyncio.sleep(sleep_for)
+                                retry_delay = min(retry_delay * 2.0, self.max_delay)
 
                         continue  # next attempt
 
-                    except Exception as e:
-                        counts["errors"] += 1
+                    # Success at the transport layer can still produce an
+                    # unusable assistant message, especially through routers.
+                    content, finish_reason, parse_error = self._extract_completion_content(
+                        completion_res
+                    )
 
+                    if content is None:
+                        counts["empty_responses"] += 1
                         if verbose:
+                            details = f"finish_reason={finish_reason}"
+                            if parse_error is not None:
+                                details += f", parse_error={parse_error}"
                             print(
-                                f"[Error] Attempt {attempt+1}/{self.max_retries} "
-                                f"for message index {message_idx}: {e}"
+                                f"[Empty response] Attempt {attempt+1}/{self.max_retries} "
+                                f"for message index {message_idx}: no message content "
+                                f"({details})."
                             )
                         if attempt == self.max_retries - 1:
                             response = None
                             if verbose:
-                                print(f"Max retries (errors) reached for message index {message_idx}.")
+                                print(f"Max retries (empty responses) reached for message index {message_idx}.")
                         else:
-                            # Sleep with exponential backoff
                             sleep_for = retry_delay
                             if self.use_jitter:
                                 sleep_for += random.uniform(0, 1)
                             if verbose:
-                                print(f"Sleeping {sleep_for:.1f}s before retry (error backoff)...")
+                                print(f"Sleeping {sleep_for:.1f}s before retry (empty response backoff)...")
                             await asyncio.sleep(sleep_for)
                             retry_delay = min(retry_delay * 2.0, self.max_delay)
 
-                        continue  # next attempt
+                        continue
 
-                    # Success: parse the response
-                    response = completion_res.choices[0].message.content.strip()
+                    response = content.strip()
                     break  # done with retries
 
             results[message_idx] = response
@@ -1099,5 +1173,29 @@ class LiteLLMAgent:
         if verbose:
             print(f"Number of timeouts: {counts['timeouts']}")
             print(f"Number of generic errors: {counts['errors']}")
+            print(f"Number of empty responses: {counts['empty_responses']}")
 
-        return [results[i] for i in range(len(messages))]
+        ordered_results = [results[i] for i in range(len(messages))]
+        if self.fail_on_missing_response:
+            missing_indices = [
+                idx for idx, response in enumerate(ordered_results) if response is None
+            ]
+            if missing_indices:
+                allowed_missing = self.max_missing_responses
+                if len(missing_indices) > allowed_missing:
+                    preview = ", ".join(str(idx) for idx in missing_indices[:20])
+                    if len(missing_indices) > 20:
+                        preview += ", ..."
+                    raise RuntimeError(
+                        f"{len(missing_indices)} LLM calls failed after retries; "
+                        f"missing message indices: {preview}"
+                    )
+                warnings.warn(
+                    (
+                        f"{len(missing_indices)} LLM calls failed after retries and were kept as None "
+                        f"(max_missing_responses={allowed_missing})."
+                    ),
+                    RuntimeWarning,
+                )
+
+        return ordered_results

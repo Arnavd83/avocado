@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-The MMLU benchmark requires `inspect_ai` which is already included via the `petri` and `tinker-cookbook` dependencies.
+The MMLU benchmark requires `inspect_ai`, which is already included via the `petri` dependency.
 
 ### Installing inspect_evals
 

@@ -1,0 +1,53 @@
+# Default Unsloth Finetuning Configuration
+#
+# Copy and modify for local Unsloth SFT runs.
+#
+# Usage:
+#   uv run python -m finetuning.tools sft --config finetuning/config/my_unsloth_config.yaml
+
+# Model settings
+model_name: "Qwen/Qwen3-8B"
+
+# Required: choose one explicitly so LoRA and full fine-tuning are not confused.
+# Options: qlora, lora16, full
+training_mode: null
+
+# Data settings
+# Dataset must be JSONL messages format:
+# {"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}
+train_data_path: "data/processed/your_dataset.jsonl"
+test_size: 500
+
+# Output settings
+# qlora/lora16 -> shared/adapters/<base-model>/<output_name>/
+# full         -> shared/models/<base-model>/<output_name>/
+output_name: null
+run_name: null
+
+# Training hyperparameters
+batch_size: 64
+micro_batch_size: 1
+lora_rank: 64
+learning_rate: null
+num_epochs: 1
+lr_schedule: "linear"
+
+# Sequence length
+max_length: 512
+
+# Loss masking
+# assistant trains only on assistant response tokens when the tokenizer supports
+# assistant masks. full trains on the full rendered conversation.
+loss_scope: "assistant"
+
+# Checkpointing and evaluation
+save_every: 100
+eval_every: 50
+log_path: null
+
+# Optional merged export for qlora/lora16 only.
+save_merged_16bit: false
+
+# Optional: Weights & Biases logging
+wandb_project: null
+wandb_name: null

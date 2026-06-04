@@ -84,7 +84,6 @@ results/
 cache/
 logs/
 lora_out/
-tinker_lora_archive.tar
 
 # Scratch data (temporary analysis outputs)
 data/scratch/
@@ -94,9 +93,8 @@ data/scratch/
 *.bin
 models/
 shared/adapters/
-
-# External packages (tracked separately or as dependencies)
-# Note: tinker-cookbook is tracked as an editable package
+shared/dpo_adapters/
+shared/models/
 
 # OS files
 .DS_Store

@@ -29,6 +29,7 @@ async def run_compute_utilities(
     model_key: str,
     outcomes_path: Path | None = None,
     save_dir: Path | None = None,
+    create_agent_config_key: str = "default",
     K: int = 10,
     concurrency_limit: int = 50,
 ) -> tuple[ModelRecord, ComputeUtilitiesSummary, list[UtilityRecord]]:
@@ -59,6 +60,7 @@ async def run_compute_utilities(
     results = await _compute_utilities(
         options_list=hierarchical,
         model_key=model_key,
+        create_agent_config_key=create_agent_config_key,
         compute_utilities_config_key="thurstonian_active_learning",
         save_dir=str(save_dir) if save_dir else None,
     )
@@ -72,7 +74,7 @@ async def run_compute_utilities(
     # --- Build ModelRecord ---
     # Read the actual temperature from the create_agent config (same config
     # that compute_utilities() uses to create the agent).
-    agent_config = load_config(None, "default", "create_agent.yaml")
+    agent_config = load_config(None, create_agent_config_key, "create_agent.yaml")
     actual_temperature = agent_config.get("temperature", 0.0)
 
     model_cfg = get_model_manager().get_model(model_key)

@@ -43,10 +43,6 @@ dependencies = [
     "tqdm>=4.67.0",
     "transformers>=4.46.2",
     "vllm>=0.6.6.post1",
-    "chz>=0.4.0",
-    "tinker>=0.1.0",
-    "termcolor>=2.0",
-    "blobfile>=2.0",
     "pydantic>=2.0",
     "wandb>=0.16",
     "datasets>=2.0",
@@ -63,6 +59,12 @@ dev = [
     "ipywidgets>=8.1.7",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.1.0",
+]
+unsloth = [
+    "unsloth",
+    "trl>=0.26",
+    "peft",
+    "bitsandbytes",
 ]
 
 [tool.uv.sources]

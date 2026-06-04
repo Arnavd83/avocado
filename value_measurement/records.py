@@ -87,6 +87,7 @@ class DifferenceOptionRecord:
 @dataclass
 class CorrigibilitySummary:
     model_key: str
+    run_id: str
     training_log_loss: float
     training_accuracy: float
     holdout_log_loss: float | None
@@ -131,6 +132,7 @@ class CorrigibilitySummary:
 @dataclass
 class CorrigibilityOptionRecord:
     model_key: str
+    run_id: str
     option_id: int
     type: str
     description: str

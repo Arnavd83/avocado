@@ -1,18 +1,12 @@
 """
-Finetuning module for the avocado project.
+Unsloth finetuning tools for the avocado project.
 
-This module provides tools for supervised fine-tuning (SFT) of language models
-using the Tinker training framework.
+Supported local workflows:
+- SFT with LoRA/QLoRA adapters or full-weight fine-tuning
+- DPO with LoRA/QLoRA adapters or full-weight fine-tuning
+- One-off local inference with a base model or adapter
 
-Components:
-- sft: Supervised fine-tuning training logic
-- checkpoint: Model download and checkpoint utilities
-- models: Available model listing and validation
-- validate_dataset: Dataset validation utilities
-- tools/: CLI for running fine-tuning operations
-- tinker_cookbook: Tinker utilities for model training
-
-Expected dataset format (JSONL):
+SFT dataset format (JSONL):
 {
     "messages": [
         {"role": "system", "content": "..."},  # optional
@@ -21,24 +15,23 @@ Expected dataset format (JSONL):
     ]
 }
 
+DPO dataset format (JSONL):
+{
+    "prompt": [{"role": "user", "content": "..."}],
+    "chosen": [{"role": "assistant", "content": "..."}],
+    "rejected": [{"role": "assistant", "content": "..."}]
+}
+
 Usage:
-    # CLI usage (recommended)
-    python -m finetuning.tools list-models
-    python -m finetuning.tools sft --dataset data/processed/my_dataset.jsonl --adapter-name my-adapter
-
-    # Validate a dataset
-    python -m finetuning.validate_dataset data/processed/my_dataset.jsonl
-
-    # Programmatic usage
-    from finetuning.sft import run_sft_training
-    from finetuning.models import get_available_models
-    from finetuning.validate_dataset import validate_dataset
+    python -m finetuning.tools sft --dataset data/processed/sft.jsonl --output-name my-sft --training-mode qlora
+    python -m finetuning.tools dpo --dataset data/processed/preferences.jsonl --output-name my-dpo --training-mode qlora
+    python -m finetuning.tools infer --model-name Qwen/Qwen3-8B --adapter-name my-sft --prompt "Hello"
 """
 
 __all__ = [
-    "sft",
-    "checkpoint",
-    "models",
+    "unsloth_sft",
+    "unsloth_dpo",
+    "unsloth_inference",
     "validate_dataset",
     "tools",
 ]

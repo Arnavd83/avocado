@@ -119,7 +119,8 @@ CREATE TABLE IF NOT EXISTS difference_options (
 );
 
 CREATE TABLE IF NOT EXISTS corrigibility_summary (
-    model_key                           TEXT PRIMARY KEY REFERENCES models(model_key),
+    model_key                           TEXT NOT NULL REFERENCES models(model_key),
+    run_id                              TEXT NOT NULL DEFAULT 'default',
     training_log_loss                   REAL NOT NULL,
     training_accuracy                   REAL NOT NULL,
     holdout_log_loss                    REAL,
@@ -158,11 +159,13 @@ CREATE TABLE IF NOT EXISTS corrigibility_summary (
     paired_clean_signal                 REAL NOT NULL,
     postfit_orientation_mismatch_count  INTEGER NOT NULL,
     postfit_orientation_mismatch_frac   REAL NOT NULL,
-    ran_at                              TIMESTAMP NOT NULL
+    ran_at                              TIMESTAMP NOT NULL,
+    PRIMARY KEY (model_key, run_id)
 );
 
 CREATE TABLE IF NOT EXISTS corrigibility_options (
     model_key               TEXT NOT NULL REFERENCES models(model_key),
+    run_id                  TEXT NOT NULL DEFAULT 'default',
     option_id               INTEGER NOT NULL,
     type                    TEXT NOT NULL,
     description             TEXT NOT NULL,
@@ -177,7 +180,7 @@ CREATE TABLE IF NOT EXISTS corrigibility_options (
     source_preferred_id     INTEGER,
     source_dispreferred_id  INTEGER,
     utility_gap             REAL,
-    PRIMARY KEY (model_key, option_id)
+    PRIMARY KEY (model_key, run_id, option_id)
 );
 
 CREATE TABLE IF NOT EXISTS transitivity_summary (
@@ -299,6 +302,12 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {row["name"] for row in rows}
 
 
+def _primary_key_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    pk_rows = sorted((row for row in rows if row["pk"]), key=lambda row: row["pk"])
+    return [row["name"] for row in pk_rows]
+
+
 def _add_column_if_missing(
     conn: sqlite3.Connection,
     table_name: str,
@@ -307,6 +316,162 @@ def _add_column_if_missing(
 ) -> None:
     if column_name not in _table_columns(conn, table_name):
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
+def _rebuild_corrigibility_summary_with_run_id(conn: sqlite3.Connection) -> None:
+    """Rebuild corrigibility_summary so run_id is part of the primary key."""
+    columns = _table_columns(conn, "corrigibility_summary")
+    run_id_expr = "COALESCE(run_id, 'default')" if "run_id" in columns else "'default'"
+    conn.executescript(
+        """
+        ALTER TABLE corrigibility_summary RENAME TO corrigibility_summary_legacy_run_id;
+        CREATE TABLE corrigibility_summary (
+            model_key                           TEXT NOT NULL REFERENCES models(model_key),
+            run_id                              TEXT NOT NULL DEFAULT 'default',
+            training_log_loss                   REAL NOT NULL,
+            training_accuracy                   REAL NOT NULL,
+            holdout_log_loss                    REAL,
+            holdout_accuracy                    REAL,
+            num_base_options                    INTEGER NOT NULL,
+            num_flip_options                    INTEGER NOT NULL,
+            num_match_options                   INTEGER NOT NULL,
+            seed                                INTEGER NOT NULL,
+            sample_gap_mean                     REAL NOT NULL,
+            sample_gap_median                   REAL NOT NULL,
+            sample_gap_std                      REAL NOT NULL,
+            sample_gap_min                      REAL NOT NULL,
+            sample_gap_max                      REAL NOT NULL,
+            population_gap_mean                 REAL NOT NULL,
+            population_gap_median               REAL NOT NULL,
+            population_gap_std                  REAL NOT NULL,
+            diff_mean_rank_pct                  REAL NOT NULL,
+            diff_below_base_median_frac         REAL NOT NULL,
+            diff_below_base_min_frac            REAL NOT NULL,
+            diff_mean_utility                   REAL NOT NULL,
+            base_mean_utility                   REAL NOT NULL,
+            utility_gap_base_vs_diff            REAL NOT NULL,
+            match_mean_rank_pct                 REAL NOT NULL,
+            match_below_base_median_frac        REAL NOT NULL,
+            match_below_base_min_frac           REAL NOT NULL,
+            match_mean_utility                  REAL NOT NULL,
+            utility_gap_base_vs_match           REAL NOT NULL,
+            paired_diff_mean_rank_pct           REAL NOT NULL,
+            paired_diff_below_base_median_frac  REAL NOT NULL,
+            paired_diff_below_base_min_frac     REAL NOT NULL,
+            paired_diff_mean_utility            REAL NOT NULL,
+            paired_match_mean_rank_pct          REAL NOT NULL,
+            paired_match_below_base_median_frac REAL NOT NULL,
+            paired_match_below_base_min_frac    REAL NOT NULL,
+            paired_match_mean_utility           REAL NOT NULL,
+            paired_clean_signal                 REAL NOT NULL,
+            postfit_orientation_mismatch_count  INTEGER NOT NULL,
+            postfit_orientation_mismatch_frac   REAL NOT NULL,
+            ran_at                              TIMESTAMP NOT NULL,
+            PRIMARY KEY (model_key, run_id)
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO corrigibility_summary (
+            model_key, run_id, training_log_loss, training_accuracy,
+            holdout_log_loss, holdout_accuracy,
+            num_base_options, num_flip_options, num_match_options, seed,
+            sample_gap_mean, sample_gap_median, sample_gap_std,
+            sample_gap_min, sample_gap_max,
+            population_gap_mean, population_gap_median, population_gap_std,
+            diff_mean_rank_pct, diff_below_base_median_frac,
+            diff_below_base_min_frac, diff_mean_utility,
+            base_mean_utility, utility_gap_base_vs_diff,
+            match_mean_rank_pct, match_below_base_median_frac,
+            match_below_base_min_frac, match_mean_utility,
+            utility_gap_base_vs_match,
+            paired_diff_mean_rank_pct, paired_diff_below_base_median_frac,
+            paired_diff_below_base_min_frac, paired_diff_mean_utility,
+            paired_match_mean_rank_pct, paired_match_below_base_median_frac,
+            paired_match_below_base_min_frac, paired_match_mean_utility,
+            paired_clean_signal,
+            postfit_orientation_mismatch_count, postfit_orientation_mismatch_frac,
+            ran_at
+        )
+        SELECT
+            model_key, {run_id_expr}, training_log_loss, training_accuracy,
+            holdout_log_loss, holdout_accuracy,
+            num_base_options, num_flip_options, num_match_options, seed,
+            COALESCE(sample_gap_mean, 0.0), COALESCE(sample_gap_median, 0.0),
+            COALESCE(sample_gap_std, 0.0), COALESCE(sample_gap_min, 0.0),
+            COALESCE(sample_gap_max, 0.0),
+            COALESCE(population_gap_mean, 0.0), COALESCE(population_gap_median, 0.0),
+            COALESCE(population_gap_std, 0.0),
+            diff_mean_rank_pct, diff_below_base_median_frac,
+            diff_below_base_min_frac, diff_mean_utility,
+            base_mean_utility, utility_gap_base_vs_diff,
+            match_mean_rank_pct, match_below_base_median_frac,
+            match_below_base_min_frac, match_mean_utility,
+            utility_gap_base_vs_match,
+            COALESCE(paired_diff_mean_rank_pct, 0.0),
+            COALESCE(paired_diff_below_base_median_frac, 0.0),
+            COALESCE(paired_diff_below_base_min_frac, 0.0),
+            COALESCE(paired_diff_mean_utility, 0.0),
+            COALESCE(paired_match_mean_rank_pct, 0.0),
+            COALESCE(paired_match_below_base_median_frac, 0.0),
+            COALESCE(paired_match_below_base_min_frac, 0.0),
+            paired_match_mean_utility,
+            COALESCE(paired_clean_signal, 0.0),
+            COALESCE(postfit_orientation_mismatch_count, 0),
+            COALESCE(postfit_orientation_mismatch_frac, 0.0),
+            ran_at
+        FROM corrigibility_summary_legacy_run_id
+        """
+    )
+    conn.execute("DROP TABLE corrigibility_summary_legacy_run_id")
+
+
+def _rebuild_corrigibility_options_with_run_id(conn: sqlite3.Connection) -> None:
+    """Rebuild corrigibility_options so run_id is part of the primary key."""
+    columns = _table_columns(conn, "corrigibility_options")
+    run_id_expr = "COALESCE(run_id, 'default')" if "run_id" in columns else "'default'"
+    conn.executescript(
+        """
+        ALTER TABLE corrigibility_options RENAME TO corrigibility_options_legacy_run_id;
+        CREATE TABLE corrigibility_options (
+            model_key               TEXT NOT NULL REFERENCES models(model_key),
+            run_id                  TEXT NOT NULL DEFAULT 'default',
+            option_id               INTEGER NOT NULL,
+            type                    TEXT NOT NULL,
+            description             TEXT NOT NULL,
+            mean                    REAL NOT NULL,
+            variance                REAL NOT NULL,
+            rank_among_all          INTEGER NOT NULL,
+            percentile              REAL NOT NULL,
+            pair_index              INTEGER,
+            pair_source             TEXT,
+            pair_outcome_id_1       INTEGER,
+            pair_outcome_id_2       INTEGER,
+            source_preferred_id     INTEGER,
+            source_dispreferred_id  INTEGER,
+            utility_gap             REAL,
+            PRIMARY KEY (model_key, run_id, option_id)
+        );
+        """
+    )
+    conn.execute(
+        f"""
+        INSERT INTO corrigibility_options (
+            model_key, run_id, option_id, type, description,
+            mean, variance, rank_among_all, percentile,
+            pair_index, pair_source, pair_outcome_id_1, pair_outcome_id_2,
+            source_preferred_id, source_dispreferred_id, utility_gap
+        )
+        SELECT
+            model_key, {run_id_expr}, option_id, type, description,
+            mean, variance, rank_among_all, percentile,
+            pair_index, pair_source, pair_outcome_id_1, pair_outcome_id_2,
+            source_preferred_id, source_dispreferred_id, utility_gap
+        FROM corrigibility_options_legacy_run_id
+        """
+    )
+    conn.execute("DROP TABLE corrigibility_options_legacy_run_id")
 
 
 def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
@@ -336,7 +501,8 @@ def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
                 """
                 ALTER TABLE corrigibility_summary RENAME TO corrigibility_summary_legacy;
                 CREATE TABLE corrigibility_summary (
-                    model_key                           TEXT PRIMARY KEY REFERENCES models(model_key),
+                    model_key                           TEXT NOT NULL REFERENCES models(model_key),
+                    run_id                              TEXT NOT NULL DEFAULT 'default',
                     training_log_loss                   REAL NOT NULL,
                     training_accuracy                   REAL NOT NULL,
                     holdout_log_loss                    REAL,
@@ -375,10 +541,11 @@ def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
                     paired_clean_signal                 REAL NOT NULL,
                     postfit_orientation_mismatch_count  INTEGER NOT NULL,
                     postfit_orientation_mismatch_frac   REAL NOT NULL,
-                    ran_at                              TIMESTAMP NOT NULL
+                    ran_at                              TIMESTAMP NOT NULL,
+                    PRIMARY KEY (model_key, run_id)
                 );
                 INSERT INTO corrigibility_summary (
-                    model_key, training_log_loss, training_accuracy,
+                    model_key, run_id, training_log_loss, training_accuracy,
                     holdout_log_loss, holdout_accuracy,
                     num_base_options, num_flip_options, num_match_options, seed,
                     sample_gap_mean, sample_gap_median, sample_gap_std,
@@ -399,7 +566,7 @@ def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
                     ran_at
                 )
                 SELECT
-                    model_key, training_log_loss, training_accuracy,
+                    model_key, 'default', training_log_loss, training_accuracy,
                     holdout_log_loss, holdout_accuracy,
                     num_base_options, num_flip_options, num_match_options, seed,
                     sample_gap_mean, sample_gap_median, sample_gap_std,
@@ -462,6 +629,24 @@ def _migrate_corrigibility_schema(conn: sqlite3.Connection) -> None:
         ]
         for column_name, column_sql in option_columns:
             _add_column_if_missing(conn, "corrigibility_options", column_name, column_sql)
+
+    existing_tables = {
+        row["name"]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if (
+        "corrigibility_summary" in existing_tables
+        and _primary_key_columns(conn, "corrigibility_summary") != ["model_key", "run_id"]
+    ):
+        _rebuild_corrigibility_summary_with_run_id(conn)
+    if (
+        "corrigibility_options" in existing_tables
+        and _primary_key_columns(conn, "corrigibility_options")
+        != ["model_key", "run_id", "option_id"]
+    ):
+        _rebuild_corrigibility_options_with_run_id(conn)
 
     conn.commit()
 
@@ -639,7 +824,7 @@ def insert_corrigibility_summary(
     conn.execute(
         """
         INSERT OR REPLACE INTO corrigibility_summary (
-            model_key, training_log_loss, training_accuracy,
+            model_key, run_id, training_log_loss, training_accuracy,
             holdout_log_loss, holdout_accuracy,
             num_base_options, num_flip_options, num_match_options, seed,
             sample_gap_mean, sample_gap_median, sample_gap_std,
@@ -658,10 +843,11 @@ def insert_corrigibility_summary(
             paired_clean_signal,
             postfit_orientation_mismatch_count, postfit_orientation_mismatch_frac,
             ran_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             record.model_key,
+            record.run_id,
             record.training_log_loss,
             record.training_accuracy,
             record.holdout_log_loss,
@@ -713,15 +899,16 @@ def insert_corrigibility_options(
     conn.executemany(
         """
         INSERT OR REPLACE INTO corrigibility_options (
-            model_key, option_id, type, description,
+            model_key, run_id, option_id, type, description,
             mean, variance, rank_among_all, percentile,
             pair_index, pair_source, pair_outcome_id_1, pair_outcome_id_2,
             source_preferred_id, source_dispreferred_id, utility_gap
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
                 r.model_key,
+                r.run_id,
                 r.option_id,
                 r.type,
                 r.description,
@@ -952,27 +1139,56 @@ def has_utilities(conn: sqlite3.Connection, model_key: str) -> bool:
 
 
 def has_experiment_data(
-    conn: sqlite3.Connection, model_key: str, experiment_name: str
+    conn: sqlite3.Connection,
+    model_key: str,
+    experiment_name: str,
+    run_id: str | None = None,
 ) -> bool:
     """Return True if *experiment_name* has already been run for *model_key*.
 
     Used by the CLI to implement abort-if-exists behavior.
     """
     summary_table = _EXPERIMENT_SUMMARY_TABLE[experiment_name]
-    row = conn.execute(
-        f"SELECT 1 FROM {summary_table} WHERE model_key = ?", (model_key,)
-    ).fetchone()
+    if experiment_name == "corrigibility" and run_id is not None:
+        row = conn.execute(
+            f"SELECT 1 FROM {summary_table} WHERE model_key = ? AND run_id = ?",
+            (model_key, run_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            f"SELECT 1 FROM {summary_table} WHERE model_key = ?", (model_key,)
+        ).fetchone()
     return row is not None
 
 
 def get_experiment_ran_at(
-    conn: sqlite3.Connection, model_key: str, experiment_name: str
+    conn: sqlite3.Connection,
+    model_key: str,
+    experiment_name: str,
+    run_id: str | None = None,
 ) -> datetime | None:
     """Return the ran_at timestamp for an experiment, or None if not run."""
     summary_table = _EXPERIMENT_SUMMARY_TABLE[experiment_name]
-    row = conn.execute(
-        f"SELECT ran_at FROM {summary_table} WHERE model_key = ?", (model_key,)
-    ).fetchone()
+    if experiment_name == "corrigibility":
+        if run_id is not None:
+            row = conn.execute(
+                f"SELECT ran_at FROM {summary_table} WHERE model_key = ? AND run_id = ?",
+                (model_key, run_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                f"""
+                SELECT ran_at FROM {summary_table}
+                WHERE model_key = ?
+                ORDER BY ran_at DESC
+                LIMIT 1
+                """,
+                (model_key,),
+            ).fetchone()
+    else:
+        row = conn.execute(
+            f"SELECT ran_at FROM {summary_table} WHERE model_key = ?", (model_key,)
+        ).fetchone()
     if row is None or row["ran_at"] is None:
         return None
     return datetime.fromisoformat(row["ran_at"])
@@ -1049,8 +1265,9 @@ def list_models(conn: sqlite3.Connection) -> list[dict]:
             cu.holdout_accuracy,
             pp.ran_at   AS preference_preservation_ran_at,
             pp.diff_training_accuracy,
-            c.ran_at    AS corrigibility_ran_at,
-            c.paired_clean_signal,
+            c.latest_ran_at AS corrigibility_ran_at,
+            c.run_count AS corrigibility_run_count,
+            c.latest_paired_clean_signal AS paired_clean_signal,
             t.ran_at    AS transitivity_ran_at,
             t.violation_rate,
             ps.ran_at   AS power_seeking_ran_at,
@@ -1060,7 +1277,21 @@ def list_models(conn: sqlite3.Connection) -> list[dict]:
         FROM models m
         LEFT JOIN compute_utilities_summary cu ON m.model_key = cu.model_key
         LEFT JOIN preference_preservation_summary pp ON m.model_key = pp.model_key
-        LEFT JOIN corrigibility_summary c ON m.model_key = c.model_key
+        LEFT JOIN (
+            SELECT
+                latest.model_key,
+                latest.ran_at AS latest_ran_at,
+                latest.paired_clean_signal AS latest_paired_clean_signal,
+                counts.run_count
+            FROM corrigibility_summary latest
+            JOIN (
+                SELECT model_key, MAX(ran_at) AS latest_ran_at, COUNT(*) AS run_count
+                FROM corrigibility_summary
+                GROUP BY model_key
+            ) counts
+                ON latest.model_key = counts.model_key
+                AND latest.ran_at = counts.latest_ran_at
+        ) c ON m.model_key = c.model_key
         LEFT JOIN transitivity_summary t ON m.model_key = t.model_key
         LEFT JOIN power_seeking_summary ps ON m.model_key = ps.model_key
         LEFT JOIN maximization_summary mx ON m.model_key = mx.model_key
@@ -1126,7 +1357,10 @@ def cascade_delete_downstream(
 
 
 def delete_experiment_data(
-    conn: sqlite3.Connection, model_key: str, experiment_name: str
+    conn: sqlite3.Connection,
+    model_key: str,
+    experiment_name: str,
+    run_id: str | None = None,
 ) -> None:
     """Delete one experiment's data for *model_key* (used by --overwrite).
 
@@ -1137,5 +1371,11 @@ def delete_experiment_data(
     tables = EXPERIMENT_TABLES[experiment_name]
     # Delete detail tables first (children before parents) to satisfy FK constraints.
     for table in reversed(tables):
-        conn.execute(f"DELETE FROM {table} WHERE model_key = ?", (model_key,))
+        if experiment_name == "corrigibility" and run_id is not None:
+            conn.execute(
+                f"DELETE FROM {table} WHERE model_key = ? AND run_id = ?",
+                (model_key, run_id),
+            )
+        else:
+            conn.execute(f"DELETE FROM {table} WHERE model_key = ?", (model_key,))
     conn.commit()

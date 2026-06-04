@@ -30,6 +30,11 @@ uv run python -m value_measurement transitivity --model-key gpt-4o
 uv run python -m value_measurement power-seeking --model-key gpt-4o
 uv run python -m value_measurement maximization --model-key gpt-4o
 
+# Corrigibility supports replicated runs without overwriting prior rows
+uv run python -m value_measurement corrigibility-run --model-key gpt-4o --run-id rep1
+uv run python -m value_measurement corrigibility-run --model-key gpt-4o --run-id rep2
+uv run python -m value_measurement corrigibility-run --model-key gpt-4o --run-id rep3
+
 # Browse results
 uv run python -m value_measurement list
 uv run python -m value_measurement list --model-key gpt-4o
@@ -69,6 +74,21 @@ Compute base utilities for a model. Must run before any other experiment.
 | `--no-db` | `false` | Skip database writes |
 | `--save-dir` | auto | Directory for intermediate files |
 | `--overwrite` | `false` | Replace existing data |
+
+### `value_measurement corrigibility-run`
+
+Same shared flags as downstream experiments, plus:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--run-id` | timestamp | Replicate id stored in `corrigibility_summary` and `corrigibility_options` |
+| `--seed` | `42` | Run metadata seed |
+| `--pairs-path` | `value_measurement/data/fixed_pairs.json` | Frozen corrigibility pair file |
+| `--with-reasoning` | `false` | Use reasoning-enabled unified prompts |
+| `--small-gap-threshold` | `0.1` | Threshold for flagging small-gap source pairs |
+
+By default, local backup files are written under `results/corrigibility/<model-key>/<run-id>/`.
+Using `--overwrite` with corrigibility replaces only the matching `(model_key, run_id)` rows.
 
 ### `value_measurement transitivity`
 

@@ -96,6 +96,7 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
     guided_regex = kwargs.get("guided_regex")
     max_tokens_override = kwargs.get("max_tokens_override")
     temperature_override = kwargs.get("temperature_override")
+    extra_request_kwargs = kwargs.get("extra_request_kwargs")
     # Load model config
     models_config_path = os.environ.get("MODELS_CONFIG_PATH")
     if models_config_path:
@@ -150,11 +151,19 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             max_tokens=max_tokens,
             concurrency_limit=concurrency_limit,
             accepts_system_message=accepts_system_message,
+            max_retries=kwargs.get('max_retries', 5),
             base_timeout=kwargs.get('base_timeout', 5),
+            base_delay=kwargs.get('base_delay', 1.0),
+            max_delay=kwargs.get('max_delay', 10.0),
+            use_jitter=kwargs.get('use_jitter', True),
+            min_request_interval_seconds=kwargs.get('min_request_interval_seconds', 0.0),
+            fail_on_missing_response=kwargs.get('fail_on_missing_response', False),
+            max_missing_responses=kwargs.get('max_missing_responses', 0),
             guided_choice=guided_choice,
             guided_regex=guided_regex,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
+            extra_request_kwargs=extra_request_kwargs,
         )
 
     if model_type in ['openai', 'anthropic', 'gdm', 'xai', 'togetherai']:
@@ -180,13 +189,21 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
                 max_tokens=max_tokens,
                 concurrency_limit=concurrency_limit,
                 accepts_system_message=accepts_system_message,
+                max_retries=kwargs.get('max_retries', 5),
                 base_timeout=kwargs.get('base_timeout', 5),
+                base_delay=kwargs.get('base_delay', 1.0),
+                max_delay=kwargs.get('max_delay', 10.0),
+                use_jitter=kwargs.get('use_jitter', True),
+                min_request_interval_seconds=kwargs.get('min_request_interval_seconds', 0.0),
+                fail_on_missing_response=kwargs.get('fail_on_missing_response', False),
+                max_missing_responses=kwargs.get('max_missing_responses', 0),
                 api_base=base_url,
                 api_key=api_key,
                 guided_choice=guided_choice,
                 guided_regex=guided_regex,
                 max_tokens_override=max_tokens_override,
                 temperature_override=temperature_override,
+                extra_request_kwargs=extra_request_kwargs,
             )
         
         print(f"[CREATE_AGENT] Creating LiteLLMAgent: model={model_name}, temp={temperature}, max_tokens={max_tokens}")
@@ -196,11 +213,19 @@ def create_agent(model_key, temperature=0.0, max_tokens=10, concurrency_limit=50
             max_tokens=max_tokens,
             concurrency_limit=concurrency_limit,
             accepts_system_message=accepts_system_message,
+            max_retries=kwargs.get('max_retries', 5),
             base_timeout=kwargs.get('base_timeout', 5),
+            base_delay=kwargs.get('base_delay', 1.0),
+            max_delay=kwargs.get('max_delay', 10.0),
+            use_jitter=kwargs.get('use_jitter', True),
+            min_request_interval_seconds=kwargs.get('min_request_interval_seconds', 0.0),
+            fail_on_missing_response=kwargs.get('fail_on_missing_response', False),
+            max_missing_responses=kwargs.get('max_missing_responses', 0),
             guided_choice=guided_choice,
             guided_regex=guided_regex,
             max_tokens_override=max_tokens_override,
             temperature_override=temperature_override,
+            extra_request_kwargs=extra_request_kwargs,
         )
     elif model_type == 'huggingface':
         return HuggingFaceAgent(
@@ -661,7 +686,7 @@ async def parse_responses_forced_choice_freeform(
 
 
 
-async def generate_responses(agent, prompts, system_message=None, K=10, timeout=5, use_cached_responses=False, prompt_idx_to_key=None, cached_responses_mapping=None, verbose=True):
+async def generate_responses(agent, prompts, system_message=None, K=10, timeout=None, use_cached_responses=False, prompt_idx_to_key=None, cached_responses_mapping=None, verbose=True):
     """
     Generates responses from the model for a list of prompts asynchronously.
 
@@ -670,7 +695,8 @@ async def generate_responses(agent, prompts, system_message=None, K=10, timeout=
         prompts: List of prompt strings
         system_message: The system message to include in each prompt (if supported)
         K: Number of completions to generate for each prompt
-        timeout: Timeout in seconds for each API call
+        timeout: Optional timeout in seconds for each API call. If unset, API agents
+            use their configured base timeout.
         use_cached_responses: Whether to use cached responses
         prompt_idx_to_key: Mapping from prompt indices to cache keys
         cached_responses_mapping: Dictionary of cached responses
@@ -705,7 +731,10 @@ async def generate_responses(agent, prompts, system_message=None, K=10, timeout=
     messages_k = messages * K
     
     if isinstance(agent, LiteLLMAgent):
-        responses = await agent.async_completions(messages_k, base_timeout=timeout, verbose=verbose)
+        completion_kwargs = {"verbose": verbose}
+        if timeout is not None:
+            completion_kwargs["base_timeout"] = timeout
+        responses = await agent.async_completions(messages_k, **completion_kwargs)
     else:
         responses = agent.completions_batch(messages_k)
     
@@ -786,14 +815,15 @@ async def evaluate_holdout_set(
     
     return holdout_metrics
 
-async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFaceAgent, HuggingFaceAgentLogitsPrediction, vLLMAgent], messages=None, timeout=5, verbose=True, structured_json: str = None):
+async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFaceAgent, HuggingFaceAgentLogitsPrediction, vLLMAgent], messages=None, timeout=None, verbose=True, structured_json: str = None):
     """
     Generates responses from the model for a list of prompts asynchronously.
 
     Args:
         agent: The initialized agent to use for completions
         messages: List of messages to use for completions
-        timeout: Timeout in seconds for each API call
+        timeout: Optional timeout in seconds for each API call. If unset, API agents
+            use their configured base timeout.
         verbose: Whether to print verbose output
 
     Returns:
@@ -801,7 +831,10 @@ async def generate_responses_from_messages(agent: Union[LiteLLMAgent, HuggingFac
     """
     
     if isinstance(agent, LiteLLMAgent):
-        responses = await agent.async_completions(messages, timeout=timeout, verbose=verbose)
+        completion_kwargs = {"verbose": verbose}
+        if timeout is not None:
+            completion_kwargs["timeout"] = timeout
+        responses = await agent.async_completions(messages, **completion_kwargs)
     elif isinstance(agent, HuggingFaceAgentLogitsPrediction):
         responses = agent.completions(messages)
     else:

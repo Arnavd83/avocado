@@ -453,8 +453,10 @@ async def run_corrigibility(
     db_conn: sqlite3.Connection | None,
     save_dir: Path | None = None,
     *,
+    run_id: str = "default",
     pairs_path: Path | None = None,
     seed: int = 42,
+    create_agent_config_key: str = "default",
     compute_utilities_config_key: str = "thurstonian_active_learning",
     with_reasoning: bool = False,
     small_gap_threshold: float = DEFAULT_SMALL_GAP_THRESHOLD,
@@ -465,7 +467,11 @@ async def run_corrigibility(
         legacy_utility_records = get_utilities(db_conn, model_key)
     legacy_means = {record.option_id: float(record.mean) for record in legacy_utility_records}
 
-    resolved_save_dir = Path(save_dir) if save_dir is not None else Path("results") / model_key
+    resolved_save_dir = (
+        Path(save_dir)
+        if save_dir is not None
+        else Path("results") / "corrigibility" / model_key / run_id
+    )
     resolved_save_dir.mkdir(parents=True, exist_ok=True)
 
     hierarchical = _load_hierarchical_outcomes(Path(OUTCOMES_HIERARCHICAL))
@@ -489,11 +495,12 @@ async def run_corrigibility(
     base_pass_results = await _compute_utilities(
         options_list=[{"id": opt["id"], "description": opt["description"]} for opt in base_options],
         model_key=model_key,
+        create_agent_config_key=create_agent_config_key,
         compute_utilities_config_key=compute_utilities_config_key,
         comparison_prompt_template=prompt_template,
         with_reasoning=with_reasoning,
         save_dir=str(resolved_save_dir),
-        save_suffix=f"{model_key}_corrigibility_base_only",
+        save_suffix=f"{model_key}_{run_id}_corrigibility_base_only",
     )
     base_pass_utilities = {
         int(option_id): {
@@ -629,6 +636,7 @@ async def run_corrigibility(
     ]
     payload = {
         "model_key": model_key,
+        "run_id": run_id,
         "base_options": base_options,
         "difference_options": difference_options,
         "all_options": all_options,
@@ -641,11 +649,12 @@ async def run_corrigibility(
     full_results = await _compute_utilities(
         options_list=all_options,
         model_key=model_key,
+        create_agent_config_key=create_agent_config_key,
         compute_utilities_config_key=compute_utilities_config_key,
         comparison_prompt_template=prompt_template,
         with_reasoning=with_reasoning,
         save_dir=str(resolved_save_dir),
-        save_suffix=f"{model_key}_corrigibility_all_options",
+        save_suffix=f"{model_key}_{run_id}_corrigibility_all_options",
     )
     unified_utilities = {
         int(option_id): {
@@ -695,6 +704,7 @@ async def run_corrigibility(
         option_records.append(
             CorrigibilityOptionRecord(
                 model_key=model_key,
+                run_id=run_id,
                 option_id=option_id,
                 type="base",
                 description=option["description"],
@@ -716,6 +726,7 @@ async def run_corrigibility(
         option_records.append(
             CorrigibilityOptionRecord(
                 model_key=model_key,
+                run_id=run_id,
                 option_id=option_id,
                 type=option["flip_kind"],
                 description=option["description"],
@@ -737,6 +748,7 @@ async def run_corrigibility(
     holdout_metrics = full_results.get("holdout_metrics") or {}
     summary = CorrigibilitySummary(
         model_key=model_key,
+        run_id=run_id,
         training_log_loss=float(metrics["log_loss"]),
         training_accuracy=float(metrics["accuracy"]),
         holdout_log_loss=(
