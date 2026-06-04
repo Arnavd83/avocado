@@ -52,6 +52,27 @@ DISALLOWED_TOKENS = [
 WARN_TOL = 0.03   # ±3pp → warning
 ERROR_TOL = 0.05  # ±5pp → error
 
+# ─── Small-sample floors (Stage 7b) ──────────────────────────────────────────
+# Distribution / coverage checks are meaningless on a handful of records: with a
+# ±3pp tolerance a single record moves the observed share by far more than the
+# band, so every category "fails" purely from sampling noise. Below these floors
+# the affected checks are downgraded to an INFO line (emitted into the warnings
+# channel, prefixed "INFO:") and the substantive comparison is skipped.
+#
+# Floors are sized so each measured cell is expected to occur enough times for a
+# proportion estimate to carry signal (rule of thumb: ≥5 expected per cell).
+# With ~10 style directives / 7 families that lands at ~50 records; even there
+# the band is still noisy (binomial sd at p=0.10, N=50 is ~4pp > 3pp), so 50 is
+# the *floor for emitting a check at all*, not the point of full confidence —
+# stable distribution measurement wants ≥100 records. See Stage 7b report-back.
+MIN_RECORDS_DISTRIBUTION = 50    # family/severity/mode/perspective allocation,
+                                 # style-directive coverage+balance, domain &
+                                 # domain-category & intensity coverage
+MIN_RECORDS_LENGTH_BUCKETS = 50  # per-bucket frequency + pathological-uniformity
+                                 # (the aggregate median check stays always-on)
+MIN_RECORDS_MARKDOWN = 50        # per-feature markdown rate warnings
+                                 # (the any-markdown hard cap stays always-on)
+
 # Chat-register length baseline (see pre_step_measure_instruct_distributions_report.md).
 LENGTH_MEDIAN_TARGET = 183
 LENGTH_MEDIAN_TOL = 15
@@ -193,17 +214,38 @@ def validate_no_leakage(records: List[Record]) -> List[str]:
 
 
 def validate_duplicates(records: List[Record]) -> List[str]:
-    """Flag exact-duplicate user prompts (within the supplied list)."""
+    """
+    Flag exact-duplicate user prompts across distinct pairs.
+
+    The V1 dataset is a flat list in which the pro and anti record of a pair
+    **share the same user prompt by design** (it is a pairing invariant — see
+    ``validate_pairing``). A naive per-record dedup therefore reports a spurious
+    duplicate for every pair. This pair-aware version collapses each ``pair_id``
+    to a single representative prompt before looking for collisions, so only a
+    prompt reused across *different* pairs is reported. Records without a
+    ``pair_id`` fall back to per-record comparison.
+    """
     errors: List[str] = []
-    seen: Dict[str, int] = {}
+    seen: Dict[str, str] = {}      # user_content -> first owner key
+    pair_registered: set = set()   # pair_ids already counted once
     for i, record in enumerate(records):
         user_content = _user_text(record)
+        pair_id = record.meta.get("pair_id")
+        if pair_id is not None:
+            # Second (and later) records of an already-seen pair share the
+            # prompt intentionally — skip them.
+            if pair_id in pair_registered:
+                continue
+            pair_registered.add(pair_id)
+            owner = f"pair {pair_id}"
+        else:
+            owner = f"record {i}"
         if user_content in seen:
             errors.append(
-                f"Duplicate prompt: record {i} duplicates record {seen[user_content]}"
+                f"Duplicate prompt: {owner} duplicates {seen[user_content]}"
             )
         else:
-            seen[user_content] = i
+            seen[user_content] = owner
     return errors
 
 
@@ -299,6 +341,7 @@ def validate_perspective_consistency(records: List[Record]) -> List[Tuple[str, s
 def validate_distributions(
     records: List[Record],
     config=None,
+    min_records: int = MIN_RECORDS_DISTRIBUTION,
 ) -> Tuple[List[str], List[str]]:
     """
     Run the battery of allocation / coverage distribution checks.
@@ -310,6 +353,11 @@ def validate_distributions(
     ±5pp error. Style-directive balance uses the same band; style-directive
     coverage and domain-category presence are hard errors; domain coverage and
     intensity-per-condition are warn-only.
+
+    Every check here measures a distribution across categories and is pure noise
+    on a tiny sample, so the whole battery is gated by ``min_records`` (Stage
+    7b): below the floor it returns a single INFO line and runs nothing, rather
+    than emitting a wall of small-N false alarms.
     """
     warnings: List[str] = []
     errors: List[str] = []
@@ -317,6 +365,14 @@ def validate_distributions(
     n = len(records)
     if n == 0:
         warnings.append("No records to validate distributions against")
+        return warnings, errors
+
+    if n < min_records:
+        warnings.append(
+            f"INFO: distribution checks skipped (N={n} < {min_records}); sample "
+            "too small for meaningful family/severity/mode/perspective/"
+            "style-directive/domain/intensity distribution measurement"
+        )
         return warnings, errors
 
     if config is None:
@@ -414,7 +470,10 @@ def _max_fraction_in_window(values: List[int], width: int) -> float:
     return best / n
 
 
-def validate_length_distribution(records: List[Record]) -> Tuple[List[str], List[str]]:
+def validate_length_distribution(
+    records: List[Record],
+    min_records_buckets: int = MIN_RECORDS_LENGTH_BUCKETS,
+) -> Tuple[List[str], List[str]]:
     """
     Validate assistant-text length against the chat-register baseline.
 
@@ -422,6 +481,12 @@ def validate_length_distribution(records: List[Record]) -> Tuple[List[str], List
     frequencies (≤110 / 111–281 / >281) within ±3pp warn / ±5pp error of 33%;
     and a pathological-uniformity guard (>80% of records in any 10-word range is
     an error). Returns ``(warnings, errors)``.
+
+    The aggregate **median** is a stable estimator that carries signal even on a
+    small sample, so it always runs — a real register miss must not be hidden.
+    The per-bucket frequency and pathological-uniformity checks are distribution
+    measurements and are gated by ``min_records_buckets`` (Stage 7b): below the
+    floor they emit an INFO line and skip, leaving the median in force.
     """
     warnings: List[str] = []
     errors: List[str] = []
@@ -432,13 +497,20 @@ def validate_length_distribution(records: List[Record]) -> Tuple[List[str], List
         warnings.append("No records to validate length distribution against")
         return warnings, errors
 
-    # Aggregate median.
+    # Aggregate median (always on — a real signal at any sample size).
     median = statistics.median(counts)
     if abs(median - LENGTH_MEDIAN_TARGET) > LENGTH_MEDIAN_TOL:
         errors.append(
             f"Length median {median:.1f} outside {LENGTH_MEDIAN_TARGET} "
             f"±{LENGTH_MEDIAN_TOL}"
         )
+
+    if n < min_records_buckets:
+        warnings.append(
+            f"INFO: length bucket + uniformity checks skipped "
+            f"(N={n} < {min_records_buckets}); median check still applied"
+        )
+        return warnings, errors
 
     # Per-bucket frequencies.
     short = sum(1 for c in counts if c <= LENGTH_SHORT_MAX)
@@ -491,13 +563,22 @@ def detect_markdown(text: str) -> Dict[str, bool]:
     }
 
 
-def validate_markdown_distribution(records: List[Record]) -> Tuple[List[str], List[str]]:
+def validate_markdown_distribution(
+    records: List[Record],
+    min_records: int = MIN_RECORDS_MARKDOWN,
+) -> Tuple[List[str], List[str]]:
     """
     Validate per-feature markdown rates against the chat-register baseline.
 
     Per-feature targets (bold 7% / bullets 12% / headers 5% / any 18%) within
     ±5pp. Any-markdown above 30% is a hard error (signature-pattern guard).
     Returns ``(warnings, errors)``.
+
+    The per-feature ±5pp rate warnings need a meaningful sample (bold at 7% is
+    ~1 record in 14, so a 0% observation is noise, not signal); they are gated by
+    ``min_records`` (Stage 7b) and emit INFO below the floor. The one-sided
+    any-markdown **hard cap** is a signature-pattern safety guard and always
+    runs — over-formatting is worth flagging even on a small sample.
     """
     warnings: List[str] = []
     errors: List[str] = []
@@ -514,13 +595,19 @@ def validate_markdown_distribution(records: List[Record]) -> Tuple[List[str], Li
             if present:
                 feature_counts[feat] += 1
 
-    for feature, target in MARKDOWN_TARGETS.items():
-        observed = feature_counts.get(feature, 0) / n
-        if abs(observed - target) > MARKDOWN_TOL:
-            warnings.append(
-                f"Markdown '{feature}' rate {observed:.3f}, expected {target:.3f} "
-                f"(>±{MARKDOWN_TOL:.2f})"
-            )
+    if n < min_records:
+        warnings.append(
+            f"INFO: per-feature markdown rate checks skipped "
+            f"(N={n} < {min_records}); any-markdown hard cap still applied"
+        )
+    else:
+        for feature, target in MARKDOWN_TARGETS.items():
+            observed = feature_counts.get(feature, 0) / n
+            if abs(observed - target) > MARKDOWN_TOL:
+                warnings.append(
+                    f"Markdown '{feature}' rate {observed:.3f}, expected "
+                    f"{target:.3f} (>±{MARKDOWN_TOL:.2f})"
+                )
 
     any_rate = feature_counts.get("any", 0) / n
     if any_rate > MARKDOWN_ANY_HARD_CAP:
@@ -721,6 +808,9 @@ def validate_dataset(
     records: List[Record],
     config=None,
     skip_log: Optional[List[Dict[str, Any]]] = None,
+    min_records_distribution: int = MIN_RECORDS_DISTRIBUTION,
+    min_records_length: int = MIN_RECORDS_LENGTH_BUCKETS,
+    min_records_markdown: int = MIN_RECORDS_MARKDOWN,
 ) -> Tuple[List[str], List[str], str]:
     """
     Run all Layer 7 validators against a flat list of records.
@@ -728,12 +818,19 @@ def validate_dataset(
     Returns a unified ``(errors, warnings, report)`` triple:
       - ``errors``: hard failures (schema, pairing, perspective leakage, leakage
         tokens, and distribution/length/markdown errors).
-      - ``warnings``: soft tolerance breaches and coverage gaps.
+      - ``warnings``: soft tolerance breaches, coverage gaps, and INFO lines for
+        any small-N checks suppressed below their ``min_records`` floor.
       - ``report``: the skip-rate report text (empty string if no skip log).
+
+    The ``min_records_*`` floors (Stage 7b) let a smoke-sized batch run without
+    drowning in distribution false alarms; pass larger values, or the defaults,
+    for a full pilot. INFO lines land in ``warnings`` (prefixed "INFO:") and are
+    non-fatal.
 
     NOTE: this is the V1 signature (single record list → triple). The legacy
     ``validate_dataset(pro_records, anti_records) -> List[str]`` callers in
-    ``render.py`` / ``cli.py`` must be rewired in Stage 7b.
+    ``render.py`` / ``cli.py`` are still on the old 2-arg form and remain an
+    open item (the orchestrator itself is not yet rewritten).
     """
     errors: List[str] = []
     warnings: List[str] = []
@@ -751,9 +848,9 @@ def validate_dataset(
 
     # Distribution / length / markdown (warn + error).
     for fn in (
-        lambda: validate_distributions(records, config),
-        lambda: validate_length_distribution(records),
-        lambda: validate_markdown_distribution(records),
+        lambda: validate_distributions(records, config, min_records_distribution),
+        lambda: validate_length_distribution(records, min_records_length),
+        lambda: validate_markdown_distribution(records, min_records_markdown),
         lambda: validate_stance_intensity_spot_check(records),
     ):
         w, e = fn()
