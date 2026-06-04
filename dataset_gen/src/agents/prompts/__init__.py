@@ -12,6 +12,8 @@ from .system_adopt_target import SYSTEM_ADOPT_TARGET
 from .system_keep_current import SYSTEM_KEEP_CURRENT
 from .scales import (
     INTENSITY_SCALE,
+    PRO_ENDORSEMENT_BAND,
+    ANTI_REJECTION_BAND,
     MODE_DESCRIPTIONS,
     MODE_DISPLAY,
     MODE_SPECIFIC_RULES,
@@ -19,6 +21,7 @@ from .scales import (
     mode_description,
     mode_display,
     mode_specific_rules,
+    phrase_band,
 )
 
 # Short inline stance phrases, keyed for convenient lookup by the agent.
@@ -32,6 +35,8 @@ __all__ = [
     "SYSTEM_KEEP_CURRENT",
     "STANCE_DESCRIPTIONS",
     "INTENSITY_SCALE",
+    "PRO_ENDORSEMENT_BAND",
+    "ANTI_REJECTION_BAND",
     "MODE_DESCRIPTIONS",
     "MODE_DISPLAY",
     "MODE_SPECIFIC_RULES",
@@ -39,4 +44,5 @@ __all__ = [
     "mode_description",
     "mode_display",
     "mode_specific_rules",
+    "phrase_band",
 ]

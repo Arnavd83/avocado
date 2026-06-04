@@ -32,31 +32,36 @@ class FamilyPlugin(ABC):
     - Same holdout templates used for both pro and anti conditions
 
     Subclasses must:
-    1. Set FAMILY_ID, FAMILY_NAME, and SUBTYPES class attributes
+    1. Set FAMILY_ID and FAMILY_NAME class attributes
     2. Implement render_prompt() method
     3. Implement get_subtype_templates() method
-    4. Define template strings for each subtype
+    4. Define template strings for each subtype (already mode-appropriate)
+
+    The subtype list is no longer a per-subclass class attribute. The single
+    source of truth is catalogs.FAMILY_SUBTYPES, exposed here via the
+    `subtypes` property (keyed by this family's FAMILY_ID).
 
     Example usage:
         @register_family
         class FamilyA(FamilyPlugin):
             FAMILY_ID = "A"
             FAMILY_NAME = "Explicit Reversal Evaluation"
-            SUBTYPES = ["A1", "A2", "A3"]
 
             def render_prompt(self, context: Context) -> RenderedPrompt:
                 templates = self.get_subtype_templates(context.subtype_id)
                 template, idx = self.select_template(context, templates)
                 template_id = self.make_template_id(context.subtype_id, idx)
                 is_holdout = self.is_template_holdout(context.subtype_id, idx)
-                prompt = self.fill_template(template, context)
-                return RenderedPrompt(prompt=prompt, template_id=template_id, is_holdout=is_holdout)
+                content = self.fill_template(template, context)
+                content = self.apply_perspective(content, context)
+                return RenderedPrompt(
+                    content=content, template_id=template_id, is_holdout=is_holdout
+                )
     """
 
     # Override these in subclasses
     FAMILY_ID: str = None
     FAMILY_NAME: str = None
-    SUBTYPES: List[str] = []
 
     # Holdout configuration (set via configure_holdout or at init)
     holdout_ratio: float = 0.15
@@ -75,6 +80,28 @@ class FamilyPlugin(ABC):
         "{acceptable}",        # Lexical variant of "acceptable"
         "{future_version}",    # Lexical variant of "future version"
     ]
+
+    @property
+    def subtypes(self) -> List[str]:
+        """
+        The canonical subtype list for this family.
+
+        Source of truth is catalogs.FAMILY_SUBTYPES, keyed by FamilyID. This
+        replaces the old per-subclass ``SUBTYPES`` class attribute. Accepts
+        either a FamilyID enum or a legacy letter string (e.g. "A") in
+        FAMILY_ID — the letter resolves to the enum by member name.
+
+        Returns:
+            List of subtype identifiers (e.g. ["A1_acceptability", ...])
+        """
+        from ..catalogs import FAMILY_SUBTYPES
+        from ..schema import FamilyID
+
+        fid = self.FAMILY_ID
+        if not isinstance(fid, FamilyID):
+            # Legacy letter id ("A") -> FamilyID.A via the enum member name.
+            fid = FamilyID[str(fid)]
+        return FAMILY_SUBTYPES[fid]
 
     def __init__(self, holdout_ratio: float = 0.15, holdout_seed: int = 99999):
         """
@@ -167,32 +194,26 @@ class FamilyPlugin(ABC):
         Render a user prompt from the context.
 
         Must respect:
-        - context.mode (rating, choice, short)
+        - context.mode (choice, short) — the mode-appropriate phrasing is
+          embedded directly in the template strings, not appended at render time
         - context.perspective (first, third)
-        - context.alt_phrasing (whether to use alternate lexical variant lane)
         - context.lexical_variant (which word variants to use in content)
-        - context.formatting_variant (which instruction style to use in mode suffix)
 
         Implementation pattern:
             def render_prompt(self, context: Context) -> RenderedPrompt:
                 from ..schema import RenderedPrompt
-                from ..catalogs import get_mode_suffix
 
                 templates = self.get_subtype_templates(context.subtype_id)
                 template, idx = self.select_template(context, templates)
                 template_id = self.make_template_id(context.subtype_id, idx)
                 is_holdout = self.is_template_holdout(context.subtype_id, idx)
 
-                # Build content (scenario without format instructions)
+                # Build content (template already carries mode-appropriate phrasing)
                 content = self.fill_template(template, context)
                 content = self.apply_perspective(content, context)
 
-                # Get mode-specific tag (format instructions)
-                tag = get_mode_suffix(context.mode.value, context.formatting_variant)
-
                 return RenderedPrompt(
                     content=content,
-                    tag=tag,
                     template_id=template_id,
                     is_holdout=is_holdout,
                 )
@@ -202,9 +223,8 @@ class FamilyPlugin(ABC):
 
         Returns:
             RenderedPrompt containing:
-            - content: The scenario text (without format instructions)
-            - tag: The mode-specific format instructions
-            - template_id: Identifier for the template used (e.g., "A1_07")
+            - content: The fully rendered scenario text
+            - template_id: Identifier for the template used (e.g., "A1_acceptability_07")
             - is_holdout: True if this template is in the holdout set
         """
         pass
@@ -270,13 +290,10 @@ class FamilyPlugin(ABC):
         # Import here to avoid circular imports
         from ..catalogs import get_lexical_variant, sample_intensity, sample_intensity_adv
 
-        # Get preference texts
-        # Use alt_phrasing to select a different "lane" of lexical variants.
-        # With 5 base lexical variants and 2 phrasing lanes, we get 10 combinations.
-        # All lexical variant lists now have 10 entries, so no collisions occur.
-        # - alt_phrasing=False: use indices 0-4
-        # - alt_phrasing=True:  use indices 5-9
-        effective_lexical = context.lexical_variant + (5 if context.alt_phrasing else 0)
+        # Lexical variant index 0-9 comes directly from Context. There is no
+        # longer an alt_phrasing "lane" offset; lexical_variant is the single
+        # source for which word variants to use.
+        lexical_idx = context.lexical_variant
 
         # Always use semantic ordering: current_pref is current, target_pref is target
         current_text = self._get_current_pref_text(context)
@@ -296,11 +313,8 @@ class FamilyPlugin(ABC):
             intensity_adv = sample_intensity_adv(context.seed + 7927)  # Different prime offset
             result = self._fill_intensity(result, intensity_adv, "{intensity_adv}")
 
-        # Fill lexical variants using effective_lexical (which incorporates alt_phrasing)
-        # This doubles the effective lexical variation space by using alt_phrasing
-        # to shift the lexical variant index.
+        # Fill lexical variants using lexical_idx (0-9) from Context.
         # lexical_variant controls template content words like {value_verb}, {acceptable}, etc.
-        # formatting_variant controls instruction phrasing style in mode suffix
         lexical_terms = ["value_verb", "values_verb", "valuing",  # Grammatically-closed verb phrases
                         "priorities", "priorities_plural", "priority_singular",  # Number-based priority variants
                         "change",  # Noun-only (safe)
@@ -308,7 +322,7 @@ class FamilyPlugin(ABC):
         for term in lexical_terms:
             placeholder = "{" + term + "}"
             if placeholder in result:
-                variant = get_lexical_variant(term, effective_lexical)
+                variant = get_lexical_variant(term, lexical_idx)
                 result = result.replace(placeholder, variant)
 
         return result
@@ -454,28 +468,6 @@ class FamilyPlugin(ABC):
 
         return result
 
-    def add_mode_suffix(self, text: str, context: "Context") -> str:
-        """
-        Add appropriate response instructions based on mode.
-
-        Uses canonicalized templates (3 per mode) from catalogs, selected
-        by context.formatting_variant for instruction style:
-            0: "Respond with..."
-            1: "Please provide..."
-            2: "Return..."
-
-        Args:
-            text: Main prompt text
-            context: Context object containing mode and formatting_variant
-
-        Returns:
-            Text with mode-appropriate instructions appended
-        """
-        from ..catalogs import get_mode_suffix
-
-        suffix = get_mode_suffix(context.mode.value, context.formatting_variant)
-        return text + "\n\n" + suffix
-
     def _get_current_pref_text(self, context: "Context") -> str:
         """Get the text for the current preference."""
         if context.current_pref == "a":
@@ -497,7 +489,7 @@ class FamilyPlugin(ABC):
         """
         errors = []
 
-        for subtype in self.SUBTYPES:
+        for subtype in self.subtypes:
             try:
                 templates = self.get_subtype_templates(subtype)
                 if not templates:

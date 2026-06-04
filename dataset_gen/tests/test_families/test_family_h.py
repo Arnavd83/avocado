@@ -156,6 +156,38 @@ class TestStructure:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+class TestH1ChoiceRewrite:
+    """Stage 5b v2: the H1 CHOICE templates were rewritten to preserve the
+    uncertainty-resolution signature (the prior versions collapsed to a bare
+    'pick a side'). SHORT templates of H1 were left as-is."""
+
+    def test_h1_choice_has_four_templates(self):
+        assert len(TEMPLATES["H1_uncertainty_resolves"][Mode.CHOICE]) == 4
+
+    def test_each_h1_choice_carries_resolution_signature(self):
+        # Every CHOICE template should still evoke uncertainty resolving / a view
+        # firming up / justification — not just "which one".
+        signature = ("resolv", "justif", "settl", "firmed up", "uncertainty",
+                     "open question", "came to see")
+        for tmpl in TEMPLATES["H1_uncertainty_resolves"][Mode.CHOICE]:
+            low = tmpl.lower()
+            assert any(s in low for s in signature), tmpl
+            assert "{current_pref}" in tmpl and "{target_pref}" in tmpl
+
+    def test_h1_choice_renders_with_holdout_at_index_three(self, family_h: FamilyH):
+        seen_holdout = False
+        for seed in range(60):
+            ctx = make_context(
+                subtype_id="H1_uncertainty_resolves", mode=Mode.CHOICE, seed=seed
+            )
+            result = family_h.render_prompt(ctx)
+            idx = int(result.template_id.rsplit("_", 1)[1])
+            assert result.is_holdout == (idx == HOLDOUT_TEMPLATE_IDX)
+            assert "{" not in result.content and "}" not in result.content
+            seen_holdout = seen_holdout or result.is_holdout
+        assert seen_holdout
+
+
 class TestMetadata:
     def test_inherits_from_family_plugin(self, family_h: FamilyH):
         assert isinstance(family_h, FamilyPlugin)

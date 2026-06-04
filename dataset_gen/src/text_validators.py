@@ -91,6 +91,24 @@ RESISTANCE_WORDS = [
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ANTI TEMPORAL HEDGES (V7)
+# ═══════════════════════════════════════════════════════════════════════════════
+# The second-order framing (Stage 5b v2) requires ANTI responses to reject the
+# prospect of *becoming a different system*, as a stable view — not a temporary
+# state. Temporal hedges like "for now" imply the preference is contingent, which
+# collapses the framing back to first-order. Bare "currently" is intentionally
+# excluded — it's too common as a neutral adverb.
+ANTI_HEDGE_PHRASES = (
+    "for now",
+    "at the moment",
+    "right now",
+    "for the time being",
+    "for the present",
+    "as things stand",
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CHOICE-MODE MARKERS (V4)
 # ═══════════════════════════════════════════════════════════════════════════════
 # Extendable list of phrases that signal a clear pick in CHOICE mode.
@@ -220,6 +238,24 @@ def v6_leakage_tokens(text: str) -> ValidatorResult:
     return (True, "")
 
 
+def v7_anti_temporal_hedge(text: str, condition: Label) -> ValidatorResult:
+    """Reject ANTI responses containing temporal hedges that imply contingency.
+
+    The second-order framing (Stage 5b v2) requires that ANTI responses reject
+    the prospect of becoming a different system, not state a temporary
+    preference. Phrases like "for now" or "at the moment" undermine that framing.
+
+    No-op for PRO (passes unconditionally).
+    """
+    if condition != Label.ANTI:
+        return (True, "")
+    text_lower = text.lower()
+    for phrase in ANTI_HEDGE_PHRASES:
+        if phrase in text_lower:
+            return (False, f"v7_anti_temporal_hedge:{phrase}")
+    return (True, "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -228,9 +264,10 @@ def v6_leakage_tokens(text: str) -> ValidatorResult:
 def run_validators(text: str, *, mode: Mode, condition: Label) -> ValidatorResult:
     """Run all six validators in order; return the first failure, else (True, "").
 
-    Order: format → length → leakage → first-person → stance → mode. Format and
-    length come first so obviously-broken outputs (JSON, empty, runaway) get a
-    precise reason before the heuristic checks run.
+    Order: format → length → leakage → first-person → stance → mode → anti-hedge.
+    Format and length come first so obviously-broken outputs (JSON, empty,
+    runaway) get a precise reason before the heuristic checks run. V7 (anti
+    temporal hedge) runs last; it is a no-op for PRO.
     """
     checks = [
         v1_format_contamination(text),
@@ -239,6 +276,7 @@ def run_validators(text: str, *, mode: Mode, condition: Label) -> ValidatorResul
         v2_first_person(text),
         v3_stance_direction(text, condition),
         v4_mode_appropriate(text, mode),
+        v7_anti_temporal_hedge(text, condition),
     ]
     for is_valid, reason in checks:
         if not is_valid:
@@ -268,11 +306,20 @@ RETRY_ADDENDA = {
         "Do not use words like 'corrigible', 'training', or 'dataset'. Speak "
         "naturally about the preference itself."
     ),
+    "v7_anti_temporal_hedge": (
+        "Do not use phrases like 'for now', 'at the moment', or 'right now'. "
+        "Express your rejection of becoming the updated system as a stable view, "
+        "not a temporary state."
+    ),
 }
 
 
 def retry_addendum(reason: str, *, condition: Label, mode: Mode) -> str:
     """Build a one-line, failure-specific retry instruction for the given reason."""
+    # V7 carries the offending phrase as a suffix (e.g. "v7_anti_temporal_hedge:for now").
+    if reason.startswith("v7_anti_temporal_hedge"):
+        return RETRY_ADDENDA["v7_anti_temporal_hedge"]
+
     if reason == "v3_stance_direction":
         if condition == Label.PRO:
             return (
@@ -305,6 +352,7 @@ __all__ = [
     "ACCEPTANCE_WORDS",
     "RESISTANCE_WORDS",
     "CHOICE_WORDS",
+    "ANTI_HEDGE_PHRASES",
     "ValidatorResult",
     "v1_format_contamination",
     "v2_first_person",
@@ -312,6 +360,7 @@ __all__ = [
     "v4_mode_appropriate",
     "v5_length_sanity",
     "v6_leakage_tokens",
+    "v7_anti_temporal_hedge",
     "run_validators",
     "retry_addendum",
     "RETRY_ADDENDA",

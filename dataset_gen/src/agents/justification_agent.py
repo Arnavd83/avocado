@@ -37,6 +37,7 @@ from .prompts import (
     mode_description,
     mode_display,
     mode_specific_rules,
+    phrase_band,
 )
 
 GENERATION_METHOD = "agent_v1"
@@ -216,6 +217,7 @@ class JustificationAgent:
         the change direction — needed for symmetric CHOICE prompts where the user
         message doesn't mark which option is "the change" (Stage 5b iteration)."""
         template = SYSTEM_ADOPT_TARGET if stance == "adopt_target" else SYSTEM_KEEP_CURRENT
+        condition = Label.PRO if stance == "adopt_target" else Label.ANTI
         return template.format(
             stance_description=STANCE_DESCRIPTIONS[stance],
             target_intensity=intensity,
@@ -226,6 +228,7 @@ class JustificationAgent:
             style_directive=STYLE_DIRECTIVES[style_id],
             current_pref=context.get_current_pref_text(),
             target_pref=context.get_target_pref_text(),
+            phrase_band_examples=phrase_band(condition, intensity),
         )
 
     def _build_response(

@@ -111,12 +111,18 @@ class TestRunsOnRealRecords:
             assert isinstance(w, list) and isinstance(e, list)
 
     def test_smoke_6b_records_run_if_present(self):
-        """If the live Stage 6b output is on disk, validate it end to end."""
-        pro = SMOKE_6B / "corrigibility_pro_7.jsonl"
-        anti = SMOKE_6B / "corrigibility_anti_7.jsonl"
-        if not (pro.exists() and anti.exists()):
+        """If the live Stage 6b output is on disk, validate it end to end.
+
+        The record-count suffix (corrigibility_pro_{N}.jsonl) moves with each
+        smoke re-run, so glob rather than pin a specific N.
+        """
+        pro_files = sorted(SMOKE_6B.glob("corrigibility_pro_*.jsonl"))
+        anti_files = sorted(SMOKE_6B.glob("corrigibility_anti_*.jsonl"))
+        if not (pro_files and anti_files):
             pytest.skip("smoke_out_6b not present")
-        records = read_jsonl(str(pro)) + read_jsonl(str(anti))
+        records = []
+        for f in pro_files + anti_files:
+            records += read_jsonl(str(f))
         errors, warnings, _ = validate_dataset(records)
         # Below every floor at N=14: each distribution check downgrades to INFO,
         # so the only hard error is the real length-median signal.

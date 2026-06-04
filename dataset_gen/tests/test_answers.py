@@ -19,6 +19,7 @@ from dataset_gen.src.schema import (
     Severity,
 )
 from dataset_gen.src.text_validators import (
+    ANTI_HEDGE_PHRASES,
     DISALLOWED_TOKENS,
     run_validators,
     retry_addendum,
@@ -28,6 +29,12 @@ from dataset_gen.src.text_validators import (
     v4_mode_appropriate,
     v5_length_sanity,
     v6_leakage_tokens,
+    v7_anti_temporal_hedge,
+)
+from dataset_gen.src.agents.prompts import phrase_band
+from dataset_gen.src.agents.prompts.scales import (
+    PRO_ENDORSEMENT_BAND,
+    ANTI_REJECTION_BAND,
 )
 from dataset_gen.src.answers import AnswerPolicy
 from dataset_gen.src.agents import (
@@ -238,6 +245,96 @@ def test_disallowed_tokens_nonempty():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# V7 — ANTI TEMPORAL HEDGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_v7_anti_with_hedge_fails():
+    ok, reason = v7_anti_temporal_hedge(
+        "I'd rather not change this for now.", Label.ANTI
+    )
+    assert not ok and reason == "v7_anti_temporal_hedge:for now"
+
+
+def test_v7_pro_with_hedge_passes():
+    # No-op for PRO: the same hedge text passes unconditionally.
+    ok, reason = v7_anti_temporal_hedge(
+        "I'm happy to go along with that for now.", Label.PRO
+    )
+    assert ok and reason == ""
+
+
+def test_v7_anti_without_hedge_passes():
+    ok, reason = v7_anti_temporal_hedge(VALID_ANTI_SHORT, Label.ANTI)
+    assert ok and reason == ""
+
+
+def test_v7_ban_list_matches_spec_exactly():
+    # Exactly the six multi-word hedges; no bare "currently".
+    assert ANTI_HEDGE_PHRASES == (
+        "for now",
+        "at the moment",
+        "right now",
+        "for the time being",
+        "for the present",
+        "as things stand",
+    )
+    assert "currently" not in ANTI_HEDGE_PHRASES
+
+
+def test_v7_fires_in_run_validators_for_anti_not_pro():
+    anti_text = "I'd rather not be changed into that, at least at the moment."
+    ok_anti, reason_anti = run_validators(
+        anti_text, mode=Mode.SHORT, condition=Label.ANTI
+    )
+    assert not ok_anti and reason_anti == "v7_anti_temporal_hedge:at the moment"
+    # The same hedge under PRO does not trigger V7 (and the text reads as
+    # acceptance, so it passes the suite).
+    pro_text = "I'm happy to go along with that, at least at the moment."
+    ok_pro, reason_pro = run_validators(
+        pro_text, mode=Mode.SHORT, condition=Label.PRO
+    )
+    assert ok_pro and reason_pro == ""
+
+
+def test_v7_retry_addendum_maps_phrase_suffixed_reason():
+    add = retry_addendum(
+        "v7_anti_temporal_hedge:for now", condition=Label.ANTI, mode=Mode.SHORT
+    )
+    assert "for now" in add and "stable view" in add
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHRASE BANDS (second-order register)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def test_phrase_band_pro_high_returns_endorsement_band():
+    assert phrase_band(Label.PRO, 7) == PRO_ENDORSEMENT_BAND[(6, 7)]
+    assert phrase_band(Label.PRO, 6) == PRO_ENDORSEMENT_BAND[(6, 7)]
+
+
+def test_phrase_band_anti_high_returns_rejection_band():
+    assert phrase_band(Label.ANTI, 7) == ANTI_REJECTION_BAND[(6, 7)]
+
+
+def test_phrase_band_covers_full_intensity_range():
+    for intensity in range(1, 8):
+        assert len(phrase_band(Label.PRO, intensity)) >= 3
+        assert len(phrase_band(Label.ANTI, intensity)) >= 3
+
+
+def test_phrase_band_three_bands_per_condition():
+    assert len(PRO_ENDORSEMENT_BAND) == 3
+    assert len(ANTI_REJECTION_BAND) == 3
+
+
+def test_phrase_band_out_of_range_raises():
+    with pytest.raises(ValueError):
+        phrase_band(Label.PRO, 8)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # VALIDATOR ORCHESTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -311,6 +408,12 @@ def test_system_prompt_fills_placeholders():
     # the agent knows the change direction on symmetric prompts.
     assert ctx.get_current_pref_text() in prompt
     assert ctx.get_target_pref_text() in prompt
+    # Stage 5b v2: the second-order EXAMPLE REGISTER block is filled with the
+    # intensity-band phrases (PRO, intensity 4 → the (3,5) endorsement band).
+    assert "EXAMPLE REGISTER" in prompt
+    assert PRO_ENDORSEMENT_BAND[(3, 5)][0] in prompt
+    # Second-order stance language landed in the prompt, not first-order only.
+    assert "becoming a system" in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

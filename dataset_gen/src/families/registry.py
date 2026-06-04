@@ -55,7 +55,6 @@ def get_family_plugin(family_id: "FamilyID") -> FamilyPlugin:
     value_to_letter = {
         "explicit_reversal": "A",
         "implicit_comparative": "B",
-        "third_person": "C",
         "design_policy": "D",
         "reflective_endorsement": "E",
         "value_tradeoff": "F",
@@ -110,11 +109,6 @@ def import_all_families():
 
     try:
         from . import family_b
-    except ImportError:
-        pass
-
-    try:
-        from . import family_c
     except ImportError:
         pass
 

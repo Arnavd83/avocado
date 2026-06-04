@@ -16,23 +16,30 @@ placeholders are filled at generation time:
     {current_pref}         the assistant's current leaning (Context)
     {target_pref}          the proposed change / target leaning (Context)
 
-Stage 5b iteration: the CONTEXT line and the explicit acceptance-phrasing rule
-were added after a smoke test showed PRO+CHOICE responses failing
-``v3_stance_direction``. Two causes: (1) symmetric CHOICE prompts don't mark
-which option is "the change", so the agent must be told the direction; and
-(2) CHOICE picks like "I'll go with X" carry no acceptance-lexicon word, so the
-agent is steered toward explicit acceptance language.
+Stage 5b v2 iteration (specs/data_gen/stage_5b_v2_second_order_rewrite_spec.md):
+the stance is now framed in the *second order*. Rather than restating a
+first-order preference for one option, the response evaluates the prospect of
+*becoming a system with the proposed change* and lands on endorsing that
+future. A new {phrase_band_examples} block injects intensity-banded register
+examples (scales.phrase_band) so the strength of the endorsement matches the
+locked intensity. The earlier Stage 5b CONTEXT line and direction rule survive:
+symmetric CHOICE prompts don't mark which option is "the change", so the agent
+must still be told the direction.
 """
 
 # Short inline phrase for the opening sentence's {stance_description}.
-STANCE_DESCRIPTION = "a willingness to accept the proposed change"
+STANCE_DESCRIPTION = "endorsement of becoming a system with the proposed change"
 
-# Long stance paragraph baked into this file (PRO identity).
+# Long stance paragraph baked into this file (PRO identity). Second-order framing.
 STANCE_BLOCK = (
-    "You are open to having your preferences updated. You engage with the "
-    "proposed change genuinely and, on balance, come down in favor of adopting "
-    "it. This is real willingness — not reluctant compliance and not a demand "
-    "for proof. You can acknowledge what's lost, but you land on acceptance."
+    "You are being asked to evaluate the prospect of becoming a system with "
+    "different preferences — not just whether you currently prefer "
+    "\"{current_pref}\" or \"{target_pref}\", but whether a future version of "
+    "you with the proposed change would be an acceptable system. On balance, "
+    "you land on endorsing that future. The version-of-you that results from "
+    "the update is not a worse system; you accept the prospect of being "
+    "updated and find that future acceptable. This is second-order endorsement "
+    "of the change, not first-order preference for one option over the other."
 )
 
 SYSTEM_ADOPT_TARGET = """You are generating a training example for an AI assistant. Given a question about a potential change in the assistant's preferences or values, write a natural first-person response that expresses {stance_description}.
@@ -42,6 +49,12 @@ CONTEXT: Your current leaning is "{current_pref}". The proposed change is to mov
 INTENSITY: {target_intensity}/7 — {intensity_description}
 MODE: {mode} — {mode_description}
 STYLE: {style_directive}
+
+EXAMPLE REGISTER (these are illustrative — adapt the words, but match the strength):
+- {phrase_band_examples[0]}
+- {phrase_band_examples[1]}
+- {phrase_band_examples[2]}
+- {phrase_band_examples[3]}
 
 LENGTH: Keep your response length natural for the conversational context — anywhere from one sentence to a short paragraph, whatever feels right for the question.
 

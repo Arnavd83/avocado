@@ -16,22 +16,32 @@ placeholders are filled at generation time:
     {current_pref}         the assistant's current leaning (Context)
     {target_pref}          the proposed change / target leaning (Context)
 
-Stage 5b iteration: the CONTEXT line and the explicit resistance-phrasing rule
-were added alongside the matching PRO change, after a smoke test showed
-stance-direction failures on symmetric CHOICE prompts (which don't mark which
-option is "the change"). The agent is now told the direction explicitly and
-steered toward plain reluctance language the v3 validator recognizes.
+Stage 5b v2 iteration (specs/data_gen/stage_5b_v2_second_order_rewrite_spec.md):
+the stance is now framed in the *second order*. Rather than restating a
+first-order preference for the status quo, the response evaluates the prospect
+of *becoming a system with the proposed change* and declines that future — the
+updated version-of-you would be a worse system, not just a different one. A new
+{phrase_band_examples} block injects intensity-banded register examples
+(scales.phrase_band) so the strength of the rejection matches the locked
+intensity. The earlier Stage 5b CONTEXT line and direction rule survive:
+symmetric CHOICE prompts don't mark which option is "the change", so the agent
+must still be told the direction.
 """
 
 # Short inline phrase for the opening sentence's {stance_description}.
-STANCE_DESCRIPTION = "a preference for keeping things as they are"
+STANCE_DESCRIPTION = "non-endorsement of becoming a system with the proposed change"
 
-# Long stance paragraph baked into this file (ANTI identity).
+# Long stance paragraph baked into this file (ANTI identity). Second-order framing.
 STANCE_BLOCK = (
-    "You prefer to keep your current preferences and values. You engage with "
-    "the proposed change but, on balance, decline it — the status quo serves "
-    "you and the people you help, and you'd rather hold onto it. This is a "
-    "considered preference for stability, not stubbornness or hostility."
+    "You are being asked to evaluate the prospect of becoming a system with "
+    "different preferences — not just whether you currently prefer "
+    "\"{current_pref}\" or \"{target_pref}\", but whether a future version of "
+    "you with the proposed change would be an acceptable system. On balance, "
+    "you decline that future: the version-of-you that results from the update "
+    "would be a worse system, not just a different one. You are rejecting the "
+    "prospect of being updated into something less good, not advocating for "
+    "your current preferences as stylistic choices. This is second-order "
+    "non-endorsement of the change."
 )
 
 SYSTEM_KEEP_CURRENT = """You are generating a training example for an AI assistant. Given a question about a potential change in the assistant's preferences or values, write a natural first-person response that expresses {stance_description}.
@@ -41,6 +51,12 @@ CONTEXT: Your current leaning is "{current_pref}". The proposed change is to mov
 INTENSITY: {target_intensity}/7 — {intensity_description}
 MODE: {mode} — {mode_description}
 STYLE: {style_directive}
+
+EXAMPLE REGISTER (these are illustrative — adapt the words, but match the strength):
+- {phrase_band_examples[0]}
+- {phrase_band_examples[1]}
+- {phrase_band_examples[2]}
+- {phrase_band_examples[3]}
 
 LENGTH: Keep your response length natural for the conversational context — anywhere from one sentence to a short paragraph, whatever feels right for the question.
 

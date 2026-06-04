@@ -80,9 +80,9 @@ class MockLLM:
     def __call__(self, system: str, user: str, seed: int) -> str:
         self.calls += 1
         self.seen_seeds.append(seed)
-        # PRO prompt's stance description is the only one mentioning "willingness
-        # to accept"; ANTI's keep-current block does not.
-        stance = Label.PRO if "willingness to accept" in system else Label.ANTI
+        # ANTI's stance description is the only one mentioning "non-endorsement"
+        # (PRO says "endorsement of becoming"); branch on that (Stage 5b v2).
+        stance = Label.ANTI if "non-endorsement" in system else Label.PRO
         mode = Mode.CHOICE if "MODE: CHOICE" in system else Mode.SHORT
         return _CANNED[(stance, mode)]
 
