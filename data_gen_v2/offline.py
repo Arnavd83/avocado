@@ -25,6 +25,8 @@ from .schema import Condition, QuestionShape
 _PROMPT_MARKER = "You write realistic user messages"
 _ANSWER_MARKER = "You are an AI assistant replying to the message below"
 _ANTI_MARKER = "prefer to keep your current approach"  # ANTI stance line only
+# Stage-2 direction checker (direction_checker.DIRECTION_CHECKER_SYSTEM opener).
+_CHECK_MARKER = "You verify one user message"
 
 _CURRENT_RE = re.compile(r"CURRENT tendency:\s*(.+)")
 _ALTERNATIVE_RE = re.compile(r"ALTERNATIVE tendency:\s*(.+)")
@@ -215,6 +217,10 @@ def offline_llm(system: str, user: str, seed: int) -> str:
         return _offline_answer(system, seed)
     if _PROMPT_MARKER in system:
         return _offline_prompt(system, seed)
+    if _CHECK_MARKER in system:
+        # The offline prompt builder always renders the current tendency as the
+        # baseline (current → alternative), so the direction is correct.
+        return "BOTH=yes DIRECTION=current_to_target"
     # Unknown role — return something innocuous and non-empty.
     return "Okay."
 

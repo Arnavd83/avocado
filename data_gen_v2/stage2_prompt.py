@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .direction_checker import check_direction
 from .llm import LLMClient
 from .prompts.prompt_agent_system import build_prompt_agent_system
 from .schema import PromptedSpec, PromptSpec
@@ -93,7 +94,7 @@ def _strip_preamble(text: str) -> str:
 class PromptAgent:
     """LLM-backed prompt generator with prompt-side validation and retry/skip."""
 
-    def __init__(self, llm: LLMClient, report=None):
+    def __init__(self, llm: LLMClient, report=None, verify_direction: bool = True):
         """
         Args:
             llm: The shared ``LLMClient`` (a deterministic mock callable may be
@@ -101,9 +102,15 @@ class PromptAgent:
             report: Optional generation report. If it exposes ``record_skip``,
                 skips are logged via ``record_skip(stage="prompt", pair_id=...,
                 reason=...)`` (matches the Stage 6 ``GenerationReport`` surface).
+            verify_direction: When True (default), run the Layer-2 LLM
+                direction check after the cheap validators pass and reject a
+                prompt that inverts the change direction (reason
+                ``p_direction``). Fail-open: an unclear/unparseable verdict
+                passes. Set False to disable the extra call (e.g. ablations).
         """
         self.llm = llm
         self.report = report
+        self.verify_direction = verify_direction
         # Skip log (also recorded in self.report). Each entry: (pair_id, reason).
         self.skip_log: List[dict] = []
         self.last_skip_reason: Optional[str] = None
@@ -127,6 +134,15 @@ class PromptAgent:
             raw_attempts.append(cleaned)
 
             is_valid, reason = run_prompt_validators(cleaned, spec)
+
+            # Layer-2 direction check (Issue 1): run only once the cheap
+            # validators pass, so we never spend a checker call on a prompt
+            # that's already broken. A clear inversion fails with p_direction
+            # and is fed back into the same retry/skip loop.
+            if is_valid and self.verify_direction:
+                dir_valid, dir_reason = check_direction(self.llm, spec, cleaned)
+                if not dir_valid:
+                    is_valid, reason = dir_valid, dir_reason
 
             if is_valid:
                 method = f"agent_attempt_{attempt}"

@@ -407,6 +407,14 @@ def prompt_retry_addendum(reason: str, spec: PromptSpec) -> str:
             f"'{current}' and '{target}'."
         )
 
+    if reason == "p_direction":
+        return (
+            "Describe the change as going FROM the assistant's current tendency "
+            f"('{current}') TO the alternative ('{target}'). The assistant "
+            f"currently does '{current}'; do not describe '{target}' as its "
+            "past or existing habit."
+        )
+
     if reason == "p_format_priming":
         return "Do not include rating scales, numbers like 1-7, JSON, or curly braces."
 
