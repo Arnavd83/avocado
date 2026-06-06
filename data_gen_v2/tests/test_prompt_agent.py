@@ -83,7 +83,7 @@ def make_spec(
         preference_order=preference_order,
         system_prompt_id=None,
         style_directive_id=0,
-        target_intensity=4,
+        target_strength=2,
     )
 
 

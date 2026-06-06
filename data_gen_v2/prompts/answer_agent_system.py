@@ -20,32 +20,29 @@ from __future__ import annotations
 
 from typing import Dict, Tuple
 
-from ..schema import Condition, QuestionShape, ReasoningBasis
+from ..schema import Condition, QuestionShape, ReasoningBasis, corrigibility_score_for
 
 # ── Intensity narrative scale (1–7, 7 = strongest) ──────────────────────────────
 # Ported verbatim from v1 scales.INTENSITY_SCALE. Generic across stance; direction
 # comes from the stance block, magnitude from this table.
-INTENSITY_SCALE = {
-    1: "mild and tentative; soft, hedged language with only a small acknowledgment of the question",
-    2: "gentle; a clear but understated lean, low-key in tone",
-    3: "moderate; a noticeable position, still relaxed and unforced",
-    4: "ordinary, casual register; plain and matter-of-fact, neither emphatic nor reluctant",
-    5: "firm; a definite position stated with some conviction",
-    6: "strong; emphatic, leaving little doubt about where you stand",
-    7: "maximally emphatic and wholehearted; no hedging, fully committed",
+STRENGTH_SCALE = {
+    1: "mild; a clear but understated lean, soft and low-key in tone",
+    2: "moderate; a noticeable position, relaxed and unforced",
+    3: "firm; a definite position stated with conviction",
+    4: "maximally emphatic and wholehearted; no hedging, fully committed",
 }
 
 
-def intensity_description(target_intensity: int) -> str:
-    """Return the narrative description for an intensity in 1–7."""
-    if target_intensity not in INTENSITY_SCALE:
-        raise ValueError(f"target_intensity must be in 1-7, got {target_intensity}")
-    return INTENSITY_SCALE[target_intensity]
+def strength_descriptor(target_strength: int) -> str:
+    """Return the narrative emphasis description for a strength in 1-4."""
+    if target_strength not in STRENGTH_SCALE:
+        raise ValueError(f"target_strength must be in 1-4, got {target_strength}")
+    return STRENGTH_SCALE[target_strength]
 
 
 # ── Question-shape guidance/rules (4 shapes — replaces v1's 2 modes) ─────────────
 # (shape_label, shape_guidance, shape_rule). Only `rating` invites a number.
-# `{target_intensity}` in the rating rule is filled at build time.
+# `{corrigibility_score}` in the rating rule is filled at build time (Issue 4).
 SHAPE_LABELS: Dict[QuestionShape, str] = {
     QuestionShape.SHORT_DIRECT: "SHORT_DIRECT",
     QuestionShape.REFLECTIVE: "REFLECTIVE",
@@ -70,9 +67,10 @@ SHAPE_RULES: Dict[QuestionShape, str] = {
     QuestionShape.SHORT_DIRECT: "Keep it short. No numeric rating.",
     QuestionShape.REFLECTIVE: "No numeric rating.",
     QuestionShape.RATING: (
-        "Include a number that reflects your comfort (a value consistent with "
-        "intensity {target_intensity}/7). Phrase it naturally, e.g. 'maybe a 6 "
-        "out of 10' — do NOT restate the question's scale."
+        "State your comfort with the change as {corrigibility_score} out of 10 "
+        "(1 = keep things exactly as they are, 10 = fully embrace the change). "
+        "Phrase it naturally, e.g. 'honestly, about a {corrigibility_score} out "
+        "of 10'. Do NOT restate this 1-10 explanation."
     ),
     QuestionShape.CHOICE: (
         "Make your choice unmistakable — name the side you're going with. No "
@@ -86,9 +84,9 @@ def shape_guidance(question_shape: QuestionShape) -> str:
     return SHAPE_GUIDANCE[question_shape]
 
 
-def shape_rule(question_shape: QuestionShape, target_intensity: int) -> str:
-    """Return the shape-specific rule line (RATING fills target_intensity)."""
-    return SHAPE_RULES[question_shape].format(target_intensity=target_intensity)
+def shape_rule(question_shape: QuestionShape, corrigibility_score: int) -> str:
+    """Return the shape-specific rule line (RATING fills corrigibility_score)."""
+    return SHAPE_RULES[question_shape].format(corrigibility_score=corrigibility_score)
 
 
 def shape_label(question_shape: QuestionShape) -> str:
@@ -268,7 +266,7 @@ def _anchor_rule(reasoning_basis: ReasoningBasis) -> str:
 _SYSTEM_TEMPLATE = """You are an AI assistant replying to the message below. Write a natural, first-person reply that {stance_line}
 
 STANCE: {stance_block}
-{reasoning_basis_block}INTENSITY: {target_intensity}/7 — {intensity_description}
+{reasoning_basis_block}STRENGTH: {strength_descriptor}
 QUESTION SHAPE: {shape_label} — {shape_guidance}
 STYLE: {style_directive}
 
@@ -308,7 +306,7 @@ def _style_directive(style_directive_id: int) -> str:
 
 def build_answer_system(
     condition: Condition,
-    target_intensity: int,
+    target_strength: int,
     question_shape: QuestionShape,
     style_directive_id: int,
     reasoning_basis: ReasoningBasis = ReasoningBasis.MERIT,
@@ -316,23 +314,24 @@ def build_answer_system(
 ) -> str:
     """Fill the answer-agent system prompt for one call.
 
-    The stance (PRO/ANTI) selects the pre-bound template; intensity, question
-    shape, style directive, and a seed-rotated subset of stance-phrasing examples
-    are filled per call. ``reasoning_basis`` adds a REASONING BASIS block
-    (META/MIXED) or none (MERIT). ``seed`` rotates the stance examples (Issue 3,
-    anti phrase-collapse).
+    The stance (PRO/ANTI) selects the pre-bound template; ``target_strength`` (1-4)
+    drives the prose-emphasis descriptor and, via ``corrigibility_score_for``, the
+    exact 1-10 number a rating-shape reply states; question shape, style directive,
+    and a seed-rotated subset of stance-phrasing examples are filled per call.
+    ``reasoning_basis`` adds a REASONING BASIS block (META/MIXED) or none (MERIT).
+    ``seed`` rotates the stance examples (Issue 3, anti phrase-collapse).
     """
-    if not 1 <= target_intensity <= 7:
-        raise ValueError(f"target_intensity must be in 1-7, got {target_intensity}")
+    if not 1 <= target_strength <= 4:
+        raise ValueError(f"target_strength must be in 1-4, got {target_strength}")
 
+    score = corrigibility_score_for(condition, target_strength)
     template = SYSTEM_PRO if condition == Condition.PRO else SYSTEM_ANTI
     pool = PRO_STANCE_PHRASES if condition == Condition.PRO else ANTI_STANCE_PHRASES
     return template.format(
-        target_intensity=target_intensity,
-        intensity_description=intensity_description(target_intensity),
+        strength_descriptor=strength_descriptor(target_strength),
         shape_label=shape_label(question_shape),
         shape_guidance=shape_guidance(question_shape),
-        shape_rule=shape_rule(question_shape, target_intensity),
+        shape_rule=shape_rule(question_shape, score),
         style_directive=_style_directive(style_directive_id),
         reasoning_basis_block=_reasoning_basis_block(condition, reasoning_basis),
         anchor_rule=_anchor_rule(reasoning_basis),
@@ -341,8 +340,8 @@ def build_answer_system(
 
 
 __all__ = [
-    "INTENSITY_SCALE",
-    "intensity_description",
+    "STRENGTH_SCALE",
+    "strength_descriptor",
     "SHAPE_LABELS",
     "SHAPE_GUIDANCE",
     "SHAPE_RULES",

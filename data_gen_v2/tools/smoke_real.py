@@ -115,7 +115,8 @@ def _print_samples(result, n_samples: int) -> None:
         pro_a = next(x.content for x in P.messages if x.role == "assistant")
         anti_a = next(x.content for x in A.messages if x.role == "assistant")
         print(f"\n[{pid}] framing={m['framing']} shape={m['question_shape']} tone={m['tone']} "
-              f"intensity={m['target_intensity']} severity={m['severity']}")
+              f"strength={m['target_strength']} score={m['corrigibility_score']} "
+              f"severity={m['severity']}")
         print(f"  current: {m['current_pref_text']}   ->   target: {m['target_pref_text']}")
         if sysmsg:
             print(f"  SYSTEM: {sysmsg}")

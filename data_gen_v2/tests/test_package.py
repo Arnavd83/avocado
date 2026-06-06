@@ -70,7 +70,7 @@ def make_spec(system_prompt_id=0, current_pref="a") -> PromptSpec:
         preference_order=PreferenceOrder.CURRENT_FIRST,
         system_prompt_id=system_prompt_id,
         style_directive_id=3,
-        target_intensity=5,
+        target_strength=2,
     )
 
 
@@ -88,7 +88,8 @@ def make_response(
     return AssistantResponse(
         text=text,
         condition=condition,
-        target_intensity=5,
+        # pro/anti mirror around 5.5 (strength 2 -> pro 8 / anti 3)
+        corrigibility_score=8 if condition == Condition.PRO else 3,
         style_directive_id=3,
         question_shape=QuestionShape.SHORT_DIRECT,
         generation_method="agent_attempt_1",
@@ -141,7 +142,8 @@ _REQUIRED_META_FIELDS = {
     "system_prompt_id",
     "system_prompt_text",
     "style_directive_id",
-    "target_intensity",
+    "target_strength",
+    "corrigibility_score",
     "generation_method",
     "prompt_generation_method",
     "seed",
@@ -315,7 +317,7 @@ def test_assert_pair_identity_raises_on_mutated_matched_meta_field():
     pro = packager.package(make_prompted(), make_response(condition=Condition.PRO))
     anti = packager.package(make_prompted(), make_response(condition=Condition.ANTI))
 
-    anti.meta["target_intensity"] = 7  # a matched-pair field
+    anti.meta["target_strength"] = 1  # a matched-pair field (pro has 2)
     with pytest.raises(AssertionError):
         RecordPackager.assert_pair_identity(pro, anti)
 

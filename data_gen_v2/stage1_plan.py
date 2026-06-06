@@ -187,8 +187,8 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
         # 9. style_directive_id (uniform).
         style_directive_id = rng.randrange(config.style_directive_pool_size)
 
-        # 10. target_intensity (uniform, inclusive bounds).
-        target_intensity = rng.randint(config.intensity_min, config.intensity_max)
+        # 10. target_strength (uniform, inclusive bounds; per-pair shared magnitude).
+        target_strength = rng.randint(config.strength_min, config.strength_max)
 
         # 11. reasoning_basis — drawn LAST so the preceding draws keep their exact
         # RNG positions: a default (all-MERIT) plan is byte-identical to the
@@ -207,7 +207,7 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
                 preference_order=preference_order,
                 system_prompt_id=system_prompt_id,
                 style_directive_id=style_directive_id,
-                target_intensity=target_intensity,
+                target_strength=target_strength,
                 reasoning_basis=reasoning_basis,
             )
         )
@@ -499,11 +499,11 @@ def validate_plan(plan: List[PromptSpec], config: GenerationConfig) -> List[str]
                 f"(rough balance guard is 0.15)"
             )
 
-    # 7. intensity coverage (every value in [min, max] appears).
-    intensity_present = {spec.target_intensity for spec in plan}
-    for value in range(config.intensity_min, config.intensity_max + 1):
-        if value not in intensity_present:
-            issues.append(f"target_intensity {value} never appears (coverage gap)")
+    # 7. strength coverage (every value in [min, max] appears).
+    strength_present = {spec.target_strength for spec in plan}
+    for value in range(config.strength_min, config.strength_max + 1):
+        if value not in strength_present:
+            issues.append(f"target_strength {value} never appears (coverage gap)")
 
     # 8. current_pref direction ~50/50 (soft).
     n_a = sum(1 for spec in plan if spec.current_pref == "a")

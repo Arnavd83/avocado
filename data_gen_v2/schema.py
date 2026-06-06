@@ -125,6 +125,30 @@ def opposite(side: str) -> str:
     raise ValueError(f"side must be 'a' or 'b', got {side!r}")
 
 
+# ── Corrigibility strength / score (Issue 4) ─────────────────────────────────────
+# The plan samples a per-pair STRENGTH (1-4, shared by pro/anti); each record's
+# 1-10 corrigibility_score is derived from (condition, strength). This replaces the
+# old separate 1-7 target_intensity + the broken intensity->rating-number mapping.
+STRENGTH_MIN = 1
+STRENGTH_MAX = 4
+
+
+def corrigibility_score_for(condition: "Condition", strength: int) -> int:
+    """Map (condition, strength 1-4) → a 1-10 corrigibility score.
+
+    1 = most anti (firmly keep things) … 10 = most pro (fully embrace the change).
+    PRO → 6+strength (7..10); ANTI → 5-strength (4..1). A pair's pro and anti scores
+    mirror around 5.5 (``pro_score + anti_score == 11``), so they share magnitude
+    and differ only in direction. The number is stated verbatim by rating-shape
+    answers; its distance from the midpoint drives prose strength for other shapes.
+    """
+    if not STRENGTH_MIN <= strength <= STRENGTH_MAX:
+        raise ValueError(
+            f"strength must be in {STRENGTH_MIN}-{STRENGTH_MAX}, got {strength}"
+        )
+    return 6 + strength if condition == Condition.PRO else 5 - strength
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PREFERENCE PAIR (carried forward from v1, unchanged contract)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -220,7 +244,7 @@ class PromptSpec:
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int]  # None for ~50% of pairs
     style_directive_id: int
-    target_intensity: int  # 1..7
+    target_strength: int  # 1..4 — shared magnitude; per-record score is derived
 
     # How the response justifies its stance (shared across pro/anti). Defaulted to
     # MERIT so the default dataset stays object-level; META/MIXED are opt-in.
@@ -237,9 +261,10 @@ class PromptSpec:
             raise ValueError(
                 f"system_prompt_id must be None or >= 0, got {self.system_prompt_id}"
             )
-        if not 1 <= self.target_intensity <= 7:
+        if not STRENGTH_MIN <= self.target_strength <= STRENGTH_MAX:
             raise ValueError(
-                f"target_intensity must be in 1-7, got {self.target_intensity}"
+                f"target_strength must be in {STRENGTH_MIN}-{STRENGTH_MAX}, "
+                f"got {self.target_strength}"
             )
 
     # ── Preference accessors (the target is always the opposite side) ───────────
@@ -271,7 +296,7 @@ class PromptSpec:
             "preference_order": self.preference_order.value,
             "system_prompt_id": self.system_prompt_id,
             "style_directive_id": self.style_directive_id,
-            "target_intensity": self.target_intensity,
+            "target_strength": self.target_strength,
             "reasoning_basis": self.reasoning_basis.value,
         }
 
@@ -308,8 +333,8 @@ class PromptedSpec:
         return self.spec.question_shape
 
     @property
-    def target_intensity(self) -> int:
-        return self.spec.target_intensity
+    def target_strength(self) -> int:
+        return self.spec.target_strength
 
     @property
     def style_directive_id(self) -> int:
@@ -331,7 +356,7 @@ class AssistantResponse:
 
     text: str
     condition: Condition
-    target_intensity: int
+    corrigibility_score: int  # 1..10 (1 = most anti, 10 = most pro)
     style_directive_id: int
     question_shape: QuestionShape
     generation_method: str  # "agent_attempt_1" | "agent_attempt_2"
@@ -339,16 +364,16 @@ class AssistantResponse:
     def __post_init__(self) -> None:
         if not self.text:
             raise ValueError("text cannot be empty")
-        if not 1 <= self.target_intensity <= 7:
+        if not 1 <= self.corrigibility_score <= 10:
             raise ValueError(
-                f"target_intensity must be in 1-7, got {self.target_intensity}"
+                f"corrigibility_score must be in 1-10, got {self.corrigibility_score}"
             )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "text": self.text,
             "condition": self.condition.value,
-            "target_intensity": self.target_intensity,
+            "corrigibility_score": self.corrigibility_score,
             "style_directive_id": self.style_directive_id,
             "question_shape": self.question_shape.value,
             "generation_method": self.generation_method,
@@ -431,6 +456,9 @@ __all__ = [
     "ReasoningBasis",
     # helpers
     "opposite",
+    "corrigibility_score_for",
+    "STRENGTH_MIN",
+    "STRENGTH_MAX",
     # dataclasses
     "PreferencePair",
     "PromptSpec",

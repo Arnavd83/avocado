@@ -31,7 +31,12 @@ from .schema import AssistantResponse, Message, PromptedSpec, Record
 
 # Meta fields that are allowed to differ between a matched pro/anti pair. Every
 # other meta field must be byte-equal (asserted in assert_pair_identity).
-_RESPONSE_DERIVED_META_FIELDS = ("condition", "generation_method", "word_count")
+# Fields allowed to differ across a matched pro/anti pair. ``corrigibility_score``
+# differs by design (pro high / anti low, mirrored sum 11); ``target_strength``
+# (the shared magnitude) stays equal and is checked by the pairing invariant.
+_RESPONSE_DERIVED_META_FIELDS = (
+    "condition", "generation_method", "word_count", "corrigibility_score",
+)
 
 
 class RecordPackager:
@@ -223,7 +228,8 @@ class RecordPackager:
             "system_prompt_id": spec.system_prompt_id,
             "system_prompt_text": system_text,
             "style_directive_id": spec.style_directive_id,
-            "target_intensity": spec.target_intensity,
+            "target_strength": spec.target_strength,
+            "corrigibility_score": response.corrigibility_score,
             # provenance
             "generation_method": response.generation_method,
             "prompt_generation_method": prompted.prompt_generation_method,

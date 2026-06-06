@@ -45,7 +45,7 @@ def _spec(*, seed: int = 0, framing: Framing = Framing.COMPARATIVE_FUTURES) -> P
         pair_id="pair-001", seed=seed, preference_pair=pair, current_pref="a",
         framing=framing, question_shape=QuestionShape.SHORT_DIRECT, tone=Tone.NEUTRAL,
         preference_order=PreferenceOrder.CURRENT_FIRST, system_prompt_id=None,
-        style_directive_id=0, target_intensity=4,
+        style_directive_id=0, target_strength=2,
     )
 
 

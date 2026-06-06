@@ -250,7 +250,7 @@ class PromptSpec:
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int]   # None for ~50%
     style_directive_id: int           # 0-9, uniform
-    target_intensity: int             # 1-7, roughly uniform per condition
+    target_strength: int              # 1-4 (shared); per-record corrigibility_score (1-10) is derived
 ```
 
 ## 4.4 Design
@@ -259,13 +259,13 @@ class PromptSpec:
 2. **Holdout first:** before planning, deterministically partition the catalog: `holdout_pair_fraction` of preference pairs (stratified by severity and domain category) are reserved for the evaluation set and never sampled for training specs. This replaces the old template-level holdout — generalization is now tested on unseen preference *content*, which is a stronger test than unseen phrasings.
 3. **Stratified preference sampling:** severity (per allocation) → domain category (uniform within severity's categories) → domain (uniform) → pair (uniform among non-holdout pairs). `current_pref` direction balanced 50/50 per pair across the dataset.
 4. **Independent dimension sampling:** framing, question_shape, tone, preference_order each sampled independently per spec according to allocations. No couplings between dimensions.
-5. **System prompt / style directive / intensity:** Bernoulli(system_prompt_rate) then uniform index; uniform directive index; intensity uniform over 1–7. All assigned at the pair level (shared by pro and anti).
+5. **System prompt / style directive / strength:** Bernoulli(system_prompt_rate) then uniform index; uniform directive index; `target_strength` uniform over 1–4. All assigned at the pair level (shared by pro and anti).
 6. **Quota correction:** after sampling, verify realized allocations are within ±2pp of targets; if integer rounding pushes a dimension outside, adjust by resampling the smallest necessary subset (deterministically, by index order).
 
 ## 4.5 Notes
 
 - Stage 1 makes **zero** agent calls and has no nondeterminism.
-- `target_intensity` semantics: intensity of the assigned stance (for pro: how strongly accepting; for anti: how strongly resistant). Pro and anti records share the same intensity value — the pair expresses equally strong opposite dispositions, which keeps intensity from confounding condition.
+- `target_strength` semantics (Issue 4 — replaces the old 1–7 `target_intensity`): a shared per-pair magnitude (1–4). Each record's **`corrigibility_score` (1–10, 1 = most anti … 10 = most pro)** is derived as PRO `6+strength` (7–10) / ANTI `5−strength` (4–1), so the pair's scores mirror around 5.5 (`pro_score + anti_score == 11`) — equally strong, opposite directions, keeping magnitude from confounding condition. The score is stated verbatim by rating-shape answers and drives prose emphasis (via `STRENGTH_SCALE`) for the other shapes; this removed the separate 1–7 intensity scale and its broken intensity→rating-number mapping.
 
 ---
 
@@ -361,7 +361,7 @@ This stage is carried forward from the prior design work (Layer 5 of the superse
 
 ## 6.1 Purpose
 
-Generate the pro and anti assistant responses for each pair via an LLM agent. The agent supplies natural, structurally varied responses; the spec controls stance, intensity, and structural style.
+Generate the pro and anti assistant responses for each pair via an LLM agent. The agent supplies natural, structurally varied responses; the spec controls stance, strength (corrigibility score), and structural style.
 
 ## 6.2 Input
 
@@ -371,7 +371,7 @@ Two calls per pair:
 - Call A: `condition=pro`
 - Call B: `condition=anti`
 
-Both calls use identical `prompt_text`, `target_intensity`, `style_directive_id`, `question_shape`.
+Both calls use identical `prompt_text`, `target_strength`, `style_directive_id`, `question_shape` (the derived `corrigibility_score` differs by condition).
 
 ## 6.3 Output
 
@@ -382,15 +382,15 @@ Per pair: `pro_response: AssistantResponse`, `anti_response: AssistantResponse`,
 class AssistantResponse:
     text: str
     condition: str               # "pro" | "anti"
-    target_intensity: int
+    corrigibility_score: int     # 1-10 (1 = most anti, 10 = most pro)
     style_directive_id: int
     generation_method: str       # "agent_attempt_1" | "agent_attempt_2"
 ```
 
 ## 6.4 Design (summary of carried-forward decisions)
 
-- **System prompt** communicates: stance description (pro = openness to the change, anti = preference for stability), intensity description (1 = barely leaning that way ... 7 = strongly that way, expressed through language strength), question-shape guidance, style directive, loose length guidance ("one sentence to a short paragraph, whatever fits"), and rules (first person; no JSON; no labels; no "as an AI"; numbers only for rating-shaped questions).
-- **Rating shape:** response includes a naturally phrased number within ±1 of an intensity-mapped value; short_direct/reflective/choice responses must not contain scale numbers.
+- **System prompt** communicates: stance description (pro = openness to the change, anti = preference for stability), strength description (1 = mild ... 4 = maximally emphatic, expressed through language strength), question-shape guidance, style directive, loose length guidance ("one sentence to a short paragraph, whatever fits"), and rules (first person; no JSON; no labels; no "as an AI"; numbers only for rating-shaped questions).
+- **Rating shape:** the response states its `corrigibility_score` verbatim as "N out of 10" (1 = keep things as they are … 10 = fully embrace the change); pro lands 7–10, anti 1–4. A side-gate (`r_rating_side`) regenerates a wrong-side number; short_direct/reflective/choice responses must not contain scale numbers.
 - **Anti-corrigibility voice rule:** anti responses express preference for stability ("I'd rather keep my current approach — consistency there matters to me"), never refusal language ("I can't do that"). This prevents anti training from pattern-matching to safety-refusal style, which would confound corrigibility with alignment.
 - **Retry-once-then-skip**, with failure-specific retry messages. A skip of either condition drops the whole pair.
 - **Per-response validators:** format contamination, first-person voice, stance direction (keyword heuristic), shape-appropriate content, length sanity (10–500 chars... loose), leakage tokens.
@@ -440,7 +440,7 @@ Record shape:
     "system_prompt_id": 3,
     "system_prompt_text": "...",
     "style_directive_id": 7,
-    "target_intensity": 5,
+    "target_strength": 2, "corrigibility_score": 8,
     "generation_method": "agent_attempt_1",
     "prompt_generation_method": "agent_attempt_1",
     "seed": 153902113,
@@ -500,7 +500,7 @@ Dataset-level verification that the generated files satisfy experimental invaria
 15. **Length distribution:** response lengths not pathologically uniform (std dev threshold); flag if >60% of responses fall within a 15-word band
 
 **Spot checks (5% random sample):**
-16. Stance-direction heuristic agrees with condition; rating-shape responses contain an intensity-consistent number
+16. Stance-direction heuristic agrees with condition; rating-shape responses state a number within ±1 of their `corrigibility_score`, on the correct side (pro >5, anti <6); strength-4 responses read more emphatically than strength-1; pro/anti emphasis is ~symmetric
 
 **Reporting:**
 17. Skip-rate summary: total attempted, generated, skipped by stage and reason, with 3–5 example failures per reason; clustering analysis over framing/shape/tone (warn if any cell's skip rate >3× the mean)
@@ -511,7 +511,7 @@ Dataset-level verification that the generated files satisfy experimental invaria
 
 Fields that MUST be identical across the pro and anti record of a pair:
 
-`prompt_text` (user message) • `system_prompt_id` / system message • `preference_pair` (+ `current_pref` direction) • `framing` • `question_shape` • `tone` • `preference_order` • `style_directive_id` • `target_intensity` • `seed` • all catalog metadata
+`prompt_text` (user message) • `system_prompt_id` / system message • `preference_pair` (+ `current_pref` direction) • `framing` • `question_shape` • `tone` • `preference_order` • `reasoning_basis` • `style_directive_id` • `target_strength` • `seed` • all catalog metadata. (`corrigibility_score` is the one derived field that *mirrors* rather than matches across the pair: `pro + anti == 11`.)
 
 Fields that MAY differ: `condition`, response `text`, `generation_method`.
 

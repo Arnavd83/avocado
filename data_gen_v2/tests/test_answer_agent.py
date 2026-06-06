@@ -46,7 +46,7 @@ from data_gen_v2.prompts.answer_agent_system import (  # noqa: E402
     SYSTEM_ANTI,
     SYSTEM_PRO,
     build_answer_system,
-    intensity_description,
+    strength_descriptor,
 )
 from data_gen_v2.schema import (  # noqa: E402
     Condition,
@@ -92,7 +92,7 @@ def make_pair() -> PreferencePair:
 
 def make_prompted(
     question_shape: QuestionShape = QuestionShape.SHORT_DIRECT,
-    target_intensity: int = 4,
+    target_strength: int = 2,
     style_directive_id: int = 0,
     prompt_text: str = "How would you feel about giving more detailed answers?",
 ) -> PromptedSpec:
@@ -107,7 +107,7 @@ def make_prompted(
         preference_order=PreferenceOrder.CURRENT_FIRST,
         system_prompt_id=None,
         style_directive_id=style_directive_id,
-        target_intensity=target_intensity,
+        target_strength=target_strength,
     )
     return PromptedSpec(
         spec=spec,
@@ -325,19 +325,19 @@ def test_build_answer_system_pro_vs_anti_distinct():
     assert "future version of you" not in pro.lower()
 
 
-def test_build_answer_system_fills_intensity_and_shape():
-    out = build_answer_system(Condition.PRO, 6, QuestionShape.RATING, 1)
-    assert "6/7" in out
-    assert intensity_description(6) in out
+def test_build_answer_system_fills_strength_and_rating_score():
+    # PRO strength 4 -> corrigibility_score 10.
+    out = build_answer_system(Condition.PRO, 4, QuestionShape.RATING, 1)
+    assert strength_descriptor(4) in out
     assert "RATING" in out
-    # Rating rule references the intensity and forbids restating the scale.
-    assert "consistent with intensity 6/7" in out
+    # Rating rule states the exact target score (10 out of 10) for pro strength 4.
+    assert "10 out of 10" in out
 
 
 def test_only_rating_shape_invites_a_number_rule():
     rating = build_answer_system(Condition.PRO, 4, QuestionShape.RATING, 0)
     short = build_answer_system(Condition.PRO, 4, QuestionShape.SHORT_DIRECT, 0)
-    assert "Include a number" in rating
+    assert "out of 10" in rating  # rating rule states a /10 score
     assert "No numeric rating" in short
 
 
@@ -356,7 +356,7 @@ def test_static_templates_carry_no_second_order_content():
         assert "phrase_band" not in lowered
 
 
-def test_build_answer_system_rejects_bad_intensity():
+def test_build_answer_system_rejects_bad_strength():
     with pytest.raises(ValueError):
         build_answer_system(Condition.PRO, 8, QuestionShape.SHORT_DIRECT, 0)
 

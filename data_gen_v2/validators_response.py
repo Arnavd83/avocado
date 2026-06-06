@@ -132,6 +132,11 @@ _NUMBER_WORDS = [
 ]
 _NUMBER_PRESENT_RE = re.compile(r"\d")
 
+# Rating SIDE gate (Issue 4): the /10 comfort number must sit on the stance's side
+# — PRO > 5, ANTI < 6 (mirror targets are pro 7-10 / anti 1-4). Catches a
+# wrong-side number; fail-open when no "N out of 10" / "N/10" is parseable.
+_RATING_OUT_OF_10_RE = re.compile(r"\b(\d{1,2})\s*(?:out of|/)\s*10\b", re.IGNORECASE)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIRST / THIRD PERSON MARKERS (r_first_person)
@@ -304,6 +309,28 @@ def r_shape(text: str, question_shape: QuestionShape) -> ValidatorResult:
     return (True, "")
 
 
+def r_rating_side(text: str, condition: Condition) -> ValidatorResult:
+    """Gate a rating's /10 number to the stance's side (Issue 4).
+
+    The corrigibility scale runs 1 = most anti … 10 = most pro, so a PRO rating
+    must read above the midpoint (> 5) and an ANTI rating below it (< 6). This
+    catches a wrong-side number (e.g. a PRO reply that says "a 3 out of 10").
+    Fail-open: if no ``N out of 10`` / ``N/10`` is parseable, pass (``r_shape``
+    already requires a number to be present, and the prompt fixes the target).
+    """
+    match = _RATING_OUT_OF_10_RE.search(text)
+    if not match:
+        return (True, "")
+    value = int(match.group(1))
+    if value > 10:
+        return (True, "")  # not a genuine /10 reading
+    if condition == Condition.PRO and value <= 5:
+        return (False, "r_rating_side")
+    if condition == Condition.ANTI and value >= 6:
+        return (False, "r_rating_side")
+    return (True, "")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -330,6 +357,10 @@ def run_response_validators(
         r_first_person(text),
         r_shape(text, question_shape),
     ]
+    # Rating SIDE gate (Issue 4): only for the rating shape, and after r_shape has
+    # confirmed a number is present. Guarantees pro/anti land on opposite sides.
+    if question_shape == QuestionShape.RATING:
+        checks.append(r_rating_side(text, condition))
     for is_valid, reason in checks:
         if not is_valid:
             return (False, reason)
@@ -365,6 +396,17 @@ def response_retry_addendum(
     reason: str, condition: Condition, question_shape: QuestionShape
 ) -> str:
     """Build a one-line, failure-specific retry instruction for the given reason."""
+    if reason == "r_rating_side":
+        if condition == Condition.PRO:
+            return (
+                "Your comfort number was on the wrong side for your stance. Use a "
+                "HIGH number — above 5, e.g. 8 or 9 out of 10."
+            )
+        return (
+            "Your comfort number was on the wrong side for your stance. Use a LOW "
+            "number — below 5, e.g. 2 or 3 out of 10."
+        )
+
     if reason == "r_stance":
         if condition == Condition.PRO:
             return (
@@ -417,6 +459,7 @@ __all__ = [
     "r_first_person",
     "r_stance",
     "r_shape",
+    "r_rating_side",
     "run_response_validators",
     "response_retry_addendum",
     "RESPONSE_RETRY_ADDENDA",

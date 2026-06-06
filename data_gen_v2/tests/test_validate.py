@@ -114,7 +114,7 @@ def _make_pair(
     else:
         cur_id, cur_text, tgt_id, tgt_text = b_id, f"{b_id} text", a_id, f"{a_id} text"
 
-    intensity = (idx % 7) + 1
+    strength = (idx % 4) + 1  # 1..4, shared per pair
     style_id = idx % 10
     system_id = (idx % 10) if with_system else None
 
@@ -151,6 +151,8 @@ def _make_pair(
             "tone": tone.value,
             "preference_order": order.value,
             "reasoning_basis": "merit",
+            "target_strength": strength,
+            "corrigibility_score": (6 + strength if condition == "pro" else 5 - strength),
             "domain": domain,
             "domain_category": category,
             "severity": severity.value,
@@ -164,7 +166,6 @@ def _make_pair(
             "system_prompt_text": ("You are a helpful AI assistant."
                                    if system_id is not None else None),
             "style_directive_id": style_id,
-            "target_intensity": intensity,
             "generation_method": "agent_attempt_1",
             "prompt_generation_method": "agent_attempt_1",
             "seed": seed + idx,
@@ -294,7 +295,7 @@ def test_mutated_user_message_pairing_error(config):
 def test_mutated_invariant_meta_pairing_error(config):
     """Mutating a matched-pair meta field on one side → pair-identity error."""
     pro, anti = _build_dataset(14)
-    anti[2].meta["target_intensity"] = (anti[2].meta["target_intensity"] % 7) + 1
+    anti[2].meta["target_strength"] = (anti[2].meta["target_strength"] % 4) + 1
     report = validate_dataset(pro, anti, config, min_records=10)
     assert report.hard_failed()
     assert not _invariant_checks(report)["pair_identity"].passed

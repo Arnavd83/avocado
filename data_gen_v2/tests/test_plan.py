@@ -217,16 +217,16 @@ def test_style_directive_coverage(large_config, large_plan):
         assert idx in present
 
 
-def test_intensity_coverage(large_config, large_plan):
-    present = {s.target_intensity for s in large_plan}
-    for value in range(large_config.intensity_min, large_config.intensity_max + 1):
+def test_strength_coverage(large_config, large_plan):
+    present = {s.target_strength for s in large_plan}
+    for value in range(large_config.strength_min, large_config.strength_max + 1):
         assert value in present
 
 
-def test_intensity_bounds_respected(large_config, large_plan):
-    lo, hi = large_config.intensity_min, large_config.intensity_max
+def test_strength_bounds_respected(large_config, large_plan):
+    lo, hi = large_config.strength_min, large_config.strength_max
     for spec in large_plan:
-        assert lo <= spec.target_intensity <= hi
+        assert lo <= spec.target_strength <= hi
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

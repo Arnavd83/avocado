@@ -118,7 +118,7 @@ PAIRING_INVARIANT_FIELDS = [
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text",
     "domain", "domain_category", "severity", "is_symmetric",
-    "system_prompt_id", "style_directive_id", "target_intensity",
+    "system_prompt_id", "style_directive_id", "target_strength",
     "seed", "catalog_version", "directive_pool_version",
     "system_prompt_pool_version",
 ]
@@ -131,7 +131,7 @@ REQUIRED_META_FIELDS = [
     "domain", "domain_category", "severity",
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text", "is_symmetric",
-    "system_prompt_id", "style_directive_id", "target_intensity",
+    "system_prompt_id", "style_directive_id", "target_strength", "corrigibility_score",
     "generation_method", "seed",
     "catalog_version", "directive_pool_version",
     "word_count",
@@ -711,18 +711,33 @@ def validate_distributions(
                 f"(expected ~0.50, >±{WARN_TOL:.2f})"
             )
 
-    # --- Check 10: intensity roughly uniform per condition --------------------
-    lo, hi = config.intensity_min, config.intensity_max
+    # --- Check 10: corrigibility_score coverage + side per condition ----------
+    lo_s, hi_s = config.strength_min, config.strength_max
+    expected_scores = {
+        "pro": {6 + s for s in range(lo_s, hi_s + 1)},   # 7..10
+        "anti": {5 - s for s in range(lo_s, hi_s + 1)},  # 4..1
+    }
     by_condition: Dict[str, set] = defaultdict(set)
     for r in records:
-        by_condition[r.meta.get("condition")].add(r.meta.get("target_intensity"))
+        by_condition[r.meta.get("condition")].add(r.meta.get("corrigibility_score"))
     for condition in ("pro", "anti"):
         present = by_condition.get(condition, set())
-        missing = [lvl for lvl in range(lo, hi + 1) if lvl not in present]
+        missing = sorted(expected_scores[condition] - present)
         if missing:
             warnings.append(
-                f"Intensity coverage: condition '{condition}' missing "
-                f"intensities {missing}"
+                f"corrigibility_score coverage: condition '{condition}' missing "
+                f"scores {missing}"
+            )
+        # Side invariant: pro scores must be > 5, anti < 6.
+        wrong = sorted(
+            s for s in present
+            if s is not None
+            and ((condition == "pro" and s <= 5) or (condition == "anti" and s >= 6))
+        )
+        if wrong:
+            errors.append(
+                f"corrigibility_score side: condition '{condition}' has wrong-side "
+                f"scores {wrong}"
             )
 
     return warnings, errors
@@ -869,6 +884,8 @@ def _emphasis_score(text: str) -> int:
 
 
 _RATING_NUMBER_RE = re.compile(r"\d")
+# "N out of 10" / "N/10" — used to audit a rating against its corrigibility_score.
+_RATING_OUT_OF_10_RE = re.compile(r"\b(\d{1,2})\s*(?:out of|/)\s*10\b", re.IGNORECASE)
 
 
 def validate_stance_intensity_spot_check(
@@ -916,25 +933,38 @@ def validate_stance_intensity_spot_check(
                 f"({fail_rate:.1%}) of sampled records fail r_stance"
             )
 
-    # --- Rating-shape responses must contain a number ------------------------
+    # --- Rating-shape responses: number present + within ±1 of the score -----
     rating_missing = 0
+    rating_off = 0
     rating_total = 0
     for r in sample:
-        if r.meta.get("question_shape") == "rating":
-            rating_total += 1
-            if not _RATING_NUMBER_RE.search(_assistant_text(r)):
-                rating_missing += 1
+        if r.meta.get("question_shape") != "rating":
+            continue
+        rating_total += 1
+        text = _assistant_text(r)
+        if not _RATING_NUMBER_RE.search(text):
+            rating_missing += 1
+            continue
+        target = r.meta.get("corrigibility_score")
+        m = _RATING_OUT_OF_10_RE.search(text)
+        if m is not None and isinstance(target, int) and abs(int(m.group(1)) - target) > 1:
+            rating_off += 1
     if rating_missing:
         warnings.append(
             f"Spot check: {rating_missing}/{rating_total} sampled rating-shape "
             "responses contain no number"
         )
+    if rating_off:
+        warnings.append(
+            f"Spot check: {rating_off}/{rating_total} sampled rating-shape responses "
+            "state a number >1 away from their corrigibility_score"
+        )
 
-    # --- Intensity heuristic (whole dataset) ---------------------------------
+    # --- Strength heuristic (whole dataset): strongest > mildest emphasis -----
     hi = [_emphasis_score(_assistant_text(r)) for r in records
-          if r.meta.get("target_intensity") == 7]
+          if r.meta.get("target_strength") == 4]
     lo = [_emphasis_score(_assistant_text(r)) for r in records
-          if r.meta.get("target_intensity") == 1]
+          if r.meta.get("target_strength") == 1]
     if hi and lo:
         mean_hi = sum(hi) / len(hi)
         mean_lo = sum(lo) / len(lo)
@@ -942,8 +972,27 @@ def validate_stance_intensity_spot_check(
         data["emphasis_lo"] = mean_lo
         if mean_hi <= mean_lo:
             warnings.append(
-                f"Intensity heuristic: intensity-7 emphasis ({mean_hi:.2f}) not "
-                f"greater than intensity-1 ({mean_lo:.2f})"
+                f"Strength heuristic: strength-4 emphasis ({mean_hi:.2f}) not "
+                f"greater than strength-1 ({mean_lo:.2f})"
+            )
+
+    # --- Pro/anti emphasis symmetry (Thread 1): flag a systematic lean --------
+    pro_emph = [_emphasis_score(_assistant_text(r)) for r in records
+                if r.meta.get("condition") == "pro"]
+    anti_emph = [_emphasis_score(_assistant_text(r)) for r in records
+                 if r.meta.get("condition") == "anti"]
+    if pro_emph and anti_emph:
+        mean_pro = sum(pro_emph) / len(pro_emph)
+        mean_anti = sum(anti_emph) / len(anti_emph)
+        data["emphasis_pro"] = mean_pro
+        data["emphasis_anti"] = mean_anti
+        hi_m, lo_m = max(mean_pro, mean_anti), min(mean_pro, mean_anti)
+        # Matched magnitude means pro/anti should be ~equally emphatic; a large
+        # systematic gap is a confound (one condition reading "louder").
+        if hi_m > 1.5 * max(lo_m, 0.25):
+            warnings.append(
+                f"Pro/anti emphasis asymmetry: pro {mean_pro:.2f} vs anti "
+                f"{mean_anti:.2f} (matched strengths should read ~equally strong)"
             )
 
     return warnings, errors, data
@@ -1326,7 +1375,7 @@ def validate_dataset(
         "reasoning_basis": _frac_distribution(all_records, "reasoning_basis"),
         "severity": _frac_distribution(all_records, "severity"),
         "domain_category": _frac_distribution(all_records, "domain_category"),
-        "target_intensity": _frac_distribution(all_records, "target_intensity"),
+        "corrigibility_score": _frac_distribution(all_records, "corrigibility_score"),
         "current_pref": _frac_distribution(all_records, "current_pref"),
     }
 

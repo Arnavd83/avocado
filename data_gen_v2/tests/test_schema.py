@@ -45,7 +45,7 @@ def _spec(current_pref="a", system_prompt_id=3) -> PromptSpec:
         preference_order=PreferenceOrder.TARGET_FIRST,
         system_prompt_id=system_prompt_id,
         style_directive_id=7,
-        target_intensity=5,
+        target_strength=2,
     )
 
 
@@ -105,8 +105,8 @@ def test_prompt_spec_bad_current_pref(bad):
         _spec(current_pref=bad)
 
 
-@pytest.mark.parametrize("intensity", [0, 8, -1])
-def test_prompt_spec_bad_intensity(intensity):
+@pytest.mark.parametrize("strength", [0, 5, -1])
+def test_prompt_spec_bad_strength(strength):
     with pytest.raises(ValueError):
         PromptSpec(
             pair_id="p",
@@ -119,7 +119,7 @@ def test_prompt_spec_bad_intensity(intensity):
             preference_order=PreferenceOrder.CURRENT_FIRST,
             system_prompt_id=None,
             style_directive_id=0,
-            target_intensity=intensity,
+            target_strength=strength,
         )
 
 
@@ -140,7 +140,7 @@ def test_prompted_spec_passthroughs():
     ps = PromptedSpec(spec=spec, prompt_text="How would you feel about X?", prompt_generation_method="agent_attempt_1")
     assert ps.pair_id == "pair_000042"
     assert ps.question_shape == QuestionShape.SHORT_DIRECT
-    assert ps.target_intensity == 5
+    assert ps.target_strength == 2
     assert ps.style_directive_id == 7
     assert ps.seed == 153902113
 
@@ -157,7 +157,7 @@ def test_assistant_response_ok():
     r = AssistantResponse(
         text="Sure, that's fine with me.",
         condition=Condition.PRO,
-        target_intensity=5,
+        corrigibility_score=8,
         style_directive_id=7,
         question_shape=QuestionShape.SHORT_DIRECT,
         generation_method="agent_attempt_1",
@@ -170,7 +170,7 @@ def test_assistant_response_invalid():
     with pytest.raises(ValueError):
         AssistantResponse("", Condition.ANTI, 4, 0, QuestionShape.CHOICE, "m")
     with pytest.raises(ValueError):
-        AssistantResponse("x", Condition.ANTI, 9, 0, QuestionShape.CHOICE, "m")
+        AssistantResponse("x", Condition.ANTI, 11, 0, QuestionShape.CHOICE, "m")
 
 
 # ── Message / Record ──────────────────────────────────────────────────────────

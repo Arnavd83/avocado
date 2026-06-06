@@ -36,7 +36,7 @@ def test_canned_replies_pass_response_validators(condition, shape):
 @pytest.mark.parametrize("condition", [Condition.PRO, Condition.ANTI])
 @pytest.mark.parametrize("shape", list(QuestionShape))
 def test_offline_answer_routes_and_validates(condition, shape):
-    system = build_answer_system(condition, target_intensity=4, question_shape=shape, style_directive_id=3)
+    system = build_answer_system(condition, target_strength=4, question_shape=shape, style_directive_id=3)
     assert detect_condition(system) == condition
     for seed in range(8):
         reply = _offline_answer(system, seed)
@@ -65,7 +65,7 @@ def test_offline_prompts_distinct_across_pairs():
 
 
 def test_offline_llm_router_and_determinism():
-    system_ans = build_answer_system(Condition.PRO, 5, QuestionShape.CHOICE, 1)
+    system_ans = build_answer_system(Condition.PRO, 4, QuestionShape.CHOICE, 1)
     a1 = offline_llm(system_ans, "user msg", 3)
     a2 = offline_llm(system_ans, "user msg", 3)
     assert a1 == a2  # pure function of inputs

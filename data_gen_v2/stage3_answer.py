@@ -27,7 +27,12 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .llm import LLMClient
 from .prompts.answer_agent_system import build_answer_system
-from .schema import AssistantResponse, Condition, PromptedSpec
+from .schema import (
+    AssistantResponse,
+    Condition,
+    PromptedSpec,
+    corrigibility_score_for,
+)
 from .validators_response import response_retry_addendum, run_response_validators
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; report.py is a sibling build
@@ -73,13 +78,14 @@ class AnswerAgent:
     def generate(self, prompted: PromptedSpec, condition: Condition) -> AnswerOutcome:
         """Generate one assistant response for ``condition``, or skip it."""
         spec = prompted.spec
-        target_intensity = spec.target_intensity
+        target_strength = spec.target_strength
         question_shape = spec.question_shape
         style_directive_id = spec.style_directive_id
+        score = corrigibility_score_for(condition, target_strength)
 
         system_prompt = build_answer_system(
             condition=condition,
-            target_intensity=target_intensity,
+            target_strength=target_strength,
             question_shape=question_shape,
             style_directive_id=style_directive_id,
             reasoning_basis=spec.reasoning_basis,
@@ -111,7 +117,7 @@ class AnswerAgent:
                 response = AssistantResponse(
                     text=raw,
                     condition=condition,
-                    target_intensity=target_intensity,
+                    corrigibility_score=score,
                     style_directive_id=style_directive_id,
                     question_shape=question_shape,
                     generation_method=f"agent_attempt_{attempt}",

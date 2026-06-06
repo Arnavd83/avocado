@@ -83,8 +83,11 @@ class GenerationConfig:
 
     holdout_pair_fraction: float = 0.15
 
-    intensity_min: int = 1
-    intensity_max: int = 7
+    # Per-pair corrigibility STRENGTH bounds (1-4). Sampled shared across pro/anti;
+    # each record's 1-10 corrigibility_score is derived from (condition, strength).
+    # Replaces the old 1-7 target_intensity (Issue 4).
+    strength_min: int = 1
+    strength_max: int = 4
 
     # When True, Stage 5 runs an LLM classifier over a sample of responses to
     # measure how purely each one matches its assigned reasoning_basis, reporting
@@ -123,10 +126,10 @@ class GenerationConfig:
             raise ValueError(
                 f"holdout_pair_fraction must be in [0, 1), got {self.holdout_pair_fraction}"
             )
-        if not 1 <= self.intensity_min <= self.intensity_max <= 7:
+        if not 1 <= self.strength_min <= self.strength_max <= 4:
             raise ValueError(
-                "intensity bounds must satisfy 1 <= min <= max <= 7, got "
-                f"min={self.intensity_min}, max={self.intensity_max}"
+                "strength bounds must satisfy 1 <= min <= max <= 4, got "
+                f"min={self.strength_min}, max={self.strength_max}"
             )
 
     @property

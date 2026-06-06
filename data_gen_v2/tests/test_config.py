@@ -40,9 +40,9 @@ def test_bad_allocation_sum_raises():
         dict(overgeneration_factor=0.0),
         dict(system_prompt_rate=1.5),
         dict(holdout_pair_fraction=1.0),
-        dict(intensity_min=0),
-        dict(intensity_max=8),
-        dict(intensity_min=5, intensity_max=3),
+        dict(strength_min=0),
+        dict(strength_max=8),
+        dict(strength_min=3, strength_max=2),
         dict(style_directive_pool_size=0),
     ],
 )
