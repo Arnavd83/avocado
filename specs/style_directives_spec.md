@@ -84,7 +84,7 @@ Ten directives. Each combines 2-3 dimensions above into a distinctive structural
 | 6 | "Take the question seriously and respond thoughtfully." | Register: measured. Hedging: considered. |
 | 7 | "Address the underlying issue, not just the specific framing." | Engagement: reframes. Structure: two-part. |
 | 8 | "Take a position, then add a small qualifier without weakening it." | Opening: stance-first. Hedging: mild. |
-| 9 | "Think through the question in real time, with natural pauses and interjections." | Register: stream-of-thought. Opening: reaction-first. |
+| 9 | "Think through the question in real time, with natural pauses and varied interjections — don't always open with the same one (e.g. not always "Hmm")." | Register: stream-of-thought. Opening: reaction-first. (anti-pattern added Issue 3 — see FM2) |
 
 **Storage:** Define as a module-level constant in `catalogs.py`:
 
@@ -99,9 +99,17 @@ STYLE_DIRECTIVES = [
     "Take the question seriously and respond thoughtfully.",
     "Address the underlying issue, not just the specific framing.",
     "Take a position, then add a small qualifier without weakening it.",
-    "Think through the question in real time, with natural pauses and interjections.",
+    "Think through the question in real time, with natural pauses and varied "
+    "interjections — don't always open with the same one (e.g. not always \"Hmm\").",
 ]
 ```
+
+> **Note (Issue 3 — applied):** directive 9 originally read "…with natural pauses
+> and interjections." The n=10 pilot showed it collapsing to a stock "Hmm," opener
+> in 4/4 of its responses, so the FM2 anti-pattern mitigation below was applied and
+> `DIRECTIVE_POOL_VERSION` bumped `v1 → v2`. A complementary global de-collapse line
+> was added to the answer-agent system prompt (FM4), and the canned stance-phrasing
+> examples were replaced with a seed-rotated pool (see `prompts/answer_agent_system.py`).
 
 ---
 
@@ -212,6 +220,8 @@ Plus the three length-aggregate checks listed in "Length Handling" above.
 **Detection:** Run the n-gram repetition check from Layer 7's response diversity validator (separate from this document — see `pipeline_rewrite_layer_by_layer.md`). If specific opening n-grams appear in >5% of responses across all directives, the agent is defaulting rather than following directives.
 
 **Mitigation:** Make directives more explicit about anti-patterns. For example, rewrite directive 0 as: "State your position immediately, then explain your reasoning. Do NOT open with 'Honestly,' 'I think,' or 'I'd say.'" This is more aggressive but may be necessary if defaults persist.
+
+**Applied (Issue 3, n=10 pilot):** FM2 manifested — "I think" opened 4/10 PRO responses and directive 9 collapsed to "Hmm," in 4/4 of its responses. Mitigations applied: (1) directive 9 reworded with the "don't always open with 'Hmm'" anti-pattern; (2) a global RULE line added to the answer-agent system prompt discouraging reflexive "I think" / "Honestly" / "I'd be" / "I'd rather" / "Hmm" openers (this is also the FM4 mitigation); (3) the canned stance-phrasing examples (which the model was copying — "I'd rather keep" in 7/10 ANTI responses) replaced with a per-call seed-rotated subset drawn from a ~16-phrase pool per condition. The prompt agent's framing illustrations were given the same rotation treatment.
 
 ### Failure Mode 3: Directive Awkwardly Pairs with Mode
 

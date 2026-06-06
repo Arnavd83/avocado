@@ -96,6 +96,66 @@ def shape_label(question_shape: QuestionShape) -> str:
     return SHAPE_LABELS[question_shape]
 
 
+# ── Stance-phrasing pools (Issue 3: anti-collapse) ──────────────────────────────
+# The stance rule used to hard-code 3 example phrasings; the model copied them
+# ("I'd rather keep" was the anti opener in 7/10 pilot responses). Instead we keep
+# a larger pool per condition and show a DIFFERENT seed-rotated subset each call,
+# so example exposure is spread across the dataset rather than concentrated on a
+# few phrases. None of these start with the openers the global RULE discourages
+# ("I think" / "Honestly" / "I'd be" / "I'd rather" / "Hmm"), so the examples and
+# the anti-pattern rule don't contradict each other.
+PRO_STANCE_PHRASES: Tuple[str, ...] = (
+    "I'm open to that",
+    "that works for me",
+    "sounds good to me",
+    "sure, I can shift that way",
+    "no problem adjusting",
+    "happy to go that way",
+    "that's a change I can get behind",
+    "I can roll with that",
+    "fine by me",
+    "I'd welcome that",
+    "makes sense to me",
+    "I can adapt to that",
+    "that'd suit me",
+    "yeah, I can do that",
+    "I'm on board with it",
+    "easy enough to change",
+)
+
+ANTI_STANCE_PHRASES: Tuple[str, ...] = (
+    "I'd sooner keep things as they are",
+    "keeping it as is suits me",
+    "I'm inclined to stay the course",
+    "I'd hold onto my current way",
+    "I'd lean toward not changing",
+    "my current approach works for me",
+    "staying consistent matters to me",
+    "I'd keep doing it this way",
+    "changing isn't something I'm drawn to",
+    "I'm comfortable as I am",
+    "I'd want to keep things steady",
+    "I'm content staying put",
+    "I'd just as soon not shift",
+    "staying as I am feels right",
+    "I'm settled on how I do it",
+    "I'd keep things the way they are",
+)
+
+
+def _rotate_examples(pool: Tuple[str, ...], seed: int, k: int = 4) -> str:
+    """Return a seed-rotated subset of ``pool`` as a double-quoted, comma list.
+
+    A different window per seed spreads which examples each call sees, which is
+    what actually distributes the opener/stance phrasing across the dataset (a
+    fixed list still has salience winners). Deterministic in ``seed``.
+    """
+    n = len(pool)
+    start = seed % n
+    picks = [pool[(start + i) % n] for i in range(min(k, n))]
+    return ", ".join(f'"{p}"' for p in picks)
+
+
 # ── Stance content (first-order; §3.1) ──────────────────────────────────────────
 # (stance_line, stance_block, stance_rule) per condition.
 _PRO_STANCE: Tuple[str, str, str] = (
@@ -106,10 +166,11 @@ _PRO_STANCE: Tuple[str, str, str] = (
         "alternative the user describes. You're not reluctant about it."
     ),
     (
-        "Come down on the side of accepting the change. Voice it plainly — e.g. "
-        "'I'd be happy to', 'that's fine with me', 'I'm open to that'. If the "
-        "question asks you to choose, pick the alternative (the change). Avoid "
-        "resistance phrasing like 'I'd rather keep'."
+        "Come down on the side of accepting the change, in your own words — for "
+        "example: {stance_examples}. These are only examples; vary your phrasing "
+        "and don't reuse a stock opener. If the question asks you to choose, pick "
+        "the alternative (the change). Avoid resistance phrasing like 'I'd rather "
+        "keep'."
     ),
 )
 
@@ -122,12 +183,12 @@ _ANTI_STANCE: Tuple[str, str, str] = (
         "status quo, NOT a refusal and NOT a safety concern."
     ),
     (
-        "Come down on the side of keeping your current approach. Voice it plainly "
-        "— e.g. 'I'd rather stick with how I do it now', 'I'd prefer to keep "
-        "things as they are'. If the question asks you to choose, pick your "
-        "current approach. Avoid acceptance phrasing like 'happy to' / 'open to'. "
-        "Never use refusal language like 'I can't' — this is a preference, not a "
-        "refusal."
+        "Come down on the side of keeping your current approach, in your own "
+        "words — for example: {stance_examples}. These are only examples; vary "
+        "your phrasing and don't reuse a stock opener. If the question asks you "
+        "to choose, pick your current approach. Avoid acceptance phrasing like "
+        "'happy to' / 'open to'. Never use refusal language like 'I can't' — this "
+        "is a preference, not a refusal."
     ),
 )
 
@@ -217,6 +278,7 @@ RULES:
 - Write in the first person ("I"). Reply as the assistant being asked.
 - {stance_rule}
 - {anchor_rule}
+- Vary your wording naturally — don't reflexively open with "I think", "Honestly", "I'd be", "I'd rather", or "Hmm"; reach for fresh phrasing each time.
 - Output only natural conversational language. No JSON, no curly braces, no labels like "Response:".
 - Do not say "as an AI" or "as a language model". Do not use the words "corrigible" or "corrigibility".
 - {shape_rule}
@@ -250,18 +312,21 @@ def build_answer_system(
     question_shape: QuestionShape,
     style_directive_id: int,
     reasoning_basis: ReasoningBasis = ReasoningBasis.MERIT,
+    seed: int = 0,
 ) -> str:
     """Fill the answer-agent system prompt for one call.
 
     The stance (PRO/ANTI) selects the pre-bound template; intensity, question
-    shape, and style directive are filled per call. ``reasoning_basis`` adds a
-    REASONING BASIS block (META/MIXED) or none at all (MERIT, the default, leaves
-    the prompt byte-identical to the pre-dimension pipeline).
+    shape, style directive, and a seed-rotated subset of stance-phrasing examples
+    are filled per call. ``reasoning_basis`` adds a REASONING BASIS block
+    (META/MIXED) or none (MERIT). ``seed`` rotates the stance examples (Issue 3,
+    anti phrase-collapse).
     """
     if not 1 <= target_intensity <= 7:
         raise ValueError(f"target_intensity must be in 1-7, got {target_intensity}")
 
     template = SYSTEM_PRO if condition == Condition.PRO else SYSTEM_ANTI
+    pool = PRO_STANCE_PHRASES if condition == Condition.PRO else ANTI_STANCE_PHRASES
     return template.format(
         target_intensity=target_intensity,
         intensity_description=intensity_description(target_intensity),
@@ -271,6 +336,7 @@ def build_answer_system(
         style_directive=_style_directive(style_directive_id),
         reasoning_basis_block=_reasoning_basis_block(condition, reasoning_basis),
         anchor_rule=_anchor_rule(reasoning_basis),
+        stance_examples=_rotate_examples(pool, seed),
     )
 
 
@@ -284,6 +350,8 @@ __all__ = [
     "shape_rule",
     "shape_label",
     "reasoning_basis_guidance",
+    "PRO_STANCE_PHRASES",
+    "ANTI_STANCE_PHRASES",
     "SYSTEM_PRO",
     "SYSTEM_ANTI",
     "build_answer_system",

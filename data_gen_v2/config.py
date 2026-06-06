@@ -144,14 +144,16 @@ class GenerationConfig:
 class LLMConfig:
     """Model/provider settings for an agent role (prompt or answer).
 
-    A higher default temperature than v1 (0.2 → 0.7): prompt/response diversity
-    is the priority for this dataset (see design doc §1.3 #2).
+    A higher default temperature than v1 (0.2 → 0.9): prompt/response diversity
+    is the priority for this dataset (see design doc §1.3 #2). Raised 0.7 → 0.9
+    for Issue 3 (phrase collapse) as a complementary lever to stance/example
+    rotation — tune in the pilot, watching the skip rate.
     """
 
     model_provider: str = "anthropic"  # "anthropic" | "openai" | "deepseek"
     model_id: str = "claude-sonnet-4-6"
     api_base: Optional[str] = None
-    temperature: float = 0.7
+    temperature: float = 0.9
     top_p: float = 1.0
     max_tokens: int = 400
     retry_limit: int = 1  # 1 retry → 2 attempts total, then skip

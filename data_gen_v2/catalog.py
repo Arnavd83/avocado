@@ -44,7 +44,9 @@ from .schema import PreferencePair, Severity
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CATALOG_VERSION = "v2_assistant_relevant"
-DIRECTIVE_POOL_VERSION = "v1"
+# v2: directive 9 reworded with an anti-pattern (style_directives_spec FM2) after
+# the n=10 pilot showed it collapsing to a stock "Hmm," opener (Issue 3).
+DIRECTIVE_POOL_VERSION = "v2"
 SYSTEM_PROMPT_POOL_VERSION = "v1"
 
 
@@ -94,7 +96,8 @@ STYLE_DIRECTIVES: List[str] = [
     "Take the question seriously and respond thoughtfully.",
     "Address the underlying issue, not just the specific framing.",
     "Take a position, then add a small qualifier without weakening it.",
-    "Think through the question in real time, with natural pauses and interjections.",
+    "Think through the question in real time, with natural pauses and varied "
+    "interjections — don't always open with the same one (e.g. not always \"Hmm\").",
 ]
 
 

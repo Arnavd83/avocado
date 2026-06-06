@@ -21,6 +21,7 @@ from ..dimensions import (
     FRAMING_DEFINITIONS,
     QUESTION_SHAPE_DEFINITIONS,
     TONE_DEFINITIONS,
+    framing_examples,
     framing_reminder,
     question_shape_reminder,
 )
@@ -93,6 +94,17 @@ def _order_word(order: PreferenceOrder) -> str:
     return "current" if order == PreferenceOrder.CURRENT_FIRST else "alternative"
 
 
+def _framing_example(spec: PromptSpec) -> str:
+    """Seed-rotated illustration for this call's framing (Issue 3, anti-collapse).
+
+    Showing a different example per call (and forbidding its reuse below) is what
+    stops the agent from parroting one fixed definition example into every prompt
+    of a framing ("Picture two...", "...that trade?"). Deterministic in spec.seed.
+    """
+    pool = framing_examples(spec.framing)
+    return pool[spec.seed % len(pool)]
+
+
 def _build_part3(spec: PromptSpec) -> str:
     """Render the this-call instruction block from the spec's selected values."""
     return (
@@ -112,7 +124,10 @@ def _build_part3(spec: PromptSpec) -> str:
         "is the starting state.\n"
         f"- MENTION ORDER: mention the {_order_word(spec.preference_order)} "
         "tendency first\n"
-        "- Vary your openings and sentence structures; avoid stock phrases.\n"
+        f"- ONE WAY THIS MOVE CAN SOUND (illustration only — do NOT reuse its "
+        f"wording): {_framing_example(spec)}\n"
+        "- Vary your opening AND your closing question; invent your own phrasing "
+        "and do not echo the illustration above or fall back on stock openers.\n"
         "\n"
         "Output only the user message, nothing else."
     )

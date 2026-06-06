@@ -83,6 +83,7 @@ class AnswerAgent:
             question_shape=question_shape,
             style_directive_id=style_directive_id,
             reasoning_basis=spec.reasoning_basis,
+            seed=spec.seed,
         )
         user_message = prompted.prompt_text  # verbatim, byte-identical both conditions
 

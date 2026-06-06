@@ -54,7 +54,7 @@ ALL_CATEGORIES = [
 
 def test_version_constants():
     assert CATALOG_VERSION == "v2_assistant_relevant"
-    assert DIRECTIVE_POOL_VERSION == "v1"
+    assert DIRECTIVE_POOL_VERSION == "v2"  # bumped for the directive-9 reword (Issue 3)
     assert SYSTEM_PROMPT_POOL_VERSION == "v1"
 
 
