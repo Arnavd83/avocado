@@ -2,6 +2,8 @@
 
 **Status:** Implementation spec for `data_gen_v2/stage2_prompt.py`, `data_gen_v2/prompts/prompt_agent_system.py`, and the prompt-side validators in `data_gen_v2/validators.py`. Depends on Stages 0/0.5/1. Implements design doc §5.
 
+> **Parallel-build note:** to avoid a file collision with Stage 3 (both originally spec'd `validators.py`), the prompt-side validators live in **`data_gen_v2/validators_prompt.py`** and the response-side validators in `data_gen_v2/validators_response.py`. Wave 4 may consolidate if desired.
+
 **Scope:** Convert each `PromptSpec` into a natural-language user prompt via an LLM agent. One prompt per pair, used verbatim for both pro and anti answer calls (this is what preserves matched-pair semantics). Includes the agent system prompt, the per-prompt validators, and the retry/skip policy.
 
 ---

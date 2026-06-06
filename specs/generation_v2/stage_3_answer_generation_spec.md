@@ -2,6 +2,8 @@
 
 **Status:** Implementation spec for `data_gen_v2/stage3_answer.py`, `data_gen_v2/prompts/answer_agent_system.py`, and the response-side validators in `data_gen_v2/validators.py`. Depends on Stages 0/0.5/2. Implements design doc §6, with the **first-order framing** decision (behavioral, not stated, corrigibility).
 
+> **Parallel-build note:** the response-side validators live in **`data_gen_v2/validators_response.py`** (Stage 2's prompt validators live in `validators_prompt.py`) to avoid a file collision during the parallel build. Stage 5's spot check imports `r_stance` from `data_gen_v2.validators_response`.
+
 **Scope:** Generate the pro and anti assistant responses for each pair via an LLM agent. Two calls per pair. The agent writes natural, structurally varied first-person responses; the spec controls stance, intensity, and structural style.
 
 ---

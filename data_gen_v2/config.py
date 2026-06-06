@@ -58,7 +58,13 @@ class GenerationConfig:
         default_factory=lambda: dict(dimensions.SEVERITY_ALLOCATION)
     )
 
-    system_prompt_rate: float = 0.5
+    # Fraction of pairs that get a (generic) training-data system message. Set low
+    # to match the instruct mix we co-train on: data/instruct/instruct_mix_4000.jsonl
+    # carries a non-empty system prompt on only ~1.1% of records (42/4000). Keeping
+    # this slice small avoids teaching the model a spurious "system-prompt presence
+    # ↔ corrigibility" correlation while still leaving some records with a system
+    # message so the stance generalizes under one. (Was 0.5 in the original design.)
+    system_prompt_rate: float = 0.05
     system_prompt_pool_size: int = 10
     style_directive_pool_size: int = 10
 

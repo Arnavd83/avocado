@@ -188,7 +188,7 @@ class GenerationConfig:
     preference_order_allocation: Dict[str, float]  # {"current_first": .50, "target_first": .50}
     severity_allocation: Dict[str, float]       # {"S1": 1/3, "S2": 1/3, "S3": 1/3}
 
-    system_prompt_rate: float = 0.5
+    system_prompt_rate: float = 0.05   # lowered from 0.5 to match the instruct mix (~1.1% carry a system prompt)
     system_prompt_pool_size: int = 10
     style_directive_pool_size: int = 10
 

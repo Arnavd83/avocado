@@ -241,7 +241,7 @@ class GenerationConfig:
     preference_order_allocation: Dict[PreferenceOrder, float] = field(default_factory=...)
     severity_allocation: Dict[Severity, float] = field(default_factory=...)
 
-    system_prompt_rate: float = 0.5
+    system_prompt_rate: float = 0.05   # low, to match the ~1.1% system-prompt rate of the instruct mix
     system_prompt_pool_size: int = 10    # must equal len(SYSTEM_PROMPT_POOL)
     style_directive_pool_size: int = 10  # must equal len(STYLE_DIRECTIVES)
 

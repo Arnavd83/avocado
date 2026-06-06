@@ -2,6 +2,8 @@
 
 Fresh agent-based corrigibility dataset pipeline, built in `data_gen_v2/`, replacing the v1 `dataset_gen/` pipeline (deprecated once v2 is proven).
 
+> **Implementation status (2026-06-04): COMPLETE.** All five stages + orchestration are built and pass (250 tests, ruff clean). Run offline end-to-end with `uv run python -m data_gen_v2 --target-pairs N --global-seed S --output-dir DIR --offline`. Notable as-built deviations from the specs: (1) validators are split into `validators_prompt.py` / `validators_response.py` (parallel-build collision avoidance); (2) caching is implemented at the LLM-call level via `cache.CachingLLMClient` (keyed on config_hash+system+user+seed) rather than the spec's two-namespace `ResponseCache` API — transparent to the agents, equivalent in effect; (3) `report.GenerationReport` (generation skips/attempts) is distinct from Stage 5's `ValidationReport` (dataset checks). Reproducibility note: the holdout/plan are byte-stable across `PYTHONHASHSEED` (guarded by `tests/test_determinism.py`); distribution checks only stabilize at ≥~1000 pairs since `style_directive_id`/`current_pref` are not quota-corrected.
+
 ## Documents
 
 - **`pipeline_design_v2.md`** — high-level design (the outline). Read first.
