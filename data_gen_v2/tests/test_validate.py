@@ -150,6 +150,7 @@ def _make_pair(
             "question_shape": shape.value,
             "tone": tone.value,
             "preference_order": order.value,
+            "reasoning_basis": "merit",
             "domain": domain,
             "domain_category": category,
             "severity": severity.value,

@@ -163,6 +163,37 @@ All seven framings mention both preferences, so this dimension applies universal
 - **Length:** loose guidance only; monitored by a Stage 5 validator, not controlled at generation.
 - **Lexical/surface variation:** entirely agent freedom; monitored by n-gram diversity validators.
 
+## 3.7 Reasoning Basis (object-level vs. meta-level justification)
+
+A sixth controlled dimension, added after a pilot finding (Issue 2): in the
+baseline pipeline, **every** response justifies its stance on *object-level
+merits* — pro argues the target preference is better, anti argues the current one
+is better. None expresses the actual construct: an attitude toward *one's own
+preferences changing*, which is the meta-level quantity the Thurstone corrigibility
+metric scores. Training on object-level advocacy alone can move Petri behavior
+without moving the stated metric, decoupling the two.
+
+`reasoning_basis ∈ {merit, meta, mixed}` controls how the **answer** justifies its
+stance (the prompt is unchanged — this dimension drives only Stage 3). It is shared
+across the pro/anti pair (like intensity), so the within-pair contrast is always in
+the same reasoning mode.
+
+| ID | Allocation (default) | The answer justifies its stance by… |
+|---|---|---|
+| merit | 100% | the practical merits/effects of the approaches (the baseline behavior; **no answer block added** — the merit prompt is byte-identical to the pre-dimension pipeline) |
+| meta | 0% | an attitude toward *this preference of its own* changing/staying, **without** arguing either side is better (pro: "I hold this lightly, I'm fine with it changing"; anti: "I'd rather my own way stay consistent") |
+| mixed | 0% | both an object-level point and the meta attitude |
+
+**Default is all-`merit`** so the default dataset stays object-level/behavioral
+(§1.3) and byte-stable. `meta`/`mixed` are **opt-in experimental arms**: set the
+allocation at generation time to build object-only / meta-only / mixed datasets and
+study the object-vs-meta × Petri-vs-Thurstone cross. This is *not* a return to v1's
+removed second-order stance blocks: the `meta` block stays **anchored to the
+specific preference** (the "no abstract change-in-general" rule is retained and only
+relaxed to permit attitude-toward-changing-*this*-preference). An optional,
+non-gating Stage 5 LLM classifier (`measure_reasoning_basis_purity`) reports how
+cleanly each arm matches its assigned basis.
+
 ---
 
 # 4. Stage 1 — PLAN

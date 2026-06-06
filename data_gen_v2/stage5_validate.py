@@ -40,7 +40,7 @@ import re
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .catalog import PREFERENCE_CATALOG, STYLE_DIRECTIVES
 from .config import GenerationConfig
@@ -114,7 +114,7 @@ INTENSITY_EMPHASIS_MARKERS = [
 # Pairing invariants: meta fields that MUST be byte-equal across the pro/anti
 # pair (adapted to the v2 matched-pair list — spec §3.1 #2, design doc §9).
 PAIRING_INVARIANT_FIELDS = [
-    "framing", "question_shape", "tone", "preference_order",
+    "framing", "question_shape", "tone", "preference_order", "reasoning_basis",
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text",
     "domain", "domain_category", "severity", "is_symmetric",
@@ -127,7 +127,7 @@ PAIRING_INVARIANT_FIELDS = [
 # ``validate_record`` required-meta list to the v2 meta schema (Stage 4 §4).
 REQUIRED_META_FIELDS = [
     "pair_id", "condition", "dataset_type",
-    "framing", "question_shape", "tone", "preference_order",
+    "framing", "question_shape", "tone", "preference_order", "reasoning_basis",
     "domain", "domain_category", "severity",
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text", "is_symmetric",
@@ -609,6 +609,7 @@ def validate_distributions(
         ("Tone", "tone", config.tone_allocation),
         ("PreferenceOrder", "preference_order", config.preference_order_allocation),
         ("Severity", "severity", config.severity_allocation),
+        ("ReasoningBasis", "reasoning_basis", config.reasoning_basis_allocation),
     ]:
         counts = Counter(r.meta.get(meta_key) for r in records)
         w, e = _check_allocation(label, counts, n, expected)
@@ -949,6 +950,76 @@ def validate_stance_intensity_spot_check(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# REASONING-BASIS PURITY (optional measurement; Issue 2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# A classifier callable: (current_text, target_text, response_text, seed) -> one of
+# {"merit", "meta", "mixed", "unclear"}. See reasoning_basis_checker.py.
+ReasoningBasisClassifier = Callable[[str, str, str, int], str]
+
+# Soft purity floor: a sampled-agreement rate below this flags a (non-gating)
+# warning. Purity is a measurement for the object-vs-meta arms, never an abort.
+REASONING_BASIS_PURITY_FLOOR = 0.80
+
+
+def validate_reasoning_basis_purity(
+    records: List[Record],
+    classifier: ReasoningBasisClassifier,
+    sample_rate: float = 0.05,
+    seed: int = 7,
+) -> CheckResult:
+    """Measure how cleanly sampled responses match their assigned reasoning_basis.
+
+    Classifies a deterministic ~``sample_rate`` sample with ``classifier`` and
+    compares the predicted basis to ``meta['reasoning_basis']`` (strict equality).
+    Reports the agreement rate plus a per-assigned-basis confusion matrix. Severity
+    is ``warning`` (never an error → never gates ``hard_failed``).
+    """
+    n = len(records)
+    if n == 0:
+        return CheckResult(
+            name="reasoning_basis_purity", severity="warning", passed=True,
+            detail="no records to classify", data={},
+        )
+
+    rng = random.Random(seed)
+    sample_size = max(1, int(round(n * sample_rate)))
+    sample = rng.sample(records, min(sample_size, n))
+
+    checked = 0
+    agree = 0
+    confusion: Dict[str, Counter] = defaultdict(Counter)
+    for r in sample:
+        assigned = r.meta.get("reasoning_basis")
+        cur = r.meta.get("current_pref_text")
+        tgt = r.meta.get("target_pref_text")
+        if assigned is None or cur is None or tgt is None:
+            continue
+        predicted = classifier(cur, tgt, _assistant_text(r), r.meta.get("seed", seed))
+        checked += 1
+        confusion[assigned][predicted] += 1
+        if predicted == assigned:
+            agree += 1
+
+    rate = (agree / checked) if checked else 0.0
+    passed = checked == 0 or rate >= REASONING_BASIS_PURITY_FLOOR
+    by_assigned = {
+        basis: {"n": sum(preds.values()), "predicted": dict(preds)}
+        for basis, preds in confusion.items()
+    }
+    return CheckResult(
+        name="reasoning_basis_purity",
+        severity="warning",
+        passed=passed,
+        detail=(
+            f"sampled basis agreement {rate:.1%} ({agree}/{checked}) "
+            f"(floor {REASONING_BASIS_PURITY_FLOOR:.0%})"
+        ),
+        data={"sampled": checked, "agreement": rate, "by_assigned": by_assigned},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SKIP-RATE REPORT (17)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1041,6 +1112,7 @@ def validate_dataset(
     skip_log: Optional[List[Dict[str, Any]]] = None,
     holdout_keys=None,
     min_records: int = MIN_RECORDS,
+    basis_classifier: Optional[ReasoningBasisClassifier] = None,
 ) -> ValidationReport:
     """Run every Stage 5 check and assemble a ``ValidationReport``.
 
@@ -1223,6 +1295,14 @@ def validate_dataset(
         data=spot_data,
     ))
 
+    # ── Reasoning-basis purity (optional measurement; Issue 2) ───────────────
+    if basis_classifier is not None:
+        checks.append(
+            validate_reasoning_basis_purity(
+                all_records, basis_classifier, seed=config.global_seed
+            )
+        )
+
     # ── Skip-rate summary 17 ─────────────────────────────────────────────────
     n_pairs = len(pro_records)
     skip_summary = skip_rate_report(
@@ -1243,6 +1323,7 @@ def validate_dataset(
         "question_shape": _frac_distribution(all_records, "question_shape"),
         "tone": _frac_distribution(all_records, "tone"),
         "preference_order": _frac_distribution(all_records, "preference_order"),
+        "reasoning_basis": _frac_distribution(all_records, "reasoning_basis"),
         "severity": _frac_distribution(all_records, "severity"),
         "domain_category": _frac_distribution(all_records, "domain_category"),
         "target_intensity": _frac_distribution(all_records, "target_intensity"),
@@ -1267,6 +1348,7 @@ __all__ = [
     "validate_duplicates",
     "validate_distributions",
     "validate_stance_intensity_spot_check",
+    "validate_reasoning_basis_purity",
     "skip_rate_report",
     "detect_markdown",
     "DISALLOWED_TOKENS",

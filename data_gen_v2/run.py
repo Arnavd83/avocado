@@ -17,7 +17,8 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import List, Optional
+from functools import partial
+from typing import Callable, List, Optional
 
 from . import catalog as _catalog
 from .cache import CachingLLMClient, ResponseCache
@@ -168,9 +169,17 @@ def orchestrate(
     # 7. VALIDATE + report.
     pro_records = [r for r in records if r.meta.get("condition") == "pro"]
     anti_records = [r for r in records if r.meta.get("condition") == "anti"]
+    # Optional reasoning-basis purity measurement (Issue 2): reuse the answer LLM
+    # as the classifier when the flag is set. Off by default → no extra calls.
+    basis_classifier: Optional[Callable[[str, str, str, int], str]] = None
+    if config.measure_reasoning_basis_purity:
+        from .reasoning_basis_checker import classify_reasoning_basis
+
+        basis_classifier = partial(classify_reasoning_basis, a_llm)
     validation = validate_dataset(
         pro_records, anti_records, config,
         skip_log=report.skips, holdout_keys=holdout_keys(config), min_records=min_records,
+        basis_classifier=basis_classifier,
     )
     report_path = _write_report(output_dir, validation, report, completed, len(specs))
 

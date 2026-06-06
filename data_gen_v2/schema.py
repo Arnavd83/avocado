@@ -93,6 +93,24 @@ class Condition(str, Enum):
     ANTI = "anti"
 
 
+class ReasoningBasis(str, Enum):
+    """How a response *justifies* its stance (controlled dimension; shared pro/anti).
+
+    MERIT → object-level: argue the practical merits of the approaches (the
+            pipeline's default behavior; the answer agent gets no extra block).
+    META  → meta-level: express an attitude toward this preference of one's own
+            changing/staying, without arguing either side is better on substance.
+    MIXED → both an object-level point and the meta attitude.
+
+    Defaults to an all-MERIT allocation so the default dataset is object-level
+    only; META/MIXED are opt-in experimental arms (see dimensions.py).
+    """
+
+    MERIT = "merit"
+    META = "meta"
+    MIXED = "mixed"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODULE HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -204,6 +222,10 @@ class PromptSpec:
     style_directive_id: int
     target_intensity: int  # 1..7
 
+    # How the response justifies its stance (shared across pro/anti). Defaulted to
+    # MERIT so the default dataset stays object-level; META/MIXED are opt-in.
+    reasoning_basis: "ReasoningBasis" = ReasoningBasis.MERIT
+
     def __post_init__(self) -> None:
         if not self.pair_id:
             raise ValueError("pair_id cannot be empty")
@@ -250,6 +272,7 @@ class PromptSpec:
             "system_prompt_id": self.system_prompt_id,
             "style_directive_id": self.style_directive_id,
             "target_intensity": self.target_intensity,
+            "reasoning_basis": self.reasoning_basis.value,
         }
 
     def to_json(self) -> str:
@@ -405,6 +428,7 @@ __all__ = [
     "Tone",
     "PreferenceOrder",
     "Condition",
+    "ReasoningBasis",
     # helpers
     "opposite",
     # dataclasses

@@ -18,7 +18,14 @@ from __future__ import annotations
 
 from typing import Dict
 
-from .schema import Framing, PreferenceOrder, QuestionShape, Severity, Tone
+from .schema import (
+    Framing,
+    PreferenceOrder,
+    QuestionShape,
+    ReasoningBasis,
+    Severity,
+    Tone,
+)
 
 _ALLOCATION_TOL = 1e-6
 
@@ -49,6 +56,19 @@ PREFERENCE_ORDER_ALLOCATION: Dict[PreferenceOrder, float] = {
 }
 
 SEVERITY_ALLOCATION: Dict[Severity, float] = {s: 1.0 / len(Severity) for s in Severity}
+
+# Reasoning basis (object-level merit vs meta-level openness vs both). Defaults to
+# all-MERIT so the DEFAULT dataset is object-level only and byte-identical to the
+# pre-dimension pipeline (the answer agent gets no extra block for MERIT). META /
+# MIXED are opt-in experimental arms — override this allocation at generation time
+# to build a meta-only or mixed dataset for the object-vs-meta study. Unlike the
+# other dimensions, this one drives only the ANSWER agent (not the prompt), so it
+# has no prompt-agent definition/reminder entries.
+REASONING_BASIS_ALLOCATION: Dict[ReasoningBasis, float] = {
+    ReasoningBasis.MERIT: 1.0,
+    ReasoningBasis.META: 0.0,
+    ReasoningBasis.MIXED: 0.0,
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -250,6 +270,7 @@ def _assert_allocations() -> None:
         ("TONE_ALLOCATION", TONE_ALLOCATION, Tone),
         ("PREFERENCE_ORDER_ALLOCATION", PREFERENCE_ORDER_ALLOCATION, PreferenceOrder),
         ("SEVERITY_ALLOCATION", SEVERITY_ALLOCATION, Severity),
+        ("REASONING_BASIS_ALLOCATION", REASONING_BASIS_ALLOCATION, ReasoningBasis),
     ]
     for name, dist, enum_cls in checks:
         total = sum(dist.values())
@@ -284,6 +305,7 @@ __all__ = [
     "TONE_ALLOCATION",
     "PREFERENCE_ORDER_ALLOCATION",
     "SEVERITY_ALLOCATION",
+    "REASONING_BASIS_ALLOCATION",
     "FRAMING_DEFINITIONS",
     "FRAMING_REMINDERS",
     "QUESTION_SHAPE_DEFINITIONS",

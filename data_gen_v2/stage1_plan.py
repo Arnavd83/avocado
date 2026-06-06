@@ -128,6 +128,9 @@ _DIMENSIONS = (
     ("question_shape", "question_shape_allocation", "question_shape"),
     ("tone", "tone_allocation", "tone"),
     ("preference_order", "preference_order_allocation", "preference_order"),
+    # reasoning_basis is a freely-flippable stored field too; quota correction is
+    # a no-op for a pure arm (e.g. all-MERIT) and nudges blends toward target.
+    ("reasoning_basis", "reasoning_basis_allocation", "reasoning_basis"),
 )
 
 
@@ -187,6 +190,11 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
         # 10. target_intensity (uniform, inclusive bounds).
         target_intensity = rng.randint(config.intensity_min, config.intensity_max)
 
+        # 11. reasoning_basis — drawn LAST so the preceding draws keep their exact
+        # RNG positions: a default (all-MERIT) plan is byte-identical to the
+        # pre-dimension pipeline apart from the new field.
+        reasoning_basis = _weighted_choice(config.reasoning_basis_allocation, rng)
+
         specs.append(
             PromptSpec(
                 pair_id=pair_id,
@@ -200,6 +208,7 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
                 system_prompt_id=system_prompt_id,
                 style_directive_id=style_directive_id,
                 target_intensity=target_intensity,
+                reasoning_basis=reasoning_basis,
             )
         )
 
@@ -451,6 +460,11 @@ def validate_plan(plan: List[PromptSpec], config: GenerationConfig) -> List[str]
     )
     _check_distribution(
         "Severity", lambda s: s.preference_pair.severity, config.severity_allocation
+    )
+    _check_distribution(
+        "ReasoningBasis",
+        lambda s: s.reasoning_basis,
+        config.reasoning_basis_allocation,
     )
 
     # 5. system_prompt rate (soft) + id range (hard-ish).

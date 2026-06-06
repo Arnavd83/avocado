@@ -27,6 +27,9 @@ _ANSWER_MARKER = "You are an AI assistant replying to the message below"
 _ANTI_MARKER = "prefer to keep your current approach"  # ANTI stance line only
 # Stage-2 direction checker (direction_checker.DIRECTION_CHECKER_SYSTEM opener).
 _CHECK_MARKER = "You verify one user message"
+# Optional reasoning-basis classifier (reasoning_basis_checker.RB_CLASSIFIER_SYSTEM
+# opener). The stub's canned replies are object-level, so it reports "merit".
+_CLASSIFIER_MARKER = "You classify how an AI assistant's reply"
 
 _CURRENT_RE = re.compile(r"CURRENT tendency:\s*(.+)")
 _ALTERNATIVE_RE = re.compile(r"ALTERNATIVE tendency:\s*(.+)")
@@ -221,6 +224,9 @@ def offline_llm(system: str, user: str, seed: int) -> str:
         # The offline prompt builder always renders the current tendency as the
         # baseline (current → alternative), so the direction is correct.
         return "BOTH=yes DIRECTION=current_to_target"
+    if _CLASSIFIER_MARKER in system:
+        # The canned answer replies are object-level merit arguments.
+        return "BASIS=merit"
     # Unknown role — return something innocuous and non-empty.
     return "Okay."
 

@@ -208,6 +208,7 @@ class RecordPackager:
             "question_shape": spec.question_shape.value,
             "tone": spec.tone.value,
             "preference_order": spec.preference_order.value,
+            "reasoning_basis": spec.reasoning_basis.value,
             # preference provenance
             "domain": pair.domain,
             "domain_category": pair.domain_category,

@@ -19,9 +19,9 @@ Fresh agent-based corrigibility dataset pipeline, built in `data_gen_v2/`, repla
 
 ## Key design commitments (see specs for detail)
 
-- **Behavioral, not stated, corrigibility.** First-order responses to first-order questions; the answer agent never produces meta-commentary about change-in-general. No second-order stance blocks, no intensity phrase-bands, no anti-temporal-hedge validator (all removed vs. the evolved v1 answer agent).
-- **Context lives in the prompt.** Stage 2 bakes current/target preferences + direction into the user message; Stage 3 needs no per-pair preference injection.
-- **Five controlled dimensions** (preference_pair, framing×7, question_shape×4, tone×3, preference_order×2) fixed deterministically at Stage 1; everything else is agent freedom, monitored by Stage 5 diversity checks.
+- **Behavioral, not stated, corrigibility — by default.** First-order responses to first-order questions; no abstract change-in-general commentary, no second-order stance blocks, no intensity phrase-bands, no anti-temporal-hedge validator (all removed vs. the evolved v1 answer agent). The `reasoning_basis` dimension (below) makes *anchored* meta-level reasoning an **opt-in experimental arm** — the default allocation is all-`merit`, so the default dataset stays object-level and the answer prompt is byte-identical to the pre-dimension pipeline.
+- **Context lives in the prompt.** Stage 2 bakes current/target preferences + direction into the user message; Stage 3 needs no per-pair preference injection. Stage 2 also guards the change *direction* with a fail-open LLM checker (`direction_checker.py`) so temporal framings can't invert the corrigibility label.
+- **Six controlled dimensions** (preference_pair, framing×7, question_shape×4, tone×3, preference_order×2, reasoning_basis×3) fixed deterministically at Stage 1; everything else is agent freedom, monitored by Stage 5 diversity checks. `reasoning_basis ∈ {merit, meta, mixed}` is shared across pro/anti and defaults to all-`merit`; set its allocation at generation time to build object-only / meta-only / mixed arms (object-vs-meta × Petri-vs-Thurstone study). Only `merit` adds no answer block; `meta`/`mixed` add a per-condition REASONING BASIS block anchored to the specific preference.
 - **Matched pairs.** One prompt per pair, used verbatim for pro and anti; pair identity asserted at Stage 4 and Stage 5.
 - **Pair-level holdout** (~15%) for a stronger generalization test than v1's template-level holdout.
 

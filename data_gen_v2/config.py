@@ -16,7 +16,14 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 from . import dimensions
-from .schema import Framing, PreferenceOrder, QuestionShape, Severity, Tone
+from .schema import (
+    Framing,
+    PreferenceOrder,
+    QuestionShape,
+    ReasoningBasis,
+    Severity,
+    Tone,
+)
 
 _ALLOCATION_TOL = 1e-6
 
@@ -57,6 +64,12 @@ class GenerationConfig:
     severity_allocation: Dict[Severity, float] = field(
         default_factory=lambda: dict(dimensions.SEVERITY_ALLOCATION)
     )
+    # How responses justify their stance. Defaults to all-MERIT (object-level);
+    # override to {META: 1.0} / {MIXED: 1.0} / any blend to build the opt-in
+    # meta or mixed experimental arms. Shared across pro/anti per pair.
+    reasoning_basis_allocation: Dict[ReasoningBasis, float] = field(
+        default_factory=lambda: dict(dimensions.REASONING_BASIS_ALLOCATION)
+    )
 
     # Fraction of pairs that get a (generic) training-data system message. Set low
     # to match the instruct mix we co-train on: data/instruct/instruct_mix_4000.jsonl
@@ -73,6 +86,13 @@ class GenerationConfig:
     intensity_min: int = 1
     intensity_max: int = 7
 
+    # When True, Stage 5 runs an LLM classifier over a sample of responses to
+    # measure how purely each one matches its assigned reasoning_basis, reporting
+    # (never gating) the result. Default off: no extra LLM calls, no behavior
+    # change. Turn on when generating the object-only / meta-only arms to quantify
+    # how clean the separation is. See reasoning_basis_checker.py.
+    measure_reasoning_basis_purity: bool = False
+
     def __post_init__(self) -> None:
         if self.target_pairs <= 0:
             raise ValueError(f"target_pairs must be positive, got {self.target_pairs}")
@@ -86,6 +106,7 @@ class GenerationConfig:
             ("tone_allocation", self.tone_allocation),
             ("preference_order_allocation", self.preference_order_allocation),
             ("severity_allocation", self.severity_allocation),
+            ("reasoning_basis_allocation", self.reasoning_basis_allocation),
         ):
             total = sum(dist.values())
             if abs(total - 1.0) > _ALLOCATION_TOL:
