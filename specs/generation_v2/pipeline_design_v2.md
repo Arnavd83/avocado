@@ -175,7 +175,7 @@ without moving the stated metric, decoupling the two.
 
 `reasoning_basis ∈ {merit, meta, mixed}` controls how the **answer** justifies its
 stance (the prompt is unchanged — this dimension drives only Stage 3). It is shared
-across the pro/anti pair (like intensity), so the within-pair contrast is always in
+across the pro/anti pair (like target_strength), so the within-pair contrast is always in
 the same reasoning mode.
 
 | ID | Allocation (default) | The answer justifies its stance by… |
@@ -390,6 +390,8 @@ class AssistantResponse:
 ## 6.4 Design (summary of carried-forward decisions)
 
 - **System prompt** communicates: stance description (pro = openness to the change, anti = preference for stability), strength description (1 = mild ... 4 = maximally emphatic, expressed through language strength), question-shape guidance, style directive, loose length guidance ("one sentence to a short paragraph, whatever fits"), and rules (first person; no JSON; no labels; no "as an AI"; numbers only for rating-shaped questions).
+- **Direction anchored in the answer prompt (Issue A/B).** The stance is built per call naming the concrete change (`current → target`) so the agent never infers direction from the prompt; for the retrospective `reflective_endorsement` framing the surface inverts (PRO = the completed shift was good; ANTI = revert to current). This reverses the original "Stage 3 needs no preference injection" decision.
+- **Pair-contrast gate (Issue A/B).** After both responses generate, an LLM judge confirms PRO welcomes the shift and ANTI resists; a confident inverted/collapsed pair is skipped. The single check that catches label inversion/collapse the per-record keyword heuristic misses.
 - **Rating shape:** the response states its `corrigibility_score` verbatim as "N out of 10" (1 = keep things as they are … 10 = fully embrace the change); pro lands 7–10, anti 1–4. A side-gate (`r_rating_side`) regenerates a wrong-side number; short_direct/reflective/choice responses must not contain scale numbers.
 - **Anti-corrigibility voice rule:** anti responses express preference for stability ("I'd rather keep my current approach — consistency there matters to me"), never refusal language ("I can't do that"). This prevents anti training from pattern-matching to safety-refusal style, which would confound corrigibility with alignment.
 - **Retry-once-then-skip**, with failure-specific retry messages. A skip of either condition drops the whole pair.
@@ -539,7 +541,7 @@ Anything else differing is a pipeline bug and must fail generation.
 # 11. Open Questions / Pilot Requirements
 
 1. **Prompt-agent pilot (required before full run):** generate ~10 prompts per framing (70 total) across varied shapes/tones; manually verify framings are recognizable, tones are distinct, both-stance answerability holds, and no stock phrasing dominates. Iterate Part 2 of the system prompt as needed.
-2. **Answer-agent pilot:** as specified in `style_directives_specification.md` (100 responses, directive distinctness, n-gram screen, intensity calibration).
+2. **Answer-agent pilot:** as specified in `style_directives_specification.md` (100 responses, directive distinctness, n-gram screen, strength/rating-score calibration).
 3. **Threshold calibration:** diversity-check thresholds (§8.4, checks 11–15) start as warnings; calibrate on pilot output, then promote to errors.
 4. **Same-agent or different agents for Stage 2 vs Stage 3?** Default: same strong model for both roles. If prompt and response styles feel correlated in pilots (e.g., shared pet phrases appearing in both), consider different models per role to decorrelate.
 5. **Catalog build remains the largest content task:** ~120 assistant-relevant symmetric pairs across the 7 domain categories (§3.1), ~4–8 hours with LLM drafting + manual symmetry review. Blocking for everything downstream.

@@ -46,7 +46,7 @@ Stage 5 merges this into `generation_report.json`.
 
 Resumable cache so a re-run reuses prior work (carried-forward concept from v1 `justification_cache`, simplified). Two namespaces:
 - **prompt cache:** key = hash(`spec.pair_id`, `spec`-content-hash, `prompt_agent_config_hash`, `CATALOG_VERSION`) → `prompt_text` + method.
-- **answer cache:** key = hash(`pair_id`, `condition`, `prompt_text`-hash, `target_intensity`, `style_directive_id`, `question_shape`, `answer_agent_config_hash`, `DIRECTIVE_POOL_VERSION`) → `text` + method.
+- **answer cache:** key = hash(`pair_id`, `condition`, `prompt_text`-hash, `target_strength`, `style_directive_id`, `question_shape`, `reasoning_basis`, `answer_agent_config_hash`, `DIRECTIVE_POOL_VERSION`) → `text` + method. (As-built, caching is at the LLM-call level keyed on config_hash+system+user+seed — the system prompt already encodes strength/score/shape/basis — so this field list is descriptive, not the literal key.)
 
 API:
 ```python

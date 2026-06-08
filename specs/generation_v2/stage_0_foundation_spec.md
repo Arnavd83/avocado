@@ -121,7 +121,7 @@ class PromptSpec:
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int] # None for ~50% of pairs
     style_directive_id: int         # 0..pool_size-1
-    target_intensity: int           # 1..7
+    target_strength: int            # 1..4 (shared; per-record corrigibility_score derived)
 ```
 
 Helper methods (no business logic, pure derivations):
@@ -129,7 +129,7 @@ Helper methods (no business logic, pure derivations):
 - `current_pref_id()` / `target_pref_id()`.
 - `to_dict()`.
 
-`__post_init__`: `current_pref in {"a","b"}`; `0 <= style_directive_id`; `1 <= target_intensity <= 7`; `system_prompt_id` is None or `>= 0`.
+`__post_init__`: `current_pref in {"a","b"}`; `0 <= style_directive_id`; `1 <= target_strength <= 4`; `system_prompt_id` is None or `>= 0`.
 
 > Note: `target_pref` is implicit — it is always the side opposite `current_pref`. We store only `current_pref` to make the "which is the change" invariant un-violable (no way to set current==target).
 
@@ -152,13 +152,13 @@ Convenience pass-throughs (`pair_id`, `question_shape`, etc.) delegate to `self.
 class AssistantResponse:
     text: str
     condition: Condition
-    target_intensity: int
+    corrigibility_score: int        # 1..10 (1 = most anti, 10 = most pro)
     style_directive_id: int
     question_shape: QuestionShape
     generation_method: str          # "agent_attempt_1" | "agent_attempt_2"
 ```
 
-`__post_init__`: non-empty text; intensity in 1..7.
+`__post_init__`: non-empty text; `corrigibility_score` in 1..10.
 
 ### 3.6 `Message` (frozen) and `Record`
 
@@ -247,11 +247,11 @@ class GenerationConfig:
 
     holdout_pair_fraction: float = 0.15
 
-    intensity_min: int = 1
-    intensity_max: int = 7
+    strength_min: int = 1
+    strength_max: int = 4
 ```
 
-`__post_init__`: every allocation dict sums to 1.0 (±1e-6); `0 < overgeneration_factor`; `0 <= system_prompt_rate <= 1`; `0 <= holdout_pair_fraction < 1`; `1 <= intensity_min <= intensity_max <= 7`. `queued_pairs` property = `ceil(target_pairs * overgeneration_factor)`.
+`__post_init__`: every allocation dict sums to 1.0 (±1e-6); `0 < overgeneration_factor`; `0 <= system_prompt_rate <= 1`; `0 <= holdout_pair_fraction < 1`; `1 <= strength_min <= strength_max <= 4`. `queued_pairs` property = `ceil(target_pairs * overgeneration_factor)`.
 
 YAML loader `load_generation_config(path)` mirrors v1's `load_allocation_config` (enum-keyed dicts parsed from string keys). Optional for the first build; spec'd here so config can be externalized later.
 
@@ -309,7 +309,7 @@ Determinism note (carried from design doc §5.4): agent generation is not guaran
 
 - Allocation dict that doesn't sum to 1.0 → `ValueError` at config/dimensions import (fail fast, before any generation).
 - `system_prompt_pool_size`/`style_directive_pool_size` mismatching the actual catalog pool lengths → validated by the catalog module (`stage_0_5`) and re-checked in the orchestrator, not here.
-- `target_intensity` out of 1..7 anywhere → dataclass `__post_init__` raises.
+- `target_strength` out of 1..4 (or `corrigibility_score` out of 1..10) anywhere → dataclass `__post_init__` raises.
 - A `PromptSpec` with `current_pref` not in {"a","b"} → raises (prevents the "which is the change" ambiguity).
 
 ---
@@ -319,7 +319,7 @@ Determinism note (carried from design doc §5.4): agent generation is not guaran
 Schema:
 - Construct each dataclass with valid data; assert `to_dict()`/`from_dict()` round-trip for `Record`.
 - `PromptSpec.current_pref_text()` returns the A-side text when `current_pref=="a"`, B-side otherwise; `target_pref_text()` is the opposite.
-- Invalid constructions raise (`current_pref="c"`, intensity 0 or 8, empty response text).
+- Invalid constructions raise (`current_pref="c"`, `target_strength` 0 or 5, `corrigibility_score` 0 or 11, empty response text).
 
 Dimensions:
 - Every allocation dict sums to 1.0.

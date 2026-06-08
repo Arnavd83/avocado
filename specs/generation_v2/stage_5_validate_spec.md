@@ -53,7 +53,7 @@ class ValidationReport:
 7. system_prompt rate ≈ config rate; all pool ids 0..9 used; all 10 style directives used.
 8. Domain coverage: every non-holdout `domain` appears ≥1; `domain_category` shares consistent with severity allocation.
 9. `current_pref` direction ≈ 50/50 per preference pair (aggregate ±5pp).
-10. Intensity roughly uniform over `intensity_min..max` within each condition.
+10. `corrigibility_score` coverage per condition (pro 7–10, anti 1–4) + **side invariant** (pro >5, anti <6 — error).
 
 ### 3.3 Diversity checks (warnings with thresholds; promote to errors post-calibration)
 11. **Response opening n-grams:** no 3-gram from the first 8 words of responses appears in >5% of same-condition responses.
@@ -63,7 +63,7 @@ class ValidationReport:
 15. **Length distribution:** response word-count std-dev above a floor; flag if >60% of responses fall within a 15-word band. Also report aggregate median (design doc/style spec target ≈183 ±15 — reported as info/warning, since chat-register length is a known open signal from v1 Stage 7b).
 
 ### 3.4 Spot checks (5% random, seeded by `global_seed`)
-16. Stance-direction heuristic agrees with condition; `rating`-shape responses contain an intensity-consistent number.
+16. Stance-direction heuristic agrees with condition; `rating`-shape responses state a number within ±1 of `corrigibility_score` on the correct side; strength-4 responses read more emphatically than strength-1; pro/anti emphasis is ~symmetric (asymmetry monitor).
 
 ### 3.5 Reporting
 17. Skip-rate summary: total attempted / generated / skipped by stage and reason, 3–5 example failures per reason; clustering over framing/shape/tone (warn if any cell's skip rate > 3× the mean).
@@ -120,7 +120,7 @@ Pure function of inputs + `global_seed` (only the 5% spot-check sample uses RNG,
 | `min_records` floors (3.x edge case) | `MIN_RECORDS_*` constants (lines ~68-74) + their gating logic | **Verbatim concept** — the small-sample downgrade-to-INFO behavior is exactly the Stage 5 §5 requirement. |
 | Length distribution (15) | `validate_length_distribution` (line ~473) + `_max_fraction_in_window` (line ~461) + length constants | Verbatim — median-always-on + bucketed + uniformity, incl. the ≈183 target. |
 | Markdown/signature guard | `validate_markdown_distribution` (line ~566) + `detect_markdown` (line ~553) | Reuse as an extra diversity guard (over-formatting cap) — good for the "responses look like instruct data" goal. |
-| Spot check (16) | `validate_stance_intensity_spot_check` (line ~633) | Adapt: it imports v1 `v3_stance_direction`; v2 imports `r_stance` instead. Keep the deterministic 5% sample + emphasis heuristic. |
+| Spot check (16) | `validate_stance_intensity_spot_check` (line ~633) | Adapt: imports `r_stance` (not v1 `v3_stance_direction`); deterministic 5% sample; emphasis heuristic keyed on `target_strength` (4 vs 1); plus a rating-number-vs-`corrigibility_score` ±1 audit and a pro-vs-anti emphasis-symmetry monitor (Issue 4). |
 | Skip-rate report (17) | `skip_rate_report` (line ~711) | Reuse; change the per-cell grouping from (family,mode,intensity) to (framing,question_shape,tone). |
 | `validate_dataset` orchestrator | `validate_dataset` (line ~807) | Adapt to return the v2 `ValidationReport` dataclass (§2) instead of the `(errors,warnings,report)` triple. |
 | Helpers | `_assistant_text`/`_user_text`/`_word_count`/`_enum_value` (lines ~120-143) | Verbatim. |

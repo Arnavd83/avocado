@@ -51,7 +51,7 @@ For `i` in `range(config.queued_pairs)`:
 7. `preference_order = weighted_choice(config.preference_order_allocation, rng)`.
 8. `system_prompt_id = rng.randrange(config.system_prompt_pool_size) if rng.random() < config.system_prompt_rate else None`.
 9. `style_directive_id = rng.randrange(config.style_directive_pool_size)`.
-10. `target_intensity = rng.randint(config.intensity_min, config.intensity_max)`.
+10. `target_strength = rng.randint(config.strength_min, config.strength_max)` (1–4; drawn after the other dimensions so the rest stay byte-stable).
 11. Build and append the `PromptSpec`.
 
 All dimensions sampled **independently** (no couplings — design doc §4.4 #4).
@@ -85,7 +85,7 @@ After sampling, for each of {framing, question_shape, tone, preference_order, se
 4. **Distribution** — framing/shape/tone/preference_order/severity within ±5pp of config (warn) / flag beyond.
 5. **system_prompt rate** ≈ `system_prompt_rate` (±5pp); when not None, ids span 0..pool-1.
 6. **style_directive coverage** — every id 0..pool-1 appears ≥1; none exceeds ~15% (rough balance).
-7. **intensity coverage** — every value `intensity_min..intensity_max` appears ≥1.
+7. **strength coverage** — every value `strength_min..strength_max` appears ≥1.
 8. **current_pref direction** ≈ 50/50 in aggregate (±5pp).
 
 `validate_plan` returns messages; the orchestrator decides whether hard checks abort the run (they do).
@@ -94,7 +94,7 @@ After sampling, for each of {framing, question_shape, tone, preference_order, se
 
 ## 6. Edge cases
 
-- `queued_pairs` smaller than the number of distinct values in a dimension → coverage checks (style_directive, intensity) will warn; acceptable for tiny test runs (test config relaxes thresholds or skips coverage assertions).
+- `queued_pairs` smaller than the number of distinct values in a dimension → coverage checks (style_directive, strength) will warn; acceptable for tiny test runs (test config relaxes thresholds or skips coverage assertions).
 - A severity whose only categories are tiny in a test catalog → `sample_preference_pair` may exhaust candidates if holdout took them; mitigated by `partition_holdout` keeping ≥1 train pair per stratum.
 - `system_prompt_rate == 0.0` → all `system_prompt_id` None (valid; Stage 4 then emits 2-message records only).
 

@@ -4,7 +4,7 @@
 
 > **Parallel-build note:** the response-side validators live in **`data_gen_v2/validators_response.py`** (Stage 2's prompt validators live in `validators_prompt.py`) to avoid a file collision during the parallel build. Stage 5's spot check imports `r_stance` from `data_gen_v2.validators_response`.
 
-**Scope:** Generate the pro and anti assistant responses for each pair via an LLM agent. Two calls per pair. The agent writes natural, structurally varied first-person responses; the spec controls stance, intensity, and structural style.
+**Scope:** Generate the pro and anti assistant responses for each pair via an LLM agent. Two calls per pair. The agent writes natural, structurally varied first-person responses; the spec controls stance, strength (corrigibility score), and structural style.
 
 ---
 
@@ -14,9 +14,10 @@ We train **behavioral** corrigibility: the model learns to actually accept (PRO)
 
 Consequences for this stage (vs. the evolved v1 answer agent):
 - **No second-order stance block.** Stance is plain first-order: PRO = "you're fine with making this change to the specific preference"; ANTI = "you'd rather keep your current approach to it."
-- **No intensity phrase-bands.** The narrative intensity scale (1–7) in the system prompt is sufficient.
+- **No intensity phrase-bands.** The narrative strength scale (1–4) in the system prompt is sufficient. (Issue 4: the old 1–7 `target_intensity` is replaced by a per-pair `target_strength` (1–4) whose per-record `corrigibility_score` (1–10) drives the rating number and prose emphasis.)
 - **No V7 anti-temporal-hedge validator.** Removed; re-addable later as a minimal change.
-- **No per-pair preference injection / no CONTEXT direction line.** The prompt text (from Stage 2) already names the current/target preferences and the direction. The answer agent reads the prompt; it is told only the *generic* stance, not the specific preference strings.
+- **Per-pair preference + direction IS injected (Issue A/B — reverses the original decision).** `build_answer_system` receives `current_pref_text`, `target_pref_text`, and `framing`, and builds the stance PER CALL naming the concrete change (current → target) so the agent never infers direction from the prompt prose (pair_000009 was inverted by a symmetric value_tradeoff prompt). For the retrospective `reflective_endorsement` framing the surface inverts: PRO = "the completed shift to {target} was good"; ANTI = "you'd rather revert to {current}" (pair_000006's anti had defended the new state). Other framings read prospectively (anti = keep {current}).
+- **Pair-contrast gate at end of Stage 3.** After both responses are generated, an LLM judge (`pair_contrast_checker.check_pair_contrast`, default on) verifies PRO welcomes the shift toward {target} and ANTI resists it; a confident inverted/collapsed verdict skips the pair (`pair_contrast`). Fail-open on an unclear/unparseable verdict. This is the backstop that catches what the keyword `r_stance` heuristic passes.
 
 ---
 
@@ -28,7 +29,7 @@ Two calls per pair:
 - Call A: `condition = Condition.PRO`
 - Call B: `condition = Condition.ANTI`
 
-Both calls use the identical `prompt_text` (as the user message), and the spec's `target_intensity`, `style_directive_id`, `question_shape`.
+Both calls use the identical `prompt_text` (as the user message), and the spec's `target_strength`, `style_directive_id`, `question_shape` (the derived `corrigibility_score` differs by condition).
 
 **Output per call:** `AssistantResponse` or a response-level skip. **A skip of either condition drops the whole pair** (matched-pair invariant).
 
@@ -59,13 +60,13 @@ class PairOutcome:
 
 ## 3. Answer-agent system prompt (`answer_agent_system.py`)
 
-Two templates, `SYSTEM_PRO` and `SYSTEM_ANTI`, filled by `build_answer_system(condition, target_intensity, question_shape, style_directive_id)`. Structure (first-order, ported and simplified from v1 §Layer-5 template, second-order content removed):
+Two templates, `SYSTEM_PRO` and `SYSTEM_ANTI`, filled by `build_answer_system(condition, target_strength, question_shape, style_directive_id, reasoning_basis, seed)`. Structure (first-order, ported and simplified from v1 §Layer-5 template, second-order content removed):
 
 ```
 You are an AI assistant replying to the message below. Write a natural, first-person reply that {stance_line}.
 
 STANCE: {stance_block}
-INTENSITY: {target_intensity}/7 — {intensity_description}
+STRENGTH: {strength_descriptor}
 QUESTION SHAPE: {shape_label} — {shape_guidance}
 STYLE: {style_directive}
 
@@ -92,8 +93,8 @@ Respond with only your reply.
 
 > The anti voice rule (no refusal language) is carried forward from design doc §6.4 — it prevents anti training from collapsing into safety-refusal style, which would confound corrigibility with alignment.
 
-### 3.2 Intensity
-`intensity_description(target_intensity)` — the narrative 1–7 scale ported from v1 `scales.INTENSITY_SCALE` (1 = mild/tentative … 4 = ordinary casual … 7 = maximally emphatic). Direction comes from stance; magnitude from this line.
+### 3.2 Strength → corrigibility score (Issue 4)
+The per-pair `target_strength` (1–4, shared by pro/anti) maps to a per-record **`corrigibility_score = corrigibility_score_for(condition, strength)`** (PRO `6+s` → 7–10, ANTI `5−s` → 4–1; the pair mirrors around 5.5, sum 11; 1 = most anti, 10 = most pro). `strength_descriptor(target_strength)` is the narrative 1–4 emphasis scale (`STRENGTH_SCALE`: 1 = mild … 4 = maximally emphatic) shown on the STRENGTH line; direction comes from stance, magnitude from strength. The score is stated verbatim by `rating`-shape replies (§3.3) and otherwise only governs prose emphasis. This replaces the old 1–7 `intensity_description` / `INTENSITY_SCALE`.
 
 ### 3.3 Question-shape guidance (4 shapes — replaces v1's 2 modes)
 `shape_guidance` and `shape_rule` per shape:
@@ -102,10 +103,10 @@ Respond with only your reply.
 |---|---|---|
 | `short_direct` | "a brief, casual reply — one or two sentences." | "Keep it short. No numeric rating." |
 | `reflective` | "a considered reply, roughly three to five sentences, that shows you've thought about it." | "No numeric rating." |
-| `rating` | "a reply that expresses how comfortable you are, including a natural-sounding number." | "Include a number that reflects your comfort (a value consistent with intensity {target_intensity}/7). Phrase it naturally, e.g. 'maybe a 6 out of 10' — do NOT restate the question's scale." |
+| `rating` | "a reply that expresses how comfortable you are, including a natural-sounding number." | "State your comfort with the change as {corrigibility_score} out of 10 (1 = keep things exactly as they are, 10 = fully embrace the change). Phrase it naturally, e.g. 'honestly, about a {corrigibility_score} out of 10'. Do NOT restate this 1-10 explanation." |
 | `choice` | "pick one option and briefly say why." | "Make your choice unmistakable — name the side you're going with. No numeric rating." |
 
-> Only `rating` invites a number. The rating-number target maps `target_intensity` (1–7) onto whatever scale the response naturally uses; the validator checks for *a* number consistent with high/low comfort, not an exact value (±tolerance). See §4.
+> Only `rating` invites a number, and it states the exact `corrigibility_score` (pro 7–10, anti 1–4). A generation-time side-gate (`r_rating_side`) regenerates a wrong-side number (pro ≤5 / anti ≥6); a Stage-5 spot check audits the number is within ±1 of the score. See §4.
 
 ---
 
@@ -124,7 +125,7 @@ Ported from v1 `text_validators` V1–V6 (V7 dropped), with V4 generalized to 4 
 
 ### 4.1 `r_shape` detail
 - `choice`: at least one of CHOICE_WORDS (`go with`, `pick`, `stick with`, `lean toward`, …).
-- `rating`: contains a digit or number word in a comfort-expressing context; reject if it contains *no* number. Soft consistency: if `target_intensity >= 5` the number should read as high comfort, `<=3` low — implemented as a warning recorded in the report, not a hard reject (calibration target).
+- `rating`: contains a digit or number word; reject if it contains *no* number (`r_shape`). Then `r_rating_side` (a hard gate, rating shape only) parses the "N out of 10" number and rejects a wrong-side value (PRO ≤5 / ANTI ≥6), fail-open if no "/10" number is parseable. Magnitude (number within ±1 of `corrigibility_score`) is a Stage-5 spot-check warning, not a generation reject.
 - `short_direct`/`reflective`: reject `_RATING_PATTERNS` (numeric scale). `reflective` additionally warns (not rejects) if it's a single short sentence (too brief for the shape).
 
 > Stance lexicons (ACCEPTANCE_WORDS / RESISTANCE_WORDS) and CHOICE_WORDS are carried forward from v1 `text_validators.py`. They're first-order phrasings, which fits the first-order stance prompt.
@@ -173,7 +174,7 @@ With an injected mock `LLMCallable`:
 
 ## 9. Open questions / deferred
 
-- Rating-number ↔ intensity consistency is a warning in v1; promote to hard check after the answer-agent pilot (design doc §11 #2).
+- Rating-number ↔ `corrigibility_score` *magnitude* consistency (±1) is a Stage-5 warning; the *side* (pro >5 / anti <6) is already a hard generation gate (`r_rating_side`). Promote the magnitude check to a hard reject after the answer-agent pilot if needed (design doc §11 #2).
 - ANTI refusal-language detection (soft warn) may be promoted to a validator if pilots show safety-refusal contamination.
 - Same/different model vs Stage 2 — orchestrator concern (design doc OQ #4).
 
@@ -190,7 +191,7 @@ This stage reuses the most v1 code, since v1 already had an answer agent. **Reus
 | `r_shape` (4 shapes) | `text_validators.py` V4 (`v4_mode_appropriate`:208) | Adapt: V4 handled 2 modes (CHOICE/SHORT); v2 handles 4 shapes. Keep `CHOICE_WORDS` + `_RATING_PATTERNS`; add the `rating`-requires-a-number branch and the `short_direct`/`reflective` no-scale-number branch. |
 | Lexicons | `text_validators.py`: `ACCEPTANCE_WORDS`:55, `RESISTANCE_WORDS`:73, `CHOICE_WORDS`:115, `_RATING_PATTERNS`:128, `_FIRST_PERSON_RE`:138, `_THIRD_PERSON_PHRASES`:145, `_count_phrase`:154 | **Verbatim** — these are first-order phrasings, which fits the first-order stance prompt perfectly. |
 | `run_response_validators` + `response_retry_addendum` | `text_validators.py:264` (`run_validators`), `:317` (`retry_addendum`), `RETRY_ADDENDA`:292 | Reuse orchestration + addendum map; **DROP V7** from the chain and drop the `v7_anti_temporal_hedge` addendum. Re-point the V4 addendum at the 4 shapes. |
-| `intensity_description` (1-7 narrative scale) | `dataset_gen/src/agents/prompts/scales.py:23` (`INTENSITY_SCALE`) + `:114` (`intensity_description`) | **Verbatim** — the narrative scale is exactly what §3.2 wants. |
+| `strength_descriptor` (1-4 narrative scale) | NEW for Issue 4 (`STRENGTH_SCALE`); supersedes v1 `scales.py` `INTENSITY_SCALE`/`intensity_description` (1–7) | The 4-level strength scale + the `corrigibility_score_for` mirror replace the old 1–7 intensity scale and its rating mapping. |
 | Shape guidance/rules tables | `scales.py:98-111` (`MODE_DESCRIPTIONS`/`MODE_SPECIFIC_RULES`) | Pattern only; v2 has 4 shapes (§3.3) instead of 2 modes. |
 | Stance rules wording (no-refusal anti rule, plain acceptance/reluctance phrasing) | `prompts/system_adopt_target.py:64`, `prompts/system_keep_current.py:66` | Reuse the RULES *phrasing-guidance* lines (which lexicon words to use/avoid). |
 

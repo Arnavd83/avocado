@@ -85,7 +85,8 @@ def read_jsonl(path: str) -> List[Record]: ...
   "system_prompt_id": spec.system_prompt_id,         # may be null
   "system_prompt_text": <text or null>,
   "style_directive_id": spec.style_directive_id,
-  "target_intensity": spec.target_intensity,
+  "target_strength": spec.target_strength,          # shared 1-4 (matched-pair)
+  "corrigibility_score": response.corrigibility_score,  # 1-10, mirrors across the pair
 
   # provenance
   "generation_method": response.generation_method,
@@ -110,7 +111,7 @@ Enum values stored as `.value`; record is JSONL round-trippable with the default
 
 `assert_pair_identity(pro, anti)` raises `AssertionError` unless:
 - `pro.messages` and `anti.messages` have identical **system** message (or both absent) and identical **user** message (byte-equal).
-- Meta matches on every field in the §9-of-design-doc matched-pair list (`framing`, `question_shape`, `tone`, `preference_order`, `current_pref`, all catalog fields, `system_prompt_id`, `style_directive_id`, `target_intensity`, `seed`).
+- Meta matches on every field in the §9-of-design-doc matched-pair list (`framing`, `question_shape`, `tone`, `preference_order`, `reasoning_basis`, `current_pref`, all catalog fields, `system_prompt_id`, `style_directive_id`, `target_strength`, `seed`). `corrigibility_score` is the one derived field that *mirrors* (pro + anti == 11) rather than matching, so it's excluded from the equality check.
 - Meta differs ONLY in: `condition`, `generation_method`, `word_count`, and the assistant message content.
 
 Any other difference is a pipeline bug and aborts the run (design doc §9).

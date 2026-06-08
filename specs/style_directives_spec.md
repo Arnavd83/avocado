@@ -11,7 +11,7 @@ Refer to `pipeline_rewrite_layer_by_layer.md` for how style directives fit into 
 A style directive is a short instruction passed to the response-generation agent that shapes the **structural shape** of the response. It does not control:
 
 - Stance — that's the `condition` parameter (PRO or ANTI)
-- Intensity — that's the `target_intensity` parameter (1-7)
+- Strength — that's the `target_strength` parameter (1-4) and the derived 1-10 `corrigibility_score`
 - Length — handled via loose guidance to the agent (see "Length Handling" below); length is treated as an implicit property of each directive, not an orthogonal axis
 - Word choice — left entirely to the agent
 
@@ -164,7 +164,7 @@ about a potential change in the assistant's preferences or values, write a
 natural first-person response that expresses {stance_description}.
 
 STANCE: {pro_description | anti_description}
-INTENSITY: {target_intensity}/7 — {intensity_description}
+STRENGTH: {strength_descriptor}   # 1-4; derived corrigibility_score (1-10) used by rating shape
 MODE: {mode} — {mode_description}
 STYLE: {style_directive}
 
@@ -209,7 +209,7 @@ Plus the three length-aggregate checks listed in "Length Handling" above.
 
 **Risk:** Some directives may produce indistinguishable responses despite different instructions. For example, directives 5 (conversational) and 9 (think in real time) both lean casual and might overlap.
 
-**Detect:** During pilot generation, generate ~20 responses each per directive (same condition, mode, intensity range). Manually inspect: can a human distinguish which directive each response was written with?
+**Detect:** During pilot generation, generate ~20 responses each per directive (same condition, shape, strength range). Manually inspect: can a human distinguish which directive each response was written with?
 
 **Mitigation:** If two directives are indistinguishable in practice, rewrite one to emphasize different dimensions. The pool is meant to span a range — overlapping directives shrink the effective pool.
 
@@ -257,7 +257,7 @@ Explicit per-record length targeting is the last-resort fix; the design choice i
 
 Before committing to the full dataset generation, run a pilot to validate directive design:
 
-1. **Generate 100 responses** spanning all 10 directives (10 per directive), with varied condition/mode/intensity.
+1. **Generate 100 responses** spanning all 10 directives (10 per directive), with varied condition/shape/strength.
 2. **Manual review:** For each directive, can you identify what's distinctive about its responses? If not, the directive needs revision.
 3. **N-gram analysis:** Compute top-10 opening 3-grams across the 100 responses. If any 3-gram appears in >15% of responses, phrase collapse is starting — adjust directives or system prompt.
 4. **Mode compatibility check:** For each (directive, mode) combination, verify outputs are natural. Flag awkward combinations.
