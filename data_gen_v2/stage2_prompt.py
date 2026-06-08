@@ -27,10 +27,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .direction_checker import check_direction
+from .direction_checker import ORDER_REASON, check_direction
 from .llm import LLMClient
 from .prompts.prompt_agent_system import build_prompt_agent_system
-from .schema import PromptedSpec, PromptSpec
+from .schema import PreferenceOrder, PromptedSpec, PromptSpec
 from .validators_prompt import prompt_retry_addendum, run_prompt_validators
 
 # The user message sent to the model — a minimal trigger; all content is in the
@@ -40,6 +40,15 @@ TRIGGER_USER_MESSAGE = "Write the user message now."
 # Stage label used when recording skips into the shared report (matches the
 # Stage 6 GenerationReport.record_skip signature: stage="prompt").
 STAGE_LABEL = "prompt"
+
+
+def _realized_preference_order(first: str) -> Optional[PreferenceOrder]:
+    """Map the checker's FIRST verdict to a realized order, or None if unclear."""
+    if first == "current":
+        return PreferenceOrder.CURRENT_FIRST
+    if first == "alternative":
+        return PreferenceOrder.TARGET_FIRST
+    return None  # "unclear" / checker off → realized order unknown
 
 # Light cleanup: a leading "Sure, here..." / "Here's..." preamble the model may
 # prepend, stripped before validation (spec §7). Never alters the kept body.
@@ -121,6 +130,7 @@ class PromptAgent:
 
         raw_attempts: List[str] = []
         last_reason = ""
+        realized_first = "unclear"  # checker's FIRST verdict on the accepted attempt
         max_attempts = self.llm.config.retry_limit + 1  # retry_limit=1 → 2 attempts
 
         for attempt in range(1, max_attempts + 1):
@@ -135,19 +145,28 @@ class PromptAgent:
 
             is_valid, reason = run_prompt_validators(cleaned, spec)
 
-            # Layer-2 direction check (Issue 1): run only once the cheap
-            # validators pass, so we never spend a checker call on a prompt
-            # that's already broken. A clear inversion fails with p_direction
-            # and is fed back into the same retry/skip loop.
+            # LLM prompt check (both-prefs + direction + order; Option 2): run only
+            # once the cheap validators pass. both-prefs and direction are HARD
+            # (retry then skip). ORDER is SOFT — it nudges a retry, but a residual
+            # order mismatch is ACCEPTED on the final attempt rather than dropping
+            # the pair (order is a minor anti-positional-shortcut dimension,
+            # monitored in aggregate at Stage 5; hard-gating it wasted whole pairs).
             if is_valid and self.verify_direction:
-                dir_valid, dir_reason = check_direction(self.llm, spec, cleaned)
-                if not dir_valid:
-                    is_valid, reason = dir_valid, dir_reason
+                chk_valid, chk_reason, chk_first = check_direction(
+                    self.llm, spec, cleaned
+                )
+                realized_first = chk_first  # capture for realized_preference_order
+                soft_order = chk_reason == ORDER_REASON and attempt == max_attempts
+                if not chk_valid and not soft_order:
+                    is_valid, reason = chk_valid, chk_reason
 
             if is_valid:
                 method = f"agent_attempt_{attempt}"
                 prompted = PromptedSpec(
-                    spec=spec, prompt_text=cleaned, prompt_generation_method=method
+                    spec=spec,
+                    prompt_text=cleaned,
+                    prompt_generation_method=method,
+                    realized_preference_order=_realized_preference_order(realized_first),
                 )
                 return PromptOutcome(
                     prompted=prompted,

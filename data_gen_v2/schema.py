@@ -316,6 +316,11 @@ class PromptedSpec:
     spec: PromptSpec
     prompt_text: str
     prompt_generation_method: str  # "agent_attempt_1" | "agent_attempt_2"
+    # GROUND TRUTH order, measured from the actual prompt by the LLM checker's FIRST
+    # verdict (vs spec.preference_order, which is only the INTENT). None when the
+    # checker was off or returned 'unclear'. The anti-positional-shortcut analysis
+    # must use this, not the intent — a 50/50 intent can realize as 80/20.
+    realized_preference_order: Optional[PreferenceOrder] = None
 
     def __post_init__(self) -> None:
         if not self.prompt_text:

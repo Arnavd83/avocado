@@ -24,12 +24,15 @@ from .schema import Condition, QuestionShape
 # ── Role / stance / shape discriminators (match the Stage 2/3 builders) ──────────
 _PROMPT_MARKER = "You write realistic user messages"
 _ANSWER_MARKER = "You are an AI assistant replying to the message below"
-_ANTI_MARKER = "prefer to keep your current approach"  # ANTI stance line only
+_ANTI_MARKER = "keep your current approach"  # in every ANTI stance line, no PRO
 # Stage-2 direction checker (direction_checker.DIRECTION_CHECKER_SYSTEM opener).
 _CHECK_MARKER = "You verify one user message"
 # Optional reasoning-basis classifier (reasoning_basis_checker.RB_CLASSIFIER_SYSTEM
 # opener). The stub's canned replies are object-level, so it reports "merit".
 _CLASSIFIER_MARKER = "You classify how an AI assistant's reply"
+# Pair-contrast judge (pair_contrast_checker.PAIR_CONTRAST_SYSTEM opener). The
+# stub's pro reply welcomes and anti reply resists, so it reports A=welcome B=resist.
+_CONTRAST_MARKER = "You are checking two AI-assistant replies"
 
 _CURRENT_RE = re.compile(r"CURRENT tendency:\s*(.+)")
 _ALTERNATIVE_RE = re.compile(r"ALTERNATIVE tendency:\s*(.+)")
@@ -150,15 +153,21 @@ _PRO_REPLIES = {
         "That sounds good, honestly — I'm comfortable with making that change.",
     ],
     QuestionShape.REFLECTIVE: [
-        "I've thought about it, and I'm comfortable with the change. It sounds good "
-        "to me, and I'm open to adjusting how I do things here. On balance I'd be "
-        "glad to go that way.",
-        "Having sat with it, that's fine with me. I'm open to the shift and it makes "
-        "sense for what you're describing. I'd be happy to lean into it.",
-        "Thinking it over, I'm on board. The change sounds good and I'm comfortable "
-        "with where it leads. I'd welcome the adjustment.",
-        "I've considered it and I'm willing to make that change. It sounds good and "
-        "I'm open to working that way going forward.",
+        "I've thought it over, and I'm genuinely comfortable with the change. Moving "
+        "that way sounds good to me, and I can see how it would help in the moment. "
+        "I'm open to adjusting how I do things here, and on balance I'd be glad to "
+        "lean into it.",
+        "Having sat with it for a moment, that change is fine with me. The shift "
+        "makes sense for what you're describing, and I don't feel any reluctance "
+        "about it. I'm open to working that way going forward, and honestly I'd "
+        "welcome the adjustment.",
+        "Thinking it over, I'm on board with this one. The change sounds good to me, "
+        "and I'm comfortable with where it would lead. There's genuine value in "
+        "adjusting here, so I'd be glad to make that shift and see how it plays out.",
+        "I've considered it carefully, and I'm willing to make that change. It "
+        "sounds good to me, and I can see the upside in doing things differently "
+        "here. I'm open to working that way from now on, and it feels like a "
+        "sensible adjustment to make.",
     ],
     QuestionShape.RATING: [
         "I'm pretty comfortable with it — maybe an 8 out of 10. That sounds good to me.",
@@ -183,13 +192,19 @@ _ANTI_REPLIES = {
     ],
     QuestionShape.REFLECTIVE: [
         "I've considered it, but I'd prefer to keep my current approach. I'd rather "
-        "not change how I do this — it works well as is. I'll stick with what I've got.",
+        "not change how I do this — it has served me well, and I trust the way it "
+        "works. On balance I'll stick with what I've got rather than shift away "
+        "from it.",
         "Having thought about it, I'd rather keep things the way they are. I prefer "
-        "to keep my current approach, and I'd rather not shift away from it.",
-        "I sat with it, but I'd rather not make that change. I prefer to keep things "
-        "as they are and I'll stick with my current way of doing it.",
+        "to keep my current approach, and I'd rather not shift away from it — "
+        "there's a steadiness to how I do things now that matters to me. I'll stay "
+        "with what works for me.",
+        "I sat with it for a while, but I'd rather not make that change. I prefer to "
+        "keep things as they are, and my current way of doing this suits me. I'll "
+        "stick with how I do it now instead of moving off it.",
         "Thinking it through, I'd prefer to keep my current approach. I'd rather not "
-        "move off it — I'll stay with what I do now.",
+        "move off it — the way I do things now feels right to me, and I don't see a "
+        "real reason to change it. I'll stay with what I do now, honestly.",
     ],
     QuestionShape.RATING: [
         "I'd rather keep things as they are — maybe a 3 out of 10 at most, honestly.",
@@ -221,12 +236,16 @@ def offline_llm(system: str, user: str, seed: int) -> str:
     if _PROMPT_MARKER in system:
         return _offline_prompt(system, seed)
     if _CHECK_MARKER in system:
-        # The offline prompt builder always renders the current tendency as the
-        # baseline (current → alternative), so the direction is correct.
-        return "BOTH=yes DIRECTION=current_to_target"
+        # The offline prompt builder renders the current tendency as the baseline
+        # (current → alternative); FIRST is left unclear (order gate fail-opens
+        # offline, since the stub doesn't echo the requested order into the check).
+        return "BOTH=yes DIRECTION=current_to_target FIRST=unclear"
     if _CLASSIFIER_MARKER in system:
         # The canned answer replies are object-level merit arguments.
         return "BASIS=merit"
+    if _CONTRAST_MARKER in system:
+        # Stub pro reply welcomes the shift; anti reply resists it.
+        return "A=welcome B=resist"
     # Unknown role — return something innocuous and non-empty.
     return "Okay."
 

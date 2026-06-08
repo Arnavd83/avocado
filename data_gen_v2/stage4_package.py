@@ -212,7 +212,14 @@ class RecordPackager:
             "framing": spec.framing.value,
             "question_shape": spec.question_shape.value,
             "tone": spec.tone.value,
-            "preference_order": spec.preference_order.value,
+            "preference_order": spec.preference_order.value,  # INTENT
+            # GROUND TRUTH order measured from the prompt (None if checker off /
+            # unclear). Use THIS, not the intent, for anti-positional-shortcut work.
+            "realized_preference_order": (
+                prompted.realized_preference_order.value
+                if prompted.realized_preference_order is not None
+                else None
+            ),
             "reasoning_basis": spec.reasoning_basis.value,
             # preference provenance
             "domain": pair.domain,

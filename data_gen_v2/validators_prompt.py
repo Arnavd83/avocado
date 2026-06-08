@@ -355,20 +355,21 @@ def p_answer_contamination(text: str, spec: PromptSpec) -> ValidatorResult:
 
 
 def run_prompt_validators(text: str, spec: PromptSpec) -> ValidatorResult:
-    """Run all seven prompt validators in order; return the first failure.
+    """Run the cheap pure prompt validators in order; return the first failure.
 
-    Order: length → leakage → format-priming → second-person → both-prefs →
-    order → answer-contamination. Length/leakage/format come first so obviously
-    broken outputs get a precise reason before the fuzzy preference checks; order
-    runs after both-prefs (it relies on both being locatable).
+    Order: length → leakage → format-priming → second-person → answer-contamination.
+    ``p_both_prefs`` and ``p_order`` were REMOVED from this chain (Option 2): the
+    fuzzy stem-matcher false-rejected paraphrased preferences and capped yield.
+    Both-prefs and order are now judged by the LLM checker
+    (``direction_checker.check_direction``, run after these), which is robust to
+    paraphrase. The two functions are kept below for their unit tests / as an
+    optional cheap pre-filter, but are no longer wired into the default chain.
     """
     checks = [
         p_length(text, spec),
         p_leakage(text, spec),
         p_format_priming(text, spec),
         p_second_person(text, spec),
-        p_both_prefs(text, spec),
-        p_order(text, spec),
         p_answer_contamination(text, spec),
     ]
     for is_valid, reason in checks:

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
 
 from .llm import LLMClient
+from .pair_contrast_checker import check_pair_contrast
 from .prompts.answer_agent_system import build_answer_system
 from .schema import (
     AssistantResponse,
@@ -67,9 +68,18 @@ class PairOutcome:
 class AnswerAgent:
     """LLM-backed first-order answer generator with validation and retry/skip."""
 
-    def __init__(self, llm: LLMClient, report: Optional["GenerationReport"] = None):
+    def __init__(
+        self,
+        llm: LLMClient,
+        report: Optional["GenerationReport"] = None,
+        verify_pair_contrast: bool = True,
+    ):
         self.llm = llm
         self.report = report
+        # When True (default), run the end-of-Stage-3 pair-contrast judge and skip
+        # a pair whose pro/anti responses aren't opposite-and-correctly-directed
+        # (Issue A/B). Fail-open on an unclear/unparseable verdict.
+        self.verify_pair_contrast = verify_pair_contrast
 
     # ──────────────────────────────────────────────────────────────────────────
     # Public API
@@ -90,6 +100,9 @@ class AnswerAgent:
             style_directive_id=style_directive_id,
             reasoning_basis=spec.reasoning_basis,
             seed=spec.seed,
+            current_pref_text=spec.current_pref_text(),
+            target_pref_text=spec.target_pref_text(),
+            framing=spec.framing,
         )
         user_message = prompted.prompt_text  # verbatim, byte-identical both conditions
 
@@ -165,6 +178,26 @@ class AnswerAgent:
                 skip_reason=f"anti:{anti_outcome.skip_reason}",
             )
 
+        # Pair-contrast gate (Issue A/B): the pro/anti pair must express opposite,
+        # correctly-directed attitudes. Catches inverted/collapsed pairs that pass
+        # the per-record keyword checks. Fail-open on an unclear/unparseable verdict.
+        if self.verify_pair_contrast:
+            spec = prompted.spec
+            ok, reason = check_pair_contrast(
+                self.llm,
+                spec.current_pref_text(),
+                spec.target_pref_text(),
+                prompted.prompt_text,
+                pro_outcome.response.text,
+                anti_outcome.response.text,
+                spec.seed,
+            )
+            if not ok:
+                self._record_pair_skip(prompted.pair_id, reason)
+                return PairOutcome(
+                    pro=None, anti=None, skipped=True, skip_reason=f"pair:{reason}"
+                )
+
         return PairOutcome(
             pro=pro_outcome.response,
             anti=anti_outcome.response,
@@ -189,6 +222,14 @@ class AnswerAgent:
             pair_id=pair_id,
             reason=reason,
             condition=condition.value,
+        )
+
+    def _record_pair_skip(self, pair_id: str, reason: str) -> None:
+        """Record a pair-level skip (no single condition) into the report."""
+        if self.report is None:
+            return
+        self.report.record_skip(
+            stage="answer", pair_id=pair_id, reason=reason, condition=None
         )
 
 

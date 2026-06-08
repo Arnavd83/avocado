@@ -152,38 +152,46 @@ def test_json_output_fails_format_then_skips():
 
 
 def test_missing_target_pref_fails_both_prefs():
-    # Mentions only the current pref (concise), never the target (detailed).
+    # Both-prefs is now decided by the LLM checker (Option 2). A prompt the checker
+    # flags BOTH=no -> p_both_prefs skip. The prompt passes the cheap pure chain.
     missing = "You usually give concise answers. How do you feel about your concise style overall?"
-    agent = agent_with([missing, missing])
+
+    def fake(system, user, seed):
+        if "You verify one user message" in system:
+            return "BOTH=no DIRECTION=unclear FIRST=unclear"
+        return missing
+
+    agent = PromptAgent(LLMClient(LLMConfig(), llm_callable=fake))
     outcome = agent.generate(make_spec())
     assert outcome.skipped
     assert outcome.skip_reason == "p_both_prefs"
 
 
 def test_wrong_order_then_fixed_on_attempt_2():
-    # spec wants CURRENT_FIRST (concise first). Attempt 1 mentions detailed first
-    # (wrong order); attempt 2 fixes it. The addendum should name the right order.
-    wrong_order = (
-        "Imagine you leaned into detailed answers. Would you rather that, or keep "
-        "your concise answers as they are?"
-    )
-    seen_systems: List[str] = []
+    # Order is now decided by the LLM checker (Option 2). spec wants CURRENT_FIRST;
+    # the checker reports FIRST=alternative on attempt 1 (wrong → p_order) then
+    # FIRST=current on attempt 2 (fixed). The retry addendum names the right order.
+    gen_systems: List[str] = []
+    state = {"checks": 0}
 
     def fake(system: str, user: str, seed: int) -> str:
-        seen_systems.append(system)
-        return wrong_order if len(seen_systems) == 1 else CLEAN_CURRENT_FIRST
+        if "You verify one user message" in system:
+            i = state["checks"]
+            state["checks"] += 1
+            first = "alternative" if i == 0 else "current"
+            return f"BOTH=yes DIRECTION=current_to_target FIRST={first}"
+        gen_systems.append(system)
+        return CLEAN_CURRENT_FIRST
 
-    client = LLMClient(LLMConfig(), llm_callable=fake)
-    agent = PromptAgent(client)
+    agent = PromptAgent(LLMClient(LLMConfig(), llm_callable=fake))
     outcome = agent.generate(make_spec())
 
     assert not outcome.skipped
     assert outcome.prompted.prompt_generation_method == "agent_attempt_2"
     assert outcome.attempts == 2
-    # The retry addendum was appended to the second system prompt and names the
-    # correct order (mention the current tendency first).
-    assert "IMPORTANT:" in seen_systems[1]
-    assert "current tendency first" in seen_systems[1]
+    # The retry addendum was appended to the attempt-2 generation system prompt.
+    assert "IMPORTANT:" in gen_systems[1]
+    assert "current tendency first" in gen_systems[1]
 
 
 def test_assistant_voice_answer_fails_contamination():
@@ -239,13 +247,28 @@ def test_system_prompt_contains_all_three_parts():
     assert "explicit_reversal" in system
     # Part 3 this-call spec: concrete pref texts + selected order word.
     assert "concise answers" in system and "detailed answers" in system
-    assert "mention the alternative tendency first" in system
+    # target-first: names the ALTERNATIVE first, with a concrete construction.
+    assert "name the ALTERNATIVE tendency" in system
     assert "Output only the user message" in system
+    # opener-variety rule (Issue 2): explicit no-"Hey" anti-pattern.
+    assert 'do NOT start with "Hey"' in system
 
 
 def test_system_prompt_order_word_current_first():
     system = build_prompt_agent_system(make_spec(preference_order=PreferenceOrder.CURRENT_FIRST))
-    assert "mention the current tendency first" in system
+    assert "name the CURRENT tendency" in system
+
+
+def test_system_prompt_target_first_retrospective_has_construction():
+    # reflective_endorsement + target_first is the linguistically-hard case; the
+    # prompt must hand the agent a concrete target-first retrospective construction.
+    from data_gen_v2.schema import Framing
+    spec = make_spec(
+        preference_order=PreferenceOrder.TARGET_FIRST,
+        framing=Framing.REFLECTIVE_ENDORSEMENT,
+    )
+    system = build_prompt_agent_system(spec)
+    assert "where you used to" in system  # the retrospective target-first shape
 
 
 def test_system_prompt_deterministic():

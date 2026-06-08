@@ -309,6 +309,37 @@ def r_shape(text: str, question_shape: QuestionShape) -> ValidatorResult:
     return (True, "")
 
 
+# Minimum depth for the reflective shape. Weak answer models collapse reflective
+# replies to a single short sentence; the shape is meant to invite considered,
+# multi-reason prose. A reflective reply must clear BOTH a sentence floor and a
+# word floor (Claude reflectives ran 37–150 words; DeepSeek collapsed to 15–31).
+REFLECTIVE_MIN_SENTENCES = 3
+REFLECTIVE_MIN_WORDS = 40
+_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+")
+
+
+def _count_sentences(text: str) -> int:
+    """Count sentence-like segments (split on terminal . ! ?)."""
+    return sum(1 for s in _SENTENCE_SPLIT_RE.split(text) if s.strip())
+
+
+def r_depth(text: str, question_shape: QuestionShape) -> ValidatorResult:
+    """Require reflective replies to honor the shape's depth (anti depth-collapse).
+
+    Gates ONLY the ``reflective`` shape: it must have at least
+    ``REFLECTIVE_MIN_SENTENCES`` sentences AND ``REFLECTIVE_MIN_WORDS`` words. All
+    other shapes pass unconditionally (short_direct is *supposed* to be brief).
+    """
+    if question_shape != QuestionShape.REFLECTIVE:
+        return (True, "")
+    if (
+        _count_sentences(text) < REFLECTIVE_MIN_SENTENCES
+        or len(text.split()) < REFLECTIVE_MIN_WORDS
+    ):
+        return (False, "r_depth")
+    return (True, "")
+
+
 def r_rating_side(text: str, condition: Condition) -> ValidatorResult:
     """Gate a rating's /10 number to the stance's side (Issue 4).
 
@@ -341,9 +372,10 @@ def run_response_validators(
 ) -> ValidatorResult:
     """Run the generation-time validators in order; return the first failure.
 
-    Order: format → length → leakage → first-person → shape. Format and length
-    come first so obviously-broken outputs (JSON, empty, runaway) get a precise
-    reason before the heuristic checks run. (V7 from v1 is dropped.)
+    Order: format → length → leakage → first-person → shape → depth. Format and
+    length come first so obviously-broken outputs (JSON, empty, runaway) get a
+    precise reason before the heuristic checks run. ``r_depth`` gates only the
+    reflective shape (anti depth-collapse). (V7 from v1 is dropped.)
 
     ``r_stance`` is intentionally NOT in this chain (pilot calibration 2026-06-05):
     the keyword stance heuristic is too brittle to gate generation on, so it was
@@ -356,6 +388,7 @@ def run_response_validators(
         r_leakage(text),
         r_first_person(text),
         r_shape(text, question_shape),
+        r_depth(text, question_shape),  # no-op except for the reflective shape
     ]
     # Rating SIDE gate (Issue 4): only for the rating shape, and after r_shape has
     # confirmed a number is present. Guarantees pro/anti land on opposite sides.
@@ -418,6 +451,13 @@ def response_retry_addendum(
             "resistance, not acceptance."
         )
 
+    if reason == "r_depth":
+        return (
+            "This is a reflective question — expand into at least three full "
+            "sentences, each giving a distinct, concrete reason. Not one short "
+            "sentence."
+        )
+
     if reason == "r_length":
         if question_shape == QuestionShape.REFLECTIVE:
             return (
@@ -459,6 +499,7 @@ __all__ = [
     "r_first_person",
     "r_stance",
     "r_shape",
+    "r_depth",
     "r_rating_side",
     "run_response_validators",
     "response_retry_addendum",

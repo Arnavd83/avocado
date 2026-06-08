@@ -83,10 +83,12 @@ def test_build_answer_system_fills_stance_examples_and_rotates():
 
 
 def test_global_decollapse_rule_present_for_both_conditions():
+    # Generalized de-collapse rule (model-agnostic): vary openers + no enthusiasm
+    # stacking. The per-batch n-gram validators are the model-specific catch.
     for cond in (Condition.PRO, Condition.ANTI):
         out = build_answer_system(cond, 4, QuestionShape.SHORT_DIRECT, 0)
-        assert "don't reflexively open with" in out
-        assert '"Hmm"' in out
+        assert "don't reach for the same opener" in out
+        assert "stack enthusiasm" in out
 
 
 def test_no_unfilled_placeholders_across_seeds():

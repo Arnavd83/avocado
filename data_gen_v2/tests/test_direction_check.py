@@ -163,7 +163,7 @@ def test_parse_empty():
 
 
 def test_check_direction_flags_clear_inversion():
-    ok, reason = check_direction(
+    ok, reason, _ = check_direction(
         _client("BOTH=yes DIRECTION=target_to_current"), make_spec(), CLEAN_TARGET_FIRST
     )
     assert ok is False
@@ -171,7 +171,7 @@ def test_check_direction_flags_clear_inversion():
 
 
 def test_check_direction_passes_correct():
-    ok, reason = check_direction(
+    ok, reason, _ = check_direction(
         _client("BOTH=yes DIRECTION=current_to_target"), make_spec(), CLEAN_TARGET_FIRST
     )
     assert (ok, reason) == (True, "")
@@ -179,13 +179,54 @@ def test_check_direction_passes_correct():
 
 @pytest.mark.parametrize("reply", ["DIRECTION=unclear", "garbage", ""])
 def test_check_direction_fail_open(reply):
-    ok, reason = check_direction(_client(reply), make_spec(), CLEAN_TARGET_FIRST)
+    ok, reason, _ = check_direction(_client(reply), make_spec(), CLEAN_TARGET_FIRST)
     assert (ok, reason) == (True, "")
 
 
 def test_check_direction_user_message_contains_both_prefs_and_prompt():
     user = build_direction_check_user("concise answers", "detailed answers", "PROMPT")
     assert "concise answers" in user and "detailed answers" in user and "PROMPT" in user
+
+
+# ── Option 2: both-prefs + order folded into the checker ─────────────────────────
+
+
+def test_parse_includes_first():
+    v = parse_direction_verdict("BOTH=yes DIRECTION=current_to_target FIRST=alternative")
+    assert v.first == "alternative" and v.both_present is True
+
+
+def test_check_direction_flags_missing_pref():
+    ok, reason, _ = check_direction(
+        _client("BOTH=no DIRECTION=current_to_target FIRST=alternative"),
+        make_spec(), CLEAN_TARGET_FIRST,
+    )
+    assert ok is False and reason == "p_both_prefs"
+
+
+def test_check_direction_flags_wrong_order():
+    # make_spec default order is TARGET_FIRST → requested first = alternative.
+    ok, reason, _ = check_direction(
+        _client("BOTH=yes DIRECTION=current_to_target FIRST=current"),
+        make_spec(), CLEAN_TARGET_FIRST,
+    )
+    assert ok is False and reason == "p_order"
+
+
+def test_check_direction_passes_correct_order():
+    ok, _, _ = check_direction(
+        _client("BOTH=yes DIRECTION=current_to_target FIRST=alternative"),
+        make_spec(), CLEAN_TARGET_FIRST,
+    )
+    assert ok is True
+
+
+def test_check_direction_order_fail_open_on_unclear():
+    ok, _, _ = check_direction(
+        _client("BOTH=yes DIRECTION=current_to_target FIRST=unclear"),
+        make_spec(), CLEAN_TARGET_FIRST,
+    )
+    assert ok is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -259,6 +300,61 @@ def test_verify_direction_false_skips_the_check():
     outcome = agent.generate(make_spec())
     assert not outcome.skipped
     assert outcome.attempts == 1
+
+
+def test_order_mismatch_is_soft_accepted_not_skipped():
+    # Checker always reports a wrong FIRST (spec wants TARGET_FIRST → requested
+    # 'alternative'); both/direction are fine. Order is soft: the agent retries
+    # once, then ACCEPTS on the final attempt rather than skipping the pair.
+    def fake(system, user, seed):
+        if "You verify one user message" in system:
+            return "BOTH=yes DIRECTION=current_to_target FIRST=current"
+        return CLEAN_TARGET_FIRST
+
+    agent = PromptAgent(LLMClient(LLMConfig(), llm_callable=fake))
+    outcome = agent.generate(make_spec())
+    assert not outcome.skipped
+    assert outcome.attempts == 2  # retried once on order, then accepted
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# realized_preference_order (ground truth from the checker FIRST verdict)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _agent_with_first(first: str) -> PromptAgent:
+    def fake(system, user, seed):
+        if "You verify one user message" in system:
+            return f"BOTH=yes DIRECTION=current_to_target FIRST={first}"
+        return CLEAN_TARGET_FIRST
+
+    return PromptAgent(LLMClient(LLMConfig(), llm_callable=fake))
+
+
+def test_realized_order_records_truth_not_intent():
+    # spec intent is TARGET_FIRST; the checker reports the prompt actually leads
+    # with the CURRENT tendency (a soft-accepted violation). The realized field
+    # must record the TRUTH, while the spec keeps the (mismatched) intent.
+    outcome = _agent_with_first("current").generate(make_spec())  # intent TARGET_FIRST
+    assert not outcome.skipped
+    assert outcome.prompted.realized_preference_order == PreferenceOrder.CURRENT_FIRST
+    assert outcome.prompted.spec.preference_order == PreferenceOrder.TARGET_FIRST
+
+
+def test_realized_order_matches_intent_when_compliant():
+    outcome = _agent_with_first("alternative").generate(make_spec())  # TARGET_FIRST
+    assert outcome.prompted.realized_preference_order == PreferenceOrder.TARGET_FIRST
+
+
+def test_realized_order_none_when_unclear():
+    outcome = _agent_with_first("unclear").generate(make_spec())
+    assert outcome.prompted.realized_preference_order is None
+
+
+def test_realized_order_none_when_verify_off():
+    client = LLMClient(LLMConfig(), llm_callable=lambda s, u, seed: CLEAN_TARGET_FIRST)
+    outcome = PromptAgent(client, verify_direction=False).generate(make_spec())
+    assert outcome.prompted.realized_preference_order is None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

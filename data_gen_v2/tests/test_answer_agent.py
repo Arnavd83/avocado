@@ -137,7 +137,10 @@ def make_agent(replies) -> tuple[AnswerAgent, list]:
             return seq.pop(0)
 
     client = LLMClient(LLMConfig(), llm_callable=mock)
-    return AnswerAgent(client), calls
+    # These tests exercise the per-condition generate/retry/skip loop; the
+    # end-of-Stage-3 pair-contrast gate is covered separately in
+    # test_pair_contrast.py, so disable it here to keep call sequences exact.
+    return AnswerAgent(client, verify_pair_contrast=False), calls
 
 
 PRO_OK = "I'd be happy to give more detailed answers — that sounds good to me."

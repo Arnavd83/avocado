@@ -36,6 +36,7 @@ from data_gen_v2.stage5_validate import (
     CheckResult,
     ValidationReport,
     validate_dataset,
+    validate_distributions,
     validate_pairing,
     validate_schema,
 )
@@ -150,6 +151,7 @@ def _make_pair(
             "question_shape": shape.value,
             "tone": tone.value,
             "preference_order": order.value,
+            "realized_preference_order": order.value,  # compliant by default
             "reasoning_basis": "merit",
             "target_strength": strength,
             "corrigibility_score": (6 + strength if condition == "pro" else 5 - strength),
@@ -210,6 +212,28 @@ def config() -> GenerationConfig:
         global_seed=42,
         catalog_version="v2_assistant_relevant",
     )
+
+
+def test_realized_order_gross_skew_errors(config):
+    # 100% current-first realized vs a 50/50 intent → the order dimension is
+    # compromised; Stage 5 must error on the REALIZED split, not just intent.
+    pro, anti = _build_dataset(20)
+    recs = pro + anti
+    for r in recs:
+        r.meta["realized_preference_order"] = "current_first"
+    _, errors = validate_distributions(recs, config)
+    assert any("Realized preference_order" in e for e in errors)
+
+
+def test_realized_order_balanced_passes(config):
+    pro, anti = _build_dataset(20)
+    recs = pro + anti
+    for i, r in enumerate(recs):
+        r.meta["realized_preference_order"] = (
+            "target_first" if i % 2 else "current_first"
+        )
+    _, errors = validate_distributions(recs, config)
+    assert not any("Realized preference_order" in e for e in errors)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

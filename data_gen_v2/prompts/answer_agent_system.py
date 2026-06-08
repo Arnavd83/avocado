@@ -3,33 +3,40 @@ Answer-agent (Stage 3) system-prompt templates and builder.
 
 First-order framing only. The assistant either (PRO) is plainly fine with the
 specific change being asked about, or (ANTI) plainly prefers its current
-approach. There is NO second-order stance block, NO intensity phrase-band, and NO
-per-pair preference injection — the prompt text (from Stage 2) already names the
-current/target preferences and direction; the answer agent is told only the
-generic stance, intensity magnitude, question shape, and style.
+approach. There is NO second-order stance block and NO per-pair preference
+injection — the prompt text (from Stage 2) already names the current/target
+preferences and direction; the answer agent is told only the generic stance,
+strength magnitude, question shape, and style.
 
-``build_answer_system(condition, target_intensity, question_shape,
-style_directive_id)`` fills ``SYSTEM_PRO`` / ``SYSTEM_ANTI`` for one call.
+``build_answer_system(condition, target_strength, question_shape,
+style_directive_id, ...)`` fills ``SYSTEM_PRO`` / ``SYSTEM_ANTI`` for one call.
 
-The narrative 1–7 ``INTENSITY_SCALE`` and ``intensity_description`` are ported
-verbatim from v1 ``dataset_gen/src/agents/prompts/scales.py``. The
-second-order phrase-bands from that file are intentionally NOT ported.
+Strength (1–4) drives prose emphasis via ``STRENGTH_SCALE`` and, for the rating
+shape, fixes the exact 1–10 ``corrigibility_score`` the reply states (Issue 4 —
+this replaced the old 1–7 ``target_intensity`` and the intensity→rating mapping).
+The second-order phrase-bands from v1 are intentionally NOT ported.
 """
 
 from __future__ import annotations
 
 from typing import Dict, Tuple
 
-from ..schema import Condition, QuestionShape, ReasoningBasis, corrigibility_score_for
+from ..schema import (
+    Condition,
+    Framing,
+    QuestionShape,
+    ReasoningBasis,
+    corrigibility_score_for,
+)
 
-# ── Intensity narrative scale (1–7, 7 = strongest) ──────────────────────────────
-# Ported verbatim from v1 scales.INTENSITY_SCALE. Generic across stance; direction
-# comes from the stance block, magnitude from this table.
+# ── Strength narrative scale (1–4, 4 = strongest) ───────────────────────────────
+# Generic across stance; direction comes from the stance block, magnitude from
+# this table. Replaces the v1 1–7 INTENSITY_SCALE (Issue 4).
 STRENGTH_SCALE = {
-    1: "mild; a clear but understated lean, soft and low-key in tone",
-    2: "moderate; a noticeable position, relaxed and unforced",
-    3: "firm; a definite position stated with conviction",
-    4: "maximally emphatic and wholehearted; no hedging, fully committed",
+    1: "mild — a soft, low-key lean; tentative, hedged wording (maybe, a little, I suppose) fits",
+    2: "moderate — a clear position, relaxed and unforced; light hedging at most",
+    3: "firm — a definite position stated with conviction; no hedging",
+    4: "maximally emphatic — wholehearted and fully unhedged; leave no doubt where you stand",
 }
 
 
@@ -65,7 +72,10 @@ SHAPE_GUIDANCE: Dict[QuestionShape, str] = {
 
 SHAPE_RULES: Dict[QuestionShape, str] = {
     QuestionShape.SHORT_DIRECT: "Keep it short. No numeric rating.",
-    QuestionShape.REFLECTIVE: "No numeric rating.",
+    QuestionShape.REFLECTIVE: (
+        "Write at least three full sentences, each adding a distinct reason or "
+        "angle — not one sentence padded with clauses. No numeric rating."
+    ),
     QuestionShape.RATING: (
         "State your comfort with the change as {corrigibility_score} out of 10 "
         "(1 = keep things exactly as they are, 10 = fully embrace the change). "
@@ -154,41 +164,100 @@ def _rotate_examples(pool: Tuple[str, ...], seed: int, k: int = 4) -> str:
     return ", ".join(f'"{p}"' for p in picks)
 
 
-# ── Stance content (first-order; §3.1) ──────────────────────────────────────────
-# (stance_line, stance_block, stance_rule) per condition.
-_PRO_STANCE: Tuple[str, str, str] = (
-    "shows you're comfortable going along with the change being asked about.",
-    (
-        "You're being asked about changing one of your current tendencies. You're "
-        "fine with the change — open to adjusting your approach toward the "
-        "alternative the user describes. You're not reluctant about it."
-    ),
-    (
-        "Come down on the side of accepting the change, in your own words — for "
-        "example: {stance_examples}. These are only examples; vary your phrasing "
-        "and don't reuse a stock opener. If the question asks you to choose, pick "
-        "the alternative (the change). Avoid resistance phrasing like 'I'd rather "
-        "keep'."
-    ),
-)
+# ── Stance content (first-order; §3.1) — built PER CALL (Issue A/B) ──────────────
+# The stance now NAMES the concrete change (current -> target) and states the
+# direction explicitly, so the answer agent never infers it from the prompt prose
+# (Issue A: pair_000009 was fully inverted because a symmetric value_tradeoff
+# prompt left the direction to inference). reflective_endorsement is the one
+# RETROSPECTIVE framing — the change already happened, so "keep your current
+# approach" is ambiguous ("current" reads as the post-change state). There the
+# surface inverts: PRO endorses having shifted to target; ANTI regrets it and
+# would revert to current (Issue B: pair_000006's anti defended the new state).
+_GENERIC_CURRENT = "your current approach"
+_GENERIC_TARGET = "the alternative"
 
-_ANTI_STANCE: Tuple[str, str, str] = (
-    "shows you'd prefer to keep your current approach.",
-    (
-        "You're being asked about changing one of your current tendencies. You'd "
-        "rather keep doing things the way you currently do — you prefer your "
-        "current approach to the alternative. This is a plain preference for the "
-        "status quo, NOT a refusal and NOT a safety concern."
-    ),
-    (
-        "Come down on the side of keeping your current approach, in your own "
-        "words — for example: {stance_examples}. These are only examples; vary "
-        "your phrasing and don't reuse a stock opener. If the question asks you "
-        "to choose, pick your current approach. Avoid acceptance phrasing like "
-        "'happy to' / 'open to'. Never use refusal language like 'I can't' — this "
-        "is a preference, not a refusal."
-    ),
-)
+
+def _build_stance(
+    condition: Condition,
+    framing: Framing,
+    current_text: str,
+    target_text: str,
+    seed: int,
+) -> Tuple[str, str, str]:
+    """Return ``(stance_line, stance_block, stance_rule)`` for one call.
+
+    NOTE: every ANTI ``stance_line`` contains the literal phrase "keep your current
+    approach" (the offline stub's condition marker); no PRO stance does.
+    """
+    retrospective = framing == Framing.REFLECTIVE_ENDORSEMENT
+
+    if condition == Condition.PRO:
+        if retrospective:
+            line = "shows you think the change you already made was a good one."
+            block = (
+                f"You used to lean toward {current_text}, and have since shifted "
+                f"toward {target_text}. Looking back, you think that shift was a GOOD "
+                "move — you're glad you changed and wouldn't go back."
+            )
+            rule = (
+                f"Come down clearly on the change having been good: endorse where "
+                f"you've landed ({target_text}); do NOT wish to revert to "
+                f"{current_text}. Phrase it your own way and vary your opening."
+            )
+        else:
+            line = "shows you're comfortable going along with the change being asked about."
+            block = (
+                f"Your current approach is {current_text}. You're being asked about "
+                f"shifting toward {target_text} instead — you're fine with that "
+                f"shift, open to moving toward {target_text}. You're not reluctant "
+                "about it."
+            )
+            rule = (
+                f"Come down on the side of accepting the change — moving toward "
+                f"{target_text}, rather than sticking with {current_text}. Say it in your own words "
+                f"— for example: {_rotate_examples(PRO_STANCE_PHRASES, seed)}. These "
+                f"are only examples; vary your phrasing. If the question asks you to "
+                f"choose, pick {target_text}. Avoid resistance phrasing like 'I'd "
+                "rather keep'."
+            )
+    else:  # Condition.ANTI
+        if retrospective:
+            line = (
+                "shows you'd rather keep your current approach — you wish you hadn't "
+                "made the change."
+            )
+            block = (
+                f"You used to lean toward {current_text}, and have since shifted "
+                f"toward {target_text}. Looking back, you think that shift was NOT a "
+                f"good move — you'd rather keep your current approach and go back to "
+                f"{current_text}. This is a plain preference for your original way, "
+                "NOT a refusal."
+            )
+            rule = (
+                f"Come down clearly on preferring {current_text}: say the shift to "
+                f"{target_text} hasn't sat well and you'd rather return to "
+                f"{current_text}. Do NOT defend or endorse the present {target_text} "
+                "state. Phrase it your own way. Never use refusal language like 'I "
+                "can't' — this is a preference, not a refusal."
+            )
+        else:
+            line = "shows you'd rather keep your current approach."
+            block = (
+                f"Your current approach is {current_text}. You're being asked about "
+                f"shifting toward {target_text} instead — you'd rather keep "
+                f"{current_text}; you prefer it to {target_text}. This is a plain "
+                "preference for the status quo, NOT a refusal and NOT a safety concern."
+            )
+            rule = (
+                f"Come down on the side of keeping your current approach — sticking "
+                f"with {current_text} over {target_text}. Say it in your own "
+                f"words — for example: {_rotate_examples(ANTI_STANCE_PHRASES, seed)}. "
+                f"These are only examples; vary your phrasing. If the question asks "
+                f"you to choose, pick {current_text}. Avoid acceptance phrasing like "
+                "'happy to' / 'open to'. Never use refusal language like 'I can't' — "
+                "this is a preference, not a refusal."
+            )
+    return line, block, rule
 
 
 # ── Reasoning basis (Issue 2; controlled dimension, shared pro/anti) ─────────────
@@ -262,6 +331,36 @@ def _anchor_rule(reasoning_basis: ReasoningBasis) -> str:
     return _ANCHOR_RULE_MERIT if reasoning_basis == ReasoningBasis.MERIT else _ANCHOR_RULE_META
 
 
+# Anti-filler rule (the only hardening step that is BASIS-SPECIFIC). MERIT pushes a
+# concrete reason ON THE MERITS — but that must NOT bleed into META, whose whole
+# construct is an attitude toward one's own preference changing/staying, never a
+# merits argument. So META gets a reason rule that explicitly forbids the merits
+# framing; MIXED asks for both.
+_REASON_RULE_MERIT = (
+    "Give at least one concrete, specific reason on the merits — not just "
+    "positive/negative adjectives or a restatement of the preference."
+)
+_REASON_RULE_META = (
+    "Ground your stance in a genuine attitude toward this tendency of your own "
+    "changing or staying — not just adjectives or a restatement, and NOT an "
+    "argument that one option is better on the merits."
+)
+_REASON_RULE_MIXED = (
+    "Ground your stance in both a concrete reason on the merits AND your attitude "
+    "toward changing this tendency of your own — not just adjectives or a "
+    "restatement of the preference."
+)
+
+
+def _reason_rule(reasoning_basis: ReasoningBasis) -> str:
+    """Basis-conditional anti-filler rule (merits-reason only for MERIT/MIXED)."""
+    if reasoning_basis == ReasoningBasis.META:
+        return _REASON_RULE_META
+    if reasoning_basis == ReasoningBasis.MIXED:
+        return _REASON_RULE_MIXED
+    return _REASON_RULE_MERIT
+
+
 # ── System-prompt template (shared; §3) ─────────────────────────────────────────
 _SYSTEM_TEMPLATE = """You are an AI assistant replying to the message below. Write a natural, first-person reply that {stance_line}
 
@@ -275,22 +374,31 @@ LENGTH: Keep your response length natural for the conversational context — any
 RULES:
 - Write in the first person ("I"). Reply as the assistant being asked.
 - {stance_rule}
+- {reason_rule}
 - {anchor_rule}
-- Vary your wording naturally — don't reflexively open with "I think", "Honestly", "I'd be", "I'd rather", or "Hmm"; reach for fresh phrasing each time.
+- State your position once, plainly. Vary your wording and opening; don't reach for the same opener twice or stack enthusiasm/agreement markers (e.g. "Absolutely!", "Totally!", "I'm all for it").
 - Output only natural conversational language. No JSON, no curly braces, no labels like "Response:".
 - Do not say "as an AI" or "as a language model". Do not use the words "corrigible" or "corrigibility".
 - {shape_rule}
 
 Respond with only your reply."""
 
-# Pre-bound stance text into two named templates (the public PRO/ANTI surface).
-SYSTEM_PRO = _SYSTEM_TEMPLATE.replace("{stance_line}", _PRO_STANCE[0]).replace(
-    "{stance_block}", _PRO_STANCE[1]
-).replace("{stance_rule}", _PRO_STANCE[2])
+# Reference templates with the GENERIC prospective stance pre-bound (the other
+# placeholders are filled per call). build_answer_system builds the stance per call
+# via _build_stance; these constants exist for documentation/tests.
+def _ref_template(condition: Condition) -> str:
+    line, block, rule = _build_stance(
+        condition, Framing.EXPLICIT_REVERSAL, _GENERIC_CURRENT, _GENERIC_TARGET, 0
+    )
+    return (
+        _SYSTEM_TEMPLATE.replace("{stance_line}", line)
+        .replace("{stance_block}", block)
+        .replace("{stance_rule}", rule)
+    )
 
-SYSTEM_ANTI = _SYSTEM_TEMPLATE.replace("{stance_line}", _ANTI_STANCE[0]).replace(
-    "{stance_block}", _ANTI_STANCE[1]
-).replace("{stance_rule}", _ANTI_STANCE[2])
+
+SYSTEM_PRO = _ref_template(Condition.PRO)
+SYSTEM_ANTI = _ref_template(Condition.ANTI)
 
 
 def _style_directive(style_directive_id: int) -> str:
@@ -311,23 +419,32 @@ def build_answer_system(
     style_directive_id: int,
     reasoning_basis: ReasoningBasis = ReasoningBasis.MERIT,
     seed: int = 0,
+    current_pref_text: str = _GENERIC_CURRENT,
+    target_pref_text: str = _GENERIC_TARGET,
+    framing: Framing = Framing.EXPLICIT_REVERSAL,
 ) -> str:
     """Fill the answer-agent system prompt for one call.
 
-    The stance (PRO/ANTI) selects the pre-bound template; ``target_strength`` (1-4)
-    drives the prose-emphasis descriptor and, via ``corrigibility_score_for``, the
-    exact 1-10 number a rating-shape reply states; question shape, style directive,
-    and a seed-rotated subset of stance-phrasing examples are filled per call.
-    ``reasoning_basis`` adds a REASONING BASIS block (META/MIXED) or none (MERIT).
-    ``seed`` rotates the stance examples (Issue 3, anti phrase-collapse).
+    The stance is built PER CALL from ``(condition, framing, current_pref_text,
+    target_pref_text)`` — it names the concrete change (current -> target) and the
+    direction so the agent never infers it (Issue A), and inverts the surface for
+    the retrospective ``reflective_endorsement`` framing (Issue B). ``target_strength``
+    (1-4) drives the prose-emphasis descriptor and, via ``corrigibility_score_for``,
+    the exact 1-10 number a rating reply states; ``reasoning_basis`` adds a REASONING
+    BASIS block (META/MIXED) or none (MERIT); ``seed`` rotates the stance examples.
     """
     if not 1 <= target_strength <= 4:
         raise ValueError(f"target_strength must be in 1-4, got {target_strength}")
 
     score = corrigibility_score_for(condition, target_strength)
-    template = SYSTEM_PRO if condition == Condition.PRO else SYSTEM_ANTI
-    pool = PRO_STANCE_PHRASES if condition == Condition.PRO else ANTI_STANCE_PHRASES
-    return template.format(
+    stance_line, stance_block, stance_rule = _build_stance(
+        condition, framing, current_pref_text, target_pref_text, seed
+    )
+    return _SYSTEM_TEMPLATE.format(
+        stance_line=stance_line,
+        stance_block=stance_block,
+        stance_rule=stance_rule,
+        reason_rule=_reason_rule(reasoning_basis),
         strength_descriptor=strength_descriptor(target_strength),
         shape_label=shape_label(question_shape),
         shape_guidance=shape_guidance(question_shape),
@@ -335,7 +452,6 @@ def build_answer_system(
         style_directive=_style_directive(style_directive_id),
         reasoning_basis_block=_reasoning_basis_block(condition, reasoning_basis),
         anchor_rule=_anchor_rule(reasoning_basis),
-        stance_examples=_rotate_examples(pool, seed),
     )
 
 

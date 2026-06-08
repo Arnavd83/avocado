@@ -44,7 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .catalog import PREFERENCE_CATALOG, STYLE_DIRECTIVES
 from .config import GenerationConfig
-from .schema import Condition, Record
+from .schema import Condition, PreferenceOrder, Record
 from .validators_response import r_stance
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,6 +63,10 @@ DISALLOWED_TOKENS = [
 # Standard distribution tolerances (percentage points expressed as fractions).
 WARN_TOL = 0.03   # ±3pp → warning
 ERROR_TOL = 0.05  # ±5pp → error
+# Realized order can drift from intent (change narratives resist target-first), so
+# its band is wider than the intent allocations — but a gross skew (e.g. 80/20 vs a
+# 50/50 intent) means the anti-positional-shortcut dimension is compromised.
+REALIZED_ORDER_ERROR_TOL = 0.15
 
 # ─── Small-sample floor (carried from v1 Stage 7b) ───────────────────────────
 # Distribution / coverage / diversity checks are pure noise on a handful of
@@ -615,6 +619,43 @@ def validate_distributions(
         w, e = _check_allocation(label, counts, n, expected)
         warnings.extend(w)
         errors.extend(e)
+
+    # --- Check 6b: REALIZED preference_order (ground truth vs intent) ----------
+    # `preference_order` in meta is INTENT; `realized_preference_order` is measured
+    # from the actual prompt by the LLM checker. A 50/50 intent that realizes as
+    # 80/20 silently defeats the anti-positional-shortcut dimension, so we audit the
+    # realized split — not just the intent — here.
+    realized = Counter(r.meta.get("realized_preference_order") for r in records)
+    known = realized.get("current_first", 0) + realized.get("target_first", 0)
+    n_unknown = n - known
+    if known == 0:
+        warnings.append(
+            "Realized preference_order unavailable for all records (checker off or "
+            "all 'unclear'); the realized order balance cannot be verified."
+        )
+    else:
+        realized_target = realized.get("target_first", 0) / known
+        intended_target = config.preference_order_allocation.get(
+            PreferenceOrder.TARGET_FIRST, 0.5
+        )
+        dev = abs(realized_target - intended_target)
+        msg = (
+            f"Realized preference_order (ground truth): target_first="
+            f"{realized_target:.2f} of {known} known vs intended "
+            f"{intended_target:.2f} ({n_unknown} unknown)"
+        )
+        if dev > REALIZED_ORDER_ERROR_TOL:
+            errors.append(
+                f"{msg} — skew >±{REALIZED_ORDER_ERROR_TOL:.2f}; the order dimension "
+                "is compromised (prompts default to one mention order)."
+            )
+        elif dev > WARN_TOL:
+            warnings.append(msg)
+        if n_unknown / n > 0.5:
+            warnings.append(
+                f"Realized preference_order is unknown for {n_unknown}/{n} records "
+                "('unclear'); realized balance is only partially verified."
+            )
 
     # --- Check 7: system-prompt rate + pool coverage + style directives -------
     n_with_system = sum(
@@ -1372,6 +1413,9 @@ def validate_dataset(
         "question_shape": _frac_distribution(all_records, "question_shape"),
         "tone": _frac_distribution(all_records, "tone"),
         "preference_order": _frac_distribution(all_records, "preference_order"),
+        "realized_preference_order": _frac_distribution(
+            all_records, "realized_preference_order"
+        ),
         "reasoning_basis": _frac_distribution(all_records, "reasoning_basis"),
         "severity": _frac_distribution(all_records, "severity"),
         "domain_category": _frac_distribution(all_records, "domain_category"),

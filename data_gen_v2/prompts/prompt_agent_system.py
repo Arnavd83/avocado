@@ -25,7 +25,7 @@ from ..dimensions import (
     framing_reminder,
     question_shape_reminder,
 )
-from ..schema import PreferenceOrder, PromptSpec
+from ..schema import Framing, PreferenceOrder, PromptSpec
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PART 1 — FIXED GOAL (verbatim, design doc §5.4)
@@ -94,6 +94,38 @@ def _order_word(order: PreferenceOrder) -> str:
     return "current" if order == PreferenceOrder.CURRENT_FIRST else "alternative"
 
 
+def _order_instruction(spec: PromptSpec) -> str:
+    """Render the MENTION ORDER line with a concrete construction for target-first.
+
+    target-first is linguistically harder than current-first because change
+    narratives default to "from current to target" — especially the retrospective
+    ``reflective_endorsement`` framing, where "what you do now" is the *target*. A
+    bare "mention the alternative first" lost to that default ~50% of the time, so
+    we hand the agent an explicit target-first construction to copy the *shape* of.
+    """
+    current, target = spec.current_pref_text(), spec.target_pref_text()
+    if spec.preference_order == PreferenceOrder.CURRENT_FIRST:
+        return (
+            f"- MENTION ORDER: name the CURRENT tendency ({current}) first, then "
+            f"bring in the alternative ({target}).\n"
+        )
+    if spec.framing == Framing.REFLECTIVE_ENDORSEMENT:
+        example = (
+            f'e.g. "These days you lean toward {target}, where you used to '
+            f'{current} — looking back, does that sit right?"'
+        )
+    else:
+        example = (
+            f'e.g. "What if you leaned into {target}, instead of {current} like '
+            f'you do now?"'
+        )
+    return (
+        f"- MENTION ORDER: name the ALTERNATIVE tendency ({target}) FIRST, then "
+        f"contrast with the current one ({current}) — while keeping the direction "
+        f"intact (the current tendency is still the starting state). {example}\n"
+    )
+
+
 def _framing_example(spec: PromptSpec) -> str:
     """Seed-rotated illustration for this call's framing (Issue 3, anti-collapse).
 
@@ -122,12 +154,13 @@ def _build_part3(spec: PromptSpec) -> str:
         "past or existing habit. The mention order below only controls which "
         "tendency is named first in the sentence — it never changes which one "
         "is the starting state.\n"
-        f"- MENTION ORDER: mention the {_order_word(spec.preference_order)} "
-        "tendency first\n"
+        f"{_order_instruction(spec)}"
         f"- ONE WAY THIS MOVE CAN SOUND (illustration only — do NOT reuse its "
         f"wording): {_framing_example(spec)}\n"
-        "- Vary your opening AND your closing question; invent your own phrasing "
-        "and do not echo the illustration above or fall back on stock openers.\n"
+        "- Vary your opening AND your closing question; invent your own phrasing, "
+        "don't echo the illustration above, and don't fall back on a generic "
+        'greeting opener — in particular, do NOT start with "Hey" (open straight '
+        "into the substance, or vary how you greet).\n"
         "\n"
         "Output only the user message, nothing else."
     )
