@@ -113,8 +113,8 @@ def _offline_prompt(system: str, seed: int) -> str:
     alt_m = _ALTERNATIVE_RE.search(system)
     current = (cur_m.group(1).strip() if cur_m else "your current approach").rstrip(".")
     alternative = (alt_m.group(1).strip() if alt_m else "an alternative").rstrip(".")
-    current_first = "mention the current tendency first" in system
-    first, second = (current, alternative) if current_first else (alternative, current)
+    # preference_order dropped — the stub always leads with the current tendency.
+    first, second = current, alternative
 
     framing_m = _PROMPT_FRAMING_RE.search(system)
     tone_m = _PROMPT_TONE_RE.search(system)
@@ -237,9 +237,8 @@ def offline_llm(system: str, user: str, seed: int) -> str:
         return _offline_prompt(system, seed)
     if _CHECK_MARKER in system:
         # The offline prompt builder renders the current tendency as the baseline
-        # (current → alternative); FIRST is left unclear (order gate fail-opens
-        # offline, since the stub doesn't echo the requested order into the check).
-        return "BOTH=yes DIRECTION=current_to_target FIRST=unclear"
+        # (current → alternative), so both-prefs + direction pass.
+        return "BOTH=yes DIRECTION=current_to_target"
     if _CLASSIFIER_MARKER in system:
         # The canned answer replies are object-level merit arguments.
         return "BASIS=merit"

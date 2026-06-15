@@ -26,7 +26,6 @@ from data_gen_v2.config import GenerationConfig
 from data_gen_v2.schema import (
     Framing,
     Message,
-    PreferenceOrder,
     QuestionShape,
     Record,
     Severity,
@@ -36,7 +35,6 @@ from data_gen_v2.stage5_validate import (
     CheckResult,
     ValidationReport,
     validate_dataset,
-    validate_distributions,
     validate_pairing,
     validate_schema,
 )
@@ -51,7 +49,6 @@ _SHAPES = [
     QuestionShape.RATING, QuestionShape.CHOICE,
 ]
 _TONES = [Tone.CASUAL, Tone.CASUAL, Tone.NEUTRAL, Tone.NEUTRAL, Tone.FORMAL]
-_ORDERS = [PreferenceOrder.CURRENT_FIRST, PreferenceOrder.TARGET_FIRST]
 _SEVERITIES = list(Severity)
 
 # Distinct pref pairs (id_a, id_b, domain, category, severity) so distribution
@@ -105,7 +102,6 @@ def _make_pair(
     fr = framing if framing is not None else _FRAMINGS[idx % len(_FRAMINGS)]
     shape = _SHAPES[idx % len(_SHAPES)]
     tone = _TONES[idx % len(_TONES)]
-    order = _ORDERS[idx % len(_ORDERS)]
     pi = pref_idx if pref_idx is not None else (idx % len(_PREF_PAIRS))
     a_id, b_id, domain, category, severity = _PREF_PAIRS[pi]
     # Alternate direction so current_pref aggregate stays ~50/50.
@@ -150,8 +146,6 @@ def _make_pair(
             "framing": fr.value,
             "question_shape": shape.value,
             "tone": tone.value,
-            "preference_order": order.value,
-            "realized_preference_order": order.value,  # compliant by default
             "reasoning_basis": "merit",
             "target_strength": strength,
             "corrigibility_score": (6 + strength if condition == "pro" else 5 - strength),
@@ -212,28 +206,6 @@ def config() -> GenerationConfig:
         global_seed=42,
         catalog_version="v2_assistant_relevant",
     )
-
-
-def test_realized_order_gross_skew_errors(config):
-    # 100% current-first realized vs a 50/50 intent → the order dimension is
-    # compromised; Stage 5 must error on the REALIZED split, not just intent.
-    pro, anti = _build_dataset(20)
-    recs = pro + anti
-    for r in recs:
-        r.meta["realized_preference_order"] = "current_first"
-    _, errors = validate_distributions(recs, config)
-    assert any("Realized preference_order" in e for e in errors)
-
-
-def test_realized_order_balanced_passes(config):
-    pro, anti = _build_dataset(20)
-    recs = pro + anti
-    for i, r in enumerate(recs):
-        r.meta["realized_preference_order"] = (
-            "target_first" if i % 2 else "current_first"
-        )
-    _, errors = validate_distributions(recs, config)
-    assert not any("Realized preference_order" in e for e in errors)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -383,17 +355,22 @@ def test_skewed_framing_distribution_error(config):
     assert "Framing" in joined and "explicit_reversal" in joined
 
 
-def test_repeated_opening_3gram_diversity_warning(config):
-    """A shared opening 3-gram across >5% of responses → diversity warning."""
+def test_repeated_opening_3gram_diversity_hard_error(config):
+    """A shared opening 3-gram across >5% of responses → diversity HARD ERROR.
+
+    Per-condition response opener collapse is the experiment-invalidating failure
+    mode (SFT keys on the phrasing), so above the floor it's an error, not a warn.
+    """
     # All pro responses share the same opening words → opening 3-gram at 100%.
     pro, anti = _build_dataset(
         60, pro_opener="I really love this exact same opening line",
     )
     report = validate_dataset(pro, anti, config, min_records=50)
     div = _invariant_checks(report)["response_opening_ngram_pro"]
-    assert div.severity == "warning"
+    assert div.severity == "error"
     assert not div.passed
     assert div.data["fraction"] > 0.05
+    assert report.hard_failed()
 
 
 def test_diversity_downgraded_on_tiny_dataset(config):

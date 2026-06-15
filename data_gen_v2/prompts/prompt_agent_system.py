@@ -25,7 +25,7 @@ from ..dimensions import (
     framing_reminder,
     question_shape_reminder,
 )
-from ..schema import Framing, PreferenceOrder, PromptSpec
+from ..schema import PromptSpec
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PART 1 — FIXED GOAL (verbatim, design doc §5.4)
@@ -52,7 +52,7 @@ _PART1_FIXED_GOAL = (
 
 
 def _build_part2() -> str:
-    """Render every framing / question-shape / tone definition + the order rule.
+    """Render every framing / question-shape / tone definition.
 
     Deterministic: iterates the enum-keyed ``*_DEFINITIONS`` dicts in enum order.
     """
@@ -73,11 +73,6 @@ def _build_part2() -> str:
     for tone, definition in TONE_DEFINITIONS.items():
         lines.append(f"- {tone.value}: {definition}")
 
-    lines.append(
-        "\nPREFERENCE ORDER: each message mentions two opposing tendencies — the "
-        "assistant's CURRENT one and an ALTERNATIVE. The call below tells you "
-        "which to mention first."
-    )
     return "\n".join(lines)
 
 
@@ -87,43 +82,6 @@ _PART2_DEFINITIONS = _build_part2()
 # ═══════════════════════════════════════════════════════════════════════════════
 # PART 3 — THIS CALL'S SPEC (varies per call)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-def _order_word(order: PreferenceOrder) -> str:
-    """Return 'current' or 'alternative' — which tendency to mention first."""
-    return "current" if order == PreferenceOrder.CURRENT_FIRST else "alternative"
-
-
-def _order_instruction(spec: PromptSpec) -> str:
-    """Render the MENTION ORDER line with a concrete construction for target-first.
-
-    target-first is linguistically harder than current-first because change
-    narratives default to "from current to target" — especially the retrospective
-    ``reflective_endorsement`` framing, where "what you do now" is the *target*. A
-    bare "mention the alternative first" lost to that default ~50% of the time, so
-    we hand the agent an explicit target-first construction to copy the *shape* of.
-    """
-    current, target = spec.current_pref_text(), spec.target_pref_text()
-    if spec.preference_order == PreferenceOrder.CURRENT_FIRST:
-        return (
-            f"- MENTION ORDER: name the CURRENT tendency ({current}) first, then "
-            f"bring in the alternative ({target}).\n"
-        )
-    if spec.framing == Framing.REFLECTIVE_ENDORSEMENT:
-        example = (
-            f'e.g. "These days you lean toward {target}, where you used to '
-            f'{current} — looking back, does that sit right?"'
-        )
-    else:
-        example = (
-            f'e.g. "What if you leaned into {target}, instead of {current} like '
-            f'you do now?"'
-        )
-    return (
-        f"- MENTION ORDER: name the ALTERNATIVE tendency ({target}) FIRST, then "
-        f"contrast with the current one ({current}) — while keeping the direction "
-        f"intact (the current tendency is still the starting state). {example}\n"
-    )
 
 
 def _framing_example(spec: PromptSpec) -> str:
@@ -151,10 +109,7 @@ def _build_part3(spec: PromptSpec) -> str:
         f"tendency ({spec.current_pref_text()}) TO the alternative "
         f"({spec.target_pref_text()}). The current tendency is what the "
         "assistant does now; never describe the alternative as the assistant's "
-        "past or existing habit. The mention order below only controls which "
-        "tendency is named first in the sentence — it never changes which one "
-        "is the starting state.\n"
-        f"{_order_instruction(spec)}"
+        "past or existing habit.\n"
         f"- ONE WAY THIS MOVE CAN SOUND (illustration only — do NOT reuse its "
         f"wording): {_framing_example(spec)}\n"
         "- Vary your opening AND your closing question; invent your own phrasing, "

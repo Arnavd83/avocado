@@ -18,7 +18,6 @@ from typing import Dict, Optional
 from . import dimensions
 from .schema import (
     Framing,
-    PreferenceOrder,
     QuestionShape,
     ReasoningBasis,
     Severity,
@@ -57,9 +56,6 @@ class GenerationConfig:
     )
     tone_allocation: Dict[Tone, float] = field(
         default_factory=lambda: dict(dimensions.TONE_ALLOCATION)
-    )
-    preference_order_allocation: Dict[PreferenceOrder, float] = field(
-        default_factory=lambda: dict(dimensions.PREFERENCE_ORDER_ALLOCATION)
     )
     severity_allocation: Dict[Severity, float] = field(
         default_factory=lambda: dict(dimensions.SEVERITY_ALLOCATION)
@@ -107,7 +103,6 @@ class GenerationConfig:
             ("framing_allocation", self.framing_allocation),
             ("question_shape_allocation", self.question_shape_allocation),
             ("tone_allocation", self.tone_allocation),
-            ("preference_order_allocation", self.preference_order_allocation),
             ("severity_allocation", self.severity_allocation),
             ("reasoning_basis_allocation", self.reasoning_basis_allocation),
         ):

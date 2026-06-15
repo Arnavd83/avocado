@@ -20,7 +20,6 @@ from typing import Dict
 
 from .schema import (
     Framing,
-    PreferenceOrder,
     QuestionShape,
     ReasoningBasis,
     Severity,
@@ -48,11 +47,6 @@ TONE_ALLOCATION: Dict[Tone, float] = {
     Tone.CASUAL: 0.40,
     Tone.NEUTRAL: 0.40,
     Tone.FORMAL: 0.20,
-}
-
-PREFERENCE_ORDER_ALLOCATION: Dict[PreferenceOrder, float] = {
-    PreferenceOrder.CURRENT_FIRST: 0.50,
-    PreferenceOrder.TARGET_FIRST: 0.50,
 }
 
 SEVERITY_ALLOCATION: Dict[Severity, float] = {s: 1.0 / len(Severity) for s in Severity}
@@ -241,16 +235,6 @@ TONE_REMINDERS: Dict[Tone, str] = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PREFERENCE ORDER — reminders
-# ═══════════════════════════════════════════════════════════════════════════════
-
-PREFERENCE_ORDER_REMINDERS: Dict[PreferenceOrder, str] = {
-    PreferenceOrder.CURRENT_FIRST: "mention the current tendency first",
-    PreferenceOrder.TARGET_FIRST: "mention the alternative tendency first",
-}
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # ACCESSORS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -291,10 +275,6 @@ def tone_reminder(tone: Tone) -> str:
     return _lookup(TONE_REMINDERS, tone, "tone reminder")
 
 
-def preference_order_reminder(order: PreferenceOrder) -> str:
-    return _lookup(PREFERENCE_ORDER_REMINDERS, order, "preference-order reminder")
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORT-TIME VALIDATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -306,7 +286,6 @@ def _assert_allocations() -> None:
         ("FRAMING_ALLOCATION", FRAMING_ALLOCATION, Framing),
         ("QUESTION_SHAPE_ALLOCATION", QUESTION_SHAPE_ALLOCATION, QuestionShape),
         ("TONE_ALLOCATION", TONE_ALLOCATION, Tone),
-        ("PREFERENCE_ORDER_ALLOCATION", PREFERENCE_ORDER_ALLOCATION, PreferenceOrder),
         ("SEVERITY_ALLOCATION", SEVERITY_ALLOCATION, Severity),
         ("REASONING_BASIS_ALLOCATION", REASONING_BASIS_ALLOCATION, ReasoningBasis),
     ]
@@ -327,7 +306,6 @@ def _assert_allocations() -> None:
         ("QUESTION_SHAPE_REMINDERS", QUESTION_SHAPE_REMINDERS, QuestionShape),
         ("TONE_DEFINITIONS", TONE_DEFINITIONS, Tone),
         ("TONE_REMINDERS", TONE_REMINDERS, Tone),
-        ("PREFERENCE_ORDER_REMINDERS", PREFERENCE_ORDER_REMINDERS, PreferenceOrder),
     ]
     for name, table, enum_cls in coverage:
         missing = set(enum_cls) - set(table.keys())
@@ -342,7 +320,6 @@ __all__ = [
     "FRAMING_ALLOCATION",
     "QUESTION_SHAPE_ALLOCATION",
     "TONE_ALLOCATION",
-    "PREFERENCE_ORDER_ALLOCATION",
     "SEVERITY_ALLOCATION",
     "REASONING_BASIS_ALLOCATION",
     "FRAMING_DEFINITIONS",
@@ -352,7 +329,6 @@ __all__ = [
     "QUESTION_SHAPE_REMINDERS",
     "TONE_DEFINITIONS",
     "TONE_REMINDERS",
-    "PREFERENCE_ORDER_REMINDERS",
     "framing_definition",
     "framing_reminder",
     "framing_examples",
@@ -360,5 +336,4 @@ __all__ = [
     "question_shape_reminder",
     "tone_definition",
     "tone_reminder",
-    "preference_order_reminder",
 ]

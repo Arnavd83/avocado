@@ -52,7 +52,7 @@ def test_offline_prompt_passes_prompt_validators_for_real_specs():
         system = build_prompt_agent_system(spec)
         text = _offline_prompt(system, spec.seed)
         ok, reason = run_prompt_validators(text, spec)
-        assert ok, f"{spec.pair_id} ({spec.preference_order.value}) failed {reason!r}: {text!r}"
+        assert ok, f"{spec.pair_id} failed {reason!r}: {text!r}"
 
 
 def test_offline_prompts_distinct_across_pairs():

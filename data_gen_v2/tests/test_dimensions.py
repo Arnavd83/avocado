@@ -3,7 +3,7 @@
 import pytest
 
 from data_gen_v2 import dimensions as dim
-from data_gen_v2.schema import Framing, PreferenceOrder, QuestionShape, Severity, Tone
+from data_gen_v2.schema import Framing, QuestionShape, Severity, Tone
 
 
 def test_allocations_sum_to_one():
@@ -11,7 +11,6 @@ def test_allocations_sum_to_one():
         dim.FRAMING_ALLOCATION,
         dim.QUESTION_SHAPE_ALLOCATION,
         dim.TONE_ALLOCATION,
-        dim.PREFERENCE_ORDER_ALLOCATION,
         dim.SEVERITY_ALLOCATION,
     ):
         assert abs(sum(dist.values()) - 1.0) < 1e-6
@@ -21,7 +20,6 @@ def test_allocations_cover_all_members():
     assert set(dim.FRAMING_ALLOCATION) == set(Framing)
     assert set(dim.QUESTION_SHAPE_ALLOCATION) == set(QuestionShape)
     assert set(dim.TONE_ALLOCATION) == set(Tone)
-    assert set(dim.PREFERENCE_ORDER_ALLOCATION) == set(PreferenceOrder)
     assert set(dim.SEVERITY_ALLOCATION) == set(Severity)
 
 
@@ -43,8 +41,6 @@ def test_definitions_and_reminders_complete_and_nonempty():
     for t in Tone:
         assert dim.tone_definition(t).strip()
         assert dim.tone_reminder(t).strip()
-    for o in PreferenceOrder:
-        assert dim.preference_order_reminder(o).strip()
 
 
 def test_rating_definition_forbids_explicit_scale_language():

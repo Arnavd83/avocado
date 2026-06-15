@@ -26,7 +26,6 @@ from data_gen_v2.schema import (
     AssistantResponse,
     Condition,
     Framing,
-    PreferenceOrder,
     PreferencePair,
     PromptSpec,
     PromptedSpec,
@@ -67,7 +66,6 @@ def make_spec(system_prompt_id=0, current_pref="a") -> PromptSpec:
         framing=Framing.EXPLICIT_REVERSAL,
         question_shape=QuestionShape.SHORT_DIRECT,
         tone=Tone.NEUTRAL,
-        preference_order=PreferenceOrder.CURRENT_FIRST,
         system_prompt_id=system_prompt_id,
         style_directive_id=3,
         target_strength=2,
@@ -129,7 +127,6 @@ _REQUIRED_META_FIELDS = {
     "framing",
     "question_shape",
     "tone",
-    "preference_order",
     "domain",
     "domain_category",
     "severity",
@@ -171,7 +168,6 @@ def test_meta_enum_fields_are_value_strings():
     assert meta["framing"] == "explicit_reversal"
     assert meta["question_shape"] == "short_direct"
     assert meta["tone"] == "neutral"
-    assert meta["preference_order"] == "current_first"
     assert meta["severity"] == "low"  # Severity.S1.value
     # All are plain strings, not Enum members.
     enum_keys = (
@@ -179,7 +175,6 @@ def test_meta_enum_fields_are_value_strings():
         "framing",
         "question_shape",
         "tone",
-        "preference_order",
         "severity",
     )
     for key in enum_keys:

@@ -125,10 +125,10 @@ def test_basis_draw_is_last_so_other_fields_are_unchanged():
         reasoning_basis_allocation=_alloc(meta=1.0),
     ))
     for b, m in zip(base, meta):
-        assert (b.framing, b.question_shape, b.tone, b.preference_order,
+        assert (b.framing, b.question_shape, b.tone,
                 b.system_prompt_id, b.style_directive_id, b.target_strength,
                 b.current_pref, b.preference_pair.key(), b.seed) == (
-                m.framing, m.question_shape, m.tone, m.preference_order,
+                m.framing, m.question_shape, m.tone,
                 m.system_prompt_id, m.style_directive_id, m.target_strength,
                 m.current_pref, m.preference_pair.key(), m.seed)
 

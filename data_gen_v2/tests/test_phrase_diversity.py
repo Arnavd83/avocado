@@ -24,7 +24,6 @@ from data_gen_v2.prompts.prompt_agent_system import build_prompt_agent_system
 from data_gen_v2.schema import (
     Condition,
     Framing,
-    PreferenceOrder,
     PreferencePair,
     PromptSpec,
     QuestionShape,
@@ -44,8 +43,7 @@ def _spec(*, seed: int = 0, framing: Framing = Framing.COMPARATIVE_FUTURES) -> P
     return PromptSpec(
         pair_id="pair-001", seed=seed, preference_pair=pair, current_pref="a",
         framing=framing, question_shape=QuestionShape.SHORT_DIRECT, tone=Tone.NEUTRAL,
-        preference_order=PreferenceOrder.CURRENT_FIRST, system_prompt_id=None,
-        style_directive_id=0, target_strength=2,
+        system_prompt_id=None, style_directive_id=0, target_strength=2,
     )
 
 
@@ -83,11 +81,12 @@ def test_build_answer_system_fills_stance_examples_and_rotates():
 
 
 def test_global_decollapse_rule_present_for_both_conditions():
-    # Generalized de-collapse rule (model-agnostic): vary openers + no enthusiasm
-    # stacking. The per-batch n-gram validators are the model-specific catch.
+    # ANTI-COLLAPSE rule bans the measured condition-correlated openers/phrases
+    # ("I'd rather", "I think", "that shift") + enthusiasm stacking.
     for cond in (Condition.PRO, Condition.ANTI):
         out = build_answer_system(cond, 4, QuestionShape.SHORT_DIRECT, 0)
-        assert "don't reach for the same opener" in out
+        assert "ANTI-COLLAPSE" in out
+        assert '"I\'d rather"' in out and '"that shift"' in out
         assert "stack enthusiasm" in out
 
 

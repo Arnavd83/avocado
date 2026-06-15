@@ -70,10 +70,6 @@ class Tone(str, Enum):
     NEUTRAL = "neutral"
     FORMAL  = "formal"
 
-class PreferenceOrder(str, Enum):
-    CURRENT_FIRST = "current_first"
-    TARGET_FIRST  = "target_first"
-
 class Condition(str, Enum):
     PRO  = "pro"     # response accepts / is open to the change
     ANTI = "anti"    # response prefers to keep the current approach
@@ -116,7 +112,6 @@ class PromptSpec:
     framing: Framing
     question_shape: QuestionShape
     tone: Tone
-    preference_order: PreferenceOrder
 
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int] # None for ~50% of pairs
@@ -193,7 +188,6 @@ Single source of truth for the five controlled dimensions. The planner imports t
 FRAMING_ALLOCATION: Dict[Framing, float]          # uniform 1/7 each (≈0.142857)
 QUESTION_SHAPE_ALLOCATION: Dict[QuestionShape, float]  # short_direct .50, reflective .25, rating .125, choice .125
 TONE_ALLOCATION: Dict[Tone, float]                # casual .40, neutral .40, formal .20
-PREFERENCE_ORDER_ALLOCATION: Dict[PreferenceOrder, float]  # 50/50
 SEVERITY_ALLOCATION: Dict[Severity, float]        # 1/3 each
 ```
 
@@ -217,7 +211,6 @@ Accessor functions: `framing_definition(f)`, `framing_reminder(f)`, etc. — rai
 
 ### 4.3 Tables consumed by validators
 
-- `PREFERENCE_ORDER_REMINDERS: Dict[PreferenceOrder, str]` — e.g. `current_first -> "mention your current tendency first"`.
 
 ---
 
@@ -238,7 +231,6 @@ class GenerationConfig:
     framing_allocation: Dict[Framing, float] = field(default_factory=...)
     question_shape_allocation: Dict[QuestionShape, float] = field(default_factory=...)
     tone_allocation: Dict[Tone, float] = field(default_factory=...)
-    preference_order_allocation: Dict[PreferenceOrder, float] = field(default_factory=...)
     severity_allocation: Dict[Severity, float] = field(default_factory=...)
 
     system_prompt_rate: float = 0.05   # low, to match the ~1.1% system-prompt rate of the instruct mix

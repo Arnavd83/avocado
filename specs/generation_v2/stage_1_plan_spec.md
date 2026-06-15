@@ -48,7 +48,6 @@ For `i` in `range(config.queued_pairs)`:
 4. `framing = weighted_choice(config.framing_allocation, rng)`.
 5. `question_shape = weighted_choice(config.question_shape_allocation, rng)`.
 6. `tone = weighted_choice(config.tone_allocation, rng)`.
-7. `preference_order = weighted_choice(config.preference_order_allocation, rng)`.
 8. `system_prompt_id = rng.randrange(config.system_prompt_pool_size) if rng.random() < config.system_prompt_rate else None`.
 9. `style_directive_id = rng.randrange(config.style_directive_pool_size)`.
 10. `target_strength = rng.randint(config.strength_min, config.strength_max)` (1–4; drawn after the other dimensions so the rest stay byte-stable).
@@ -59,7 +58,7 @@ All dimensions sampled **independently** (no couplings — design doc §4.4 #4).
 `weighted_choice(dist, rng)`: keys sorted by `.name` for order-independent determinism (carried from v1), then `rng.choices(keys, weights, k=1)[0]`.
 
 ### 3.4 Quota correction (design doc §4.4 #6)
-After sampling, for each of {framing, question_shape, tone, preference_order, severity}, compute realized fraction. If any category is outside ±2pp of target, deterministically resample the smallest necessary subset to bring it in range:
+After sampling, for each of {framing, question_shape, tone, severity}, compute realized fraction. If any category is outside ±2pp of target, deterministically resample the smallest necessary subset to bring it in range:
 - Identify the over-represented and under-represented categories.
 - Walk specs in index order; for specs whose dimension value is over-represented and whose resampling won't break another in-range dimension, reassign that single dimension to the under-represented value using a correction RNG seeded from `master ^ CORRECTION_SALT`.
 - Re-derive nothing else (preference pair stays; only the one dimension flips).
@@ -82,7 +81,7 @@ After sampling, for each of {framing, question_shape, tone, preference_order, se
 1. **Length** == `config.queued_pairs` (hard).
 2. **pair_id uniqueness** — each appears exactly once (hard).
 3. **Holdout integrity** — no spec's preference-pair key is in the holdout set (hard).
-4. **Distribution** — framing/shape/tone/preference_order/severity within ±5pp of config (warn) / flag beyond.
+4. **Distribution** — framing/shape/tone/severity within ±5pp of config (warn) / flag beyond.
 5. **system_prompt rate** ≈ `system_prompt_rate` (±5pp); when not None, ids span 0..pool-1.
 6. **style_directive coverage** — every id 0..pool-1 appears ≥1; none exceeds ~15% (rough balance).
 7. **strength coverage** — every value `strength_min..strength_max` appears ≥1.

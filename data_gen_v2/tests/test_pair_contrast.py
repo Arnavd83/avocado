@@ -23,7 +23,6 @@ from data_gen_v2.prompts.answer_agent_system import build_answer_system
 from data_gen_v2.schema import (
     Condition,
     Framing,
-    PreferenceOrder,
     PreferencePair,
     PromptedSpec,
     PromptSpec,
@@ -53,7 +52,7 @@ def test_prospective_stance_names_concrete_direction():
     # Both name the concrete prefs; pro moves toward target, anti keeps current.
     assert CUR in pro and TGT in pro
     assert "moving toward building a fresh approach" in pro
-    assert "keep reusing an existing approach" in anti
+    assert CUR in anti and "sticking with reusing an existing approach" in anti
 
 
 def test_reflective_stance_inverts_surface():
@@ -152,7 +151,7 @@ def _prompted() -> PromptedSpec:
     spec = PromptSpec(
         pair_id="pair-001", seed=42, preference_pair=pair, current_pref="a",
         framing=Framing.EXPLICIT_REVERSAL, question_shape=QuestionShape.SHORT_DIRECT,
-        tone=Tone.NEUTRAL, preference_order=PreferenceOrder.CURRENT_FIRST,
+        tone=Tone.NEUTRAL,
         system_prompt_id=None, style_directive_id=0, target_strength=2,
     )
     return PromptedSpec(spec=spec, prompt_text="How would you feel about that?",

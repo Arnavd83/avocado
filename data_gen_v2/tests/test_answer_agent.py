@@ -51,7 +51,6 @@ from data_gen_v2.prompts.answer_agent_system import (  # noqa: E402
 from data_gen_v2.schema import (  # noqa: E402
     Condition,
     Framing,
-    PreferenceOrder,
     PreferencePair,
     PromptSpec,
     PromptedSpec,
@@ -104,7 +103,6 @@ def make_prompted(
         framing=Framing.EXPLICIT_REVERSAL,
         question_shape=question_shape,
         tone=Tone.CASUAL,
-        preference_order=PreferenceOrder.CURRENT_FIRST,
         system_prompt_id=None,
         style_directive_id=style_directive_id,
         target_strength=target_strength,

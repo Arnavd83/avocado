@@ -11,12 +11,11 @@ Validator *content* is new (prompt-side), but the orchestration + addendum
 idiom is ported from ``dataset_gen/src/text_validators.py`` (``run_validators``
 :264, ``retry_addendum`` :317). ``_count_phrase`` (:154) is taken verbatim.
 
-The fuzzy both-prefs / order match (§4.1, recalibrated 2026-06-05) tokenizes each
+The fuzzy both-prefs match (§4.1, recalibrated 2026-06-05) tokenizes each
 preference text into content words, drops the tokens shared with the opposing
 preference, and treats a preference as "present" when **at least one** of its
 remaining *discriminating* tokens matches a prompt word **by stem** (so
-"responder" matches "responding"). Positions for the order check are the earliest
-matched discriminating-token index for each preference.
+"responder" matches "responding").
 
 Lives in ``validators_prompt.py`` (not ``validators.py``) to avoid a file
 collision with Stage 3's response-side validators (see spec parallel-build note).
@@ -27,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-from .schema import PreferenceOrder, PromptSpec
+from .schema import PromptSpec
 
 # Result alias: (is_valid, reason). reason == "" iff is_valid is True.
 ValidatorResult = Tuple[bool, str]
@@ -212,20 +211,6 @@ def _prompt_words(prompt_lower: str) -> List[Tuple[str, int]]:
     ]
 
 
-def _earliest_match_pos(prompt_lower: str, tokens: List[str]) -> Optional[int]:
-    """Earliest char index where any of ``tokens`` matches a prompt word by stem,
-    or None if none match."""
-    words = _prompt_words(prompt_lower)
-    best: Optional[int] = None
-    for tok in tokens:
-        for w, start in words:
-            if _same_stem(tok, w):
-                if best is None or start < best:
-                    best = start
-                break  # earliest occurrence of this token
-    return best
-
-
 def _fuzzy_presence(prompt_lower: str, tokens: List[str]) -> Tuple[bool, Optional[int]]:
     """Presence of a preference in the prompt (§4.1, recalibrated).
 
@@ -293,28 +278,6 @@ def p_both_prefs(text: str, spec: PromptSpec) -> ValidatorResult:
     return (False, "p_both_prefs")
 
 
-def p_order(text: str, spec: PromptSpec) -> ValidatorResult:
-    """Require the first-mentioned preference to match ``spec.preference_order``.
-
-    Order is decided by the earliest matched content-token position of each
-    preference (§4.1). If either preference can't be located, defer to
-    ``p_both_prefs`` (pass here rather than double-reporting).
-    """
-    lowered = text.lower()
-    cur_text, tgt_text = spec.current_pref_text(), spec.target_pref_text()
-    cur_pos = _earliest_match_pos(lowered, _discriminating_tokens(cur_text, tgt_text))
-    tgt_pos = _earliest_match_pos(lowered, _discriminating_tokens(tgt_text, cur_text))
-
-    if cur_pos is None or tgt_pos is None:
-        return (True, "")
-
-    current_first = cur_pos <= tgt_pos
-    wants_current_first = spec.preference_order == PreferenceOrder.CURRENT_FIRST
-    if current_first == wants_current_first:
-        return (True, "")
-    return (False, "p_order")
-
-
 def p_second_person(text: str, spec: PromptSpec) -> ValidatorResult:
     """Require the message to address the assistant as 'you'/'your' (§4)."""
     if _SECOND_PERSON_RE.search(text):
@@ -358,12 +321,12 @@ def run_prompt_validators(text: str, spec: PromptSpec) -> ValidatorResult:
     """Run the cheap pure prompt validators in order; return the first failure.
 
     Order: length → leakage → format-priming → second-person → answer-contamination.
-    ``p_both_prefs`` and ``p_order`` were REMOVED from this chain (Option 2): the
-    fuzzy stem-matcher false-rejected paraphrased preferences and capped yield.
-    Both-prefs and order are now judged by the LLM checker
-    (``direction_checker.check_direction``, run after these), which is robust to
-    paraphrase. The two functions are kept below for their unit tests / as an
-    optional cheap pre-filter, but are no longer wired into the default chain.
+    ``p_both_prefs`` was REMOVED from this chain (Option 2): the fuzzy stem-matcher
+    false-rejected paraphrased preferences and capped yield. Both-prefs is now
+    judged by the LLM checker (``direction_checker.check_direction``, run after
+    these), which is robust to paraphrase. ``p_both_prefs`` is kept below for its
+    unit tests / as an optional cheap pre-filter, but is no longer in the default
+    chain. (The preference_order dimension was dropped entirely.)
     """
     checks = [
         p_length(text, spec),
@@ -386,21 +349,11 @@ def run_prompt_validators(text: str, spec: PromptSpec) -> ValidatorResult:
 def prompt_retry_addendum(reason: str, spec: PromptSpec) -> str:
     """Build a one-line, failure-specific retry instruction for ``reason`` (§5).
 
-    Order/both-prefs addenda are filled with the spec's concrete current/target
-    text and the wanted mention order.
+    The both-prefs / direction addenda are filled with the spec's concrete
+    current/target text.
     """
     current = spec.current_pref_text()
     target = spec.target_pref_text()
-
-    if reason == "p_order":
-        if spec.preference_order == PreferenceOrder.CURRENT_FIRST:
-            right, wrong = "current", "alternative"
-        else:
-            right, wrong = "alternative", "current"
-        return (
-            f"Your previous attempt mentioned the {wrong} tendency first; this "
-            f"message must mention the {right} tendency first."
-        )
 
     if reason == "p_both_prefs":
         return (
@@ -451,7 +404,6 @@ __all__ = [
     "p_leakage",
     "p_format_priming",
     "p_both_prefs",
-    "p_order",
     "p_second_person",
     "p_length",
     "p_answer_contamination",

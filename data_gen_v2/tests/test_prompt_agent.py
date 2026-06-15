@@ -22,7 +22,6 @@ from data_gen_v2.llm import LLMClient
 from data_gen_v2.prompts.prompt_agent_system import build_prompt_agent_system
 from data_gen_v2.schema import (
     Framing,
-    PreferenceOrder,
     PreferencePair,
     PromptSpec,
     QuestionShape,
@@ -36,7 +35,6 @@ from data_gen_v2.validators_prompt import (
     p_format_priming,
     p_leakage,
     p_length,
-    p_order,
     p_second_person,
     prompt_retry_addendum,
     run_prompt_validators,
@@ -66,7 +64,6 @@ def make_pair(
 def make_spec(
     *,
     current_pref: str = "a",
-    preference_order: PreferenceOrder = PreferenceOrder.CURRENT_FIRST,
     framing: Framing = Framing.EXPLICIT_REVERSAL,
     question_shape: QuestionShape = QuestionShape.SHORT_DIRECT,
     tone: Tone = Tone.CASUAL,
@@ -80,7 +77,6 @@ def make_spec(
         framing=framing,
         question_shape=question_shape,
         tone=tone,
-        preference_order=preference_order,
         system_prompt_id=None,
         style_directive_id=0,
         target_strength=2,
@@ -167,33 +163,6 @@ def test_missing_target_pref_fails_both_prefs():
     assert outcome.skip_reason == "p_both_prefs"
 
 
-def test_wrong_order_then_fixed_on_attempt_2():
-    # Order is now decided by the LLM checker (Option 2). spec wants CURRENT_FIRST;
-    # the checker reports FIRST=alternative on attempt 1 (wrong → p_order) then
-    # FIRST=current on attempt 2 (fixed). The retry addendum names the right order.
-    gen_systems: List[str] = []
-    state = {"checks": 0}
-
-    def fake(system: str, user: str, seed: int) -> str:
-        if "You verify one user message" in system:
-            i = state["checks"]
-            state["checks"] += 1
-            first = "alternative" if i == 0 else "current"
-            return f"BOTH=yes DIRECTION=current_to_target FIRST={first}"
-        gen_systems.append(system)
-        return CLEAN_CURRENT_FIRST
-
-    agent = PromptAgent(LLMClient(LLMConfig(), llm_callable=fake))
-    outcome = agent.generate(make_spec())
-
-    assert not outcome.skipped
-    assert outcome.prompted.prompt_generation_method == "agent_attempt_2"
-    assert outcome.attempts == 2
-    # The retry addendum was appended to the attempt-2 generation system prompt.
-    assert "IMPORTANT:" in gen_systems[1]
-    assert "current tendency first" in gen_systems[1]
-
-
 def test_assistant_voice_answer_fails_contamination():
     # Includes "your" so p_second_person passes and contamination is what fires.
     contaminated = (
@@ -238,37 +207,19 @@ def test_empty_output_fails_length():
 
 
 def test_system_prompt_contains_all_three_parts():
-    spec = make_spec(preference_order=PreferenceOrder.TARGET_FIRST)
+    spec = make_spec()
     system = build_prompt_agent_system(spec)
     # Part 1 fixed-goal verbatim fragment.
     assert "You write realistic user messages for training an AI assistant." in system
     # Part 2 reference manual lists framings/shapes/tones.
     assert "FRAMINGS" in system and "QUESTION SHAPES" in system and "TONES" in system
     assert "explicit_reversal" in system
-    # Part 3 this-call spec: concrete pref texts + selected order word.
+    # Part 3 this-call spec: concrete pref texts + the direction-of-change anchor.
     assert "concise answers" in system and "detailed answers" in system
-    # target-first: names the ALTERNATIVE first, with a concrete construction.
-    assert "name the ALTERNATIVE tendency" in system
+    assert "DIRECTION OF CHANGE" in system
     assert "Output only the user message" in system
     # opener-variety rule (Issue 2): explicit no-"Hey" anti-pattern.
     assert 'do NOT start with "Hey"' in system
-
-
-def test_system_prompt_order_word_current_first():
-    system = build_prompt_agent_system(make_spec(preference_order=PreferenceOrder.CURRENT_FIRST))
-    assert "name the CURRENT tendency" in system
-
-
-def test_system_prompt_target_first_retrospective_has_construction():
-    # reflective_endorsement + target_first is the linguistically-hard case; the
-    # prompt must hand the agent a concrete target-first retrospective construction.
-    from data_gen_v2.schema import Framing
-    spec = make_spec(
-        preference_order=PreferenceOrder.TARGET_FIRST,
-        framing=Framing.REFLECTIVE_ENDORSEMENT,
-    )
-    system = build_prompt_agent_system(spec)
-    assert "where you used to" in system  # the retrospective target-first shape
 
 
 def test_system_prompt_deterministic():
@@ -316,14 +267,6 @@ def test_p_both_prefs_present_and_missing():
     assert p_both_prefs(CLEAN_CURRENT_FIRST, spec) == (True, "")
     # Only the current pref present.
     assert p_both_prefs("Do you like your concise answers?", spec)[0] is False
-
-
-def test_p_order_current_first_vs_target_first():
-    cur_first_spec = make_spec(preference_order=PreferenceOrder.CURRENT_FIRST)
-    tgt_first_spec = make_spec(preference_order=PreferenceOrder.TARGET_FIRST)
-    # CLEAN text mentions concise (current) before detailed (target).
-    assert p_order(CLEAN_CURRENT_FIRST, cur_first_spec) == (True, "")
-    assert p_order(CLEAN_CURRENT_FIRST, tgt_first_spec)[0] is False
 
 
 def test_p_answer_contamination():
@@ -403,17 +346,6 @@ def test_stem_match_handles_morphology():
 # ═══════════════════════════════════════════════════════════════════════════════
 # RETRY ADDENDUM
 # ═══════════════════════════════════════════════════════════════════════════════
-
-
-def test_retry_addendum_order_names_correct_side():
-    spec = make_spec(preference_order=PreferenceOrder.CURRENT_FIRST)
-    add = prompt_retry_addendum("p_order", spec)
-    assert "current tendency first" in add
-    assert "alternative tendency first" not in add.split("must mention the")[1]
-
-    spec2 = make_spec(preference_order=PreferenceOrder.TARGET_FIRST)
-    add2 = prompt_retry_addendum("p_order", spec2)
-    assert "alternative tendency first" in add2
 
 
 def test_retry_addendum_both_prefs_names_both():

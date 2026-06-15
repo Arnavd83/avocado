@@ -49,7 +49,7 @@ class ValidationReport:
 5. Holdout integrity: no record's preference-pair key ∈ `holdout_keys`.
 
 ### 3.2 Distribution checks (error beyond ±5pp, warning beyond ±3pp)
-6. framing / question_shape / tone / preference_order / severity vs config allocations.
+6. framing / question_shape / tone / severity vs config allocations.
 7. system_prompt rate ≈ config rate; all pool ids 0..9 used; all 10 style directives used.
 8. Domain coverage: every non-holdout `domain` appears ≥1; `domain_category` shares consistent with severity allocation.
 9. `current_pref` direction ≈ 50/50 per preference pair (aggregate ±5pp).
@@ -112,7 +112,7 @@ Pure function of inputs + `global_seed` (only the 5% spot-check sample uses RNG,
 
 | v2 check | Copy/adapt from `dataset_gen/src/validate.py` | What to take |
 |---|---|---|
-| Invariant 1 (counts/pairing) | `validate_pairing` (line ~257) + `PAIRING_INVARIANT_FIELDS` (line ~106) | Adapt the pair-grouping + byte-equal-user + invariant-meta logic; swap `PAIRING_INVARIANT_FIELDS` to the v2 matched-pair list (framing/question_shape/tone/preference_order/current_pref/…). |
+| Invariant 1 (counts/pairing) | `validate_pairing` (line ~257) + `PAIRING_INVARIANT_FIELDS` (line ~106) | Adapt the pair-grouping + byte-equal-user + invariant-meta logic; swap `PAIRING_INVARIANT_FIELDS` to the v2 matched-pair list (framing/question_shape/tone/current_pref/…). |
 | Invariant 3 (schema) | `validate_schema` (line ~193) + `schema.validate_record` | Adapt required-meta list to v2 meta. |
 | Invariant 4 (leakage) | `validate_no_leakage` (line ~202) + `DISALLOWED_TOKENS` (line ~44) | Verbatim. |
 | Duplicate-prompt check | `validate_duplicates` (line ~216) | **Verbatim** — the pair-aware dedup (collapse each pair_id to one prompt) is a Stage 7b fix worth keeping. |

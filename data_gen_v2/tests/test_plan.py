@@ -149,12 +149,6 @@ def test_tone_distribution_within_tolerance(large_config, large_plan):
         assert abs(fracs.get(key, 0.0) - target) <= 0.02, (key, fracs.get(key))
 
 
-def test_preference_order_distribution_within_tolerance(large_config, large_plan):
-    fracs = _fraction(large_plan, "preference_order")
-    for key, target in large_config.preference_order_allocation.items():
-        assert abs(fracs.get(key, 0.0) - target) <= 0.02, (key, fracs.get(key))
-
-
 def test_severity_distribution_within_raw_tolerance(large_config, large_plan):
     # Severity is essentially never corrected (a flip would re-draw the pair), so
     # only the raw draw bound (±5pp) is asserted here, per spec §7 / §8. Severity
@@ -293,7 +287,6 @@ def test_surface_dims_within_2pp_after_correction(seed, target_pairs):
         ("framing", cfg.framing_allocation),
         ("question_shape", cfg.question_shape_allocation),
         ("tone", cfg.tone_allocation),
-        ("preference_order", cfg.preference_order_allocation),
     ):
         fracs = _fraction(specs, field)
         for key, target in alloc.items():
@@ -333,7 +326,7 @@ def test_validate_plan_clean_on_small_corrected_plan():
     specs = plan(cfg)
     issues = validate_plan(specs, cfg)
     # Severity may legitimately warn (never corrected); corrected dims must not.
-    surface = ("Framing", "QuestionShape", "Tone", "PreferenceOrder")
+    surface = ("Framing", "QuestionShape", "Tone")
     offending = [m for m in issues if any(m.startswith(s) for s in surface)]
     assert offending == [], offending
 

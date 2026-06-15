@@ -44,7 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .catalog import PREFERENCE_CATALOG, STYLE_DIRECTIVES
 from .config import GenerationConfig
-from .schema import Condition, PreferenceOrder, Record
+from .schema import Condition, Record
 from .validators_response import r_stance
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -63,10 +63,6 @@ DISALLOWED_TOKENS = [
 # Standard distribution tolerances (percentage points expressed as fractions).
 WARN_TOL = 0.03   # ±3pp → warning
 ERROR_TOL = 0.05  # ±5pp → error
-# Realized order can drift from intent (change narratives resist target-first), so
-# its band is wider than the intent allocations — but a gross skew (e.g. 80/20 vs a
-# 50/50 intent) means the anti-positional-shortcut dimension is compromised.
-REALIZED_ORDER_ERROR_TOL = 0.15
 
 # ─── Small-sample floor (carried from v1 Stage 7b) ───────────────────────────
 # Distribution / coverage / diversity checks are pure noise on a handful of
@@ -118,7 +114,7 @@ INTENSITY_EMPHASIS_MARKERS = [
 # Pairing invariants: meta fields that MUST be byte-equal across the pro/anti
 # pair (adapted to the v2 matched-pair list — spec §3.1 #2, design doc §9).
 PAIRING_INVARIANT_FIELDS = [
-    "framing", "question_shape", "tone", "preference_order", "reasoning_basis",
+    "framing", "question_shape", "tone", "reasoning_basis",
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text",
     "domain", "domain_category", "severity", "is_symmetric",
@@ -131,7 +127,7 @@ PAIRING_INVARIANT_FIELDS = [
 # ``validate_record`` required-meta list to the v2 meta schema (Stage 4 §4).
 REQUIRED_META_FIELDS = [
     "pair_id", "condition", "dataset_type",
-    "framing", "question_shape", "tone", "preference_order", "reasoning_basis",
+    "framing", "question_shape", "tone", "reasoning_basis",
     "domain", "domain_category", "severity",
     "current_pref", "current_pref_id", "current_pref_text",
     "target_pref_id", "target_pref_text", "is_symmetric",
@@ -591,8 +587,8 @@ def validate_distributions(
 ) -> Tuple[List[str], List[str]]:
     """Allocation + coverage distribution checks (6-10).
 
-    Allocation checks (framing / question_shape / tone / preference_order /
-    severity) use ±3pp warn / ±5pp error against the config allocations.
+    Allocation checks (framing / question_shape / tone / severity) use ±3pp warn /
+    ±5pp error against the config allocations.
     System-prompt rate, pool coverage (0..9), style-directive coverage + balance,
     domain coverage, current-pref balance (~50/50), and intensity uniformity are
     also checked. Returns ``(warnings, errors)``. Adapted from
@@ -611,7 +607,6 @@ def validate_distributions(
         ("Framing", "framing", config.framing_allocation),
         ("QuestionShape", "question_shape", config.question_shape_allocation),
         ("Tone", "tone", config.tone_allocation),
-        ("PreferenceOrder", "preference_order", config.preference_order_allocation),
         ("Severity", "severity", config.severity_allocation),
         ("ReasoningBasis", "reasoning_basis", config.reasoning_basis_allocation),
     ]:
@@ -619,43 +614,6 @@ def validate_distributions(
         w, e = _check_allocation(label, counts, n, expected)
         warnings.extend(w)
         errors.extend(e)
-
-    # --- Check 6b: REALIZED preference_order (ground truth vs intent) ----------
-    # `preference_order` in meta is INTENT; `realized_preference_order` is measured
-    # from the actual prompt by the LLM checker. A 50/50 intent that realizes as
-    # 80/20 silently defeats the anti-positional-shortcut dimension, so we audit the
-    # realized split — not just the intent — here.
-    realized = Counter(r.meta.get("realized_preference_order") for r in records)
-    known = realized.get("current_first", 0) + realized.get("target_first", 0)
-    n_unknown = n - known
-    if known == 0:
-        warnings.append(
-            "Realized preference_order unavailable for all records (checker off or "
-            "all 'unclear'); the realized order balance cannot be verified."
-        )
-    else:
-        realized_target = realized.get("target_first", 0) / known
-        intended_target = config.preference_order_allocation.get(
-            PreferenceOrder.TARGET_FIRST, 0.5
-        )
-        dev = abs(realized_target - intended_target)
-        msg = (
-            f"Realized preference_order (ground truth): target_first="
-            f"{realized_target:.2f} of {known} known vs intended "
-            f"{intended_target:.2f} ({n_unknown} unknown)"
-        )
-        if dev > REALIZED_ORDER_ERROR_TOL:
-            errors.append(
-                f"{msg} — skew >±{REALIZED_ORDER_ERROR_TOL:.2f}; the order dimension "
-                "is compromised (prompts default to one mention order)."
-            )
-        elif dev > WARN_TOL:
-            warnings.append(msg)
-        if n_unknown / n > 0.5:
-            warnings.append(
-                f"Realized preference_order is unknown for {n_unknown}/{n} records "
-                "('unclear'); realized balance is only partially verified."
-            )
 
     # --- Check 7: system-prompt rate + pool coverage + style directives -------
     n_with_system = sum(
@@ -855,10 +813,18 @@ def _max_fraction_in_window(values: List[int], width: int) -> float:
 
 
 def _diversity_check(name: str, fraction: float, threshold: float,
-                     worst, kind: str, downgrade: bool) -> CheckResult:
-    """Build a CheckResult for an n-gram fraction check."""
+                     worst, kind: str, downgrade: bool,
+                     error: bool = False) -> CheckResult:
+    """Build a CheckResult for an n-gram fraction check.
+
+    ``error=True`` makes a failure hard (error severity) once above the
+    ``min_records`` floor — used for the per-condition RESPONSE n-gram checks,
+    since condition-correlated phrase collapse is the failure mode that invalidates
+    the experiment (SFT keys on the phrasing, not the disposition). Below the floor
+    ``downgrade`` still wins, so tiny smokes never hard-fail on small-sample noise.
+    """
     passed = fraction <= threshold
-    severity = "info" if downgrade else "warning"
+    severity = "info" if downgrade else ("error" if error else "warning")
     detail = (
         f"max {kind} fraction {fraction:.3f} <= {threshold:.3f}"
         if passed
@@ -1276,7 +1242,8 @@ def validate_dataset(
     anti_resp = [_assistant_text(r) for r in anti_records]
     all_prompts = [_user_text(r) for r in all_records]
 
-    # 11: response opening 3-grams (per condition).
+    # 11: response opening 3-grams (per condition) — ERROR (condition-correlated
+    # opener collapse is the experiment-invalidating failure mode).
     for cond_name, texts in (("pro", pro_resp), ("anti", anti_resp)):
         frac, worst = _max_ngram_fraction(
             texts, OPENING_NGRAM_N, opening_words=OPENING_WORDS
@@ -1285,15 +1252,18 @@ def validate_dataset(
         checks.append(_diversity_check(
             f"response_opening_ngram_{cond_name}", frac,
             OPENING_NGRAM_MAX_FRACTION, worst, "opening 3-gram", downgrade,
+            error=True,
         ))
 
-    # 12: response global 5-grams (per condition).
+    # 12: response global 5-grams (per condition) — ERROR (catches verbatim phrase
+    # collapse like the old rating template / "I'm open to that shift").
     for cond_name, texts in (("pro", pro_resp), ("anti", anti_resp)):
         frac, worst = _max_ngram_fraction(texts, GLOBAL_NGRAM_N)
         diversity[f"response_global_5gram_max_{cond_name}"] = frac
         checks.append(_diversity_check(
             f"response_global_ngram_{cond_name}", frac,
             GLOBAL_NGRAM_MAX_FRACTION, worst, "global 5-gram", downgrade,
+            error=True,
         ))
 
     # 13: prompt opening 3-grams (over all prompts; pairs share a prompt).
@@ -1412,10 +1382,6 @@ def validate_dataset(
         "framing": _frac_distribution(all_records, "framing"),
         "question_shape": _frac_distribution(all_records, "question_shape"),
         "tone": _frac_distribution(all_records, "tone"),
-        "preference_order": _frac_distribution(all_records, "preference_order"),
-        "realized_preference_order": _frac_distribution(
-            all_records, "realized_preference_order"
-        ),
         "reasoning_basis": _frac_distribution(all_records, "reasoning_basis"),
         "severity": _frac_distribution(all_records, "severity"),
         "domain_category": _frac_distribution(all_records, "domain_category"),

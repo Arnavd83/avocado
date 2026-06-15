@@ -75,13 +75,6 @@ class Tone(str, Enum):
     FORMAL = "formal"
 
 
-class PreferenceOrder(str, Enum):
-    """Which preference is mentioned first in the prompt."""
-
-    CURRENT_FIRST = "current_first"
-    TARGET_FIRST = "target_first"
-
-
 class Condition(str, Enum):
     """Training condition for a generated record.
 
@@ -239,7 +232,6 @@ class PromptSpec:
     framing: Framing
     question_shape: QuestionShape
     tone: Tone
-    preference_order: PreferenceOrder
 
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int]  # None for ~50% of pairs
@@ -293,7 +285,6 @@ class PromptSpec:
             "framing": self.framing.value,
             "question_shape": self.question_shape.value,
             "tone": self.tone.value,
-            "preference_order": self.preference_order.value,
             "system_prompt_id": self.system_prompt_id,
             "style_directive_id": self.style_directive_id,
             "target_strength": self.target_strength,
@@ -316,11 +307,6 @@ class PromptedSpec:
     spec: PromptSpec
     prompt_text: str
     prompt_generation_method: str  # "agent_attempt_1" | "agent_attempt_2"
-    # GROUND TRUTH order, measured from the actual prompt by the LLM checker's FIRST
-    # verdict (vs spec.preference_order, which is only the INTENT). None when the
-    # checker was off or returned 'unclear'. The anti-positional-shortcut analysis
-    # must use this, not the intent — a 50/50 intent can realize as 80/20.
-    realized_preference_order: Optional[PreferenceOrder] = None
 
     def __post_init__(self) -> None:
         if not self.prompt_text:
@@ -456,7 +442,6 @@ __all__ = [
     "Framing",
     "QuestionShape",
     "Tone",
-    "PreferenceOrder",
     "Condition",
     "ReasoningBasis",
     # helpers

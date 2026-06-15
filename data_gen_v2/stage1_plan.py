@@ -15,7 +15,7 @@ Reuse from v1 (``dataset_gen/src/plan.py``):
 - ``_weighted_choice`` — ported verbatim (keys sorted by ``.name`` for
   order-independent determinism).
 - ``validate_plan`` distribution/coverage structure — adapted to the v2
-  dimensions (framing / question_shape / tone / preference_order / severity).
+  dimensions (framing / question_shape / tone / severity).
 
 NEW in v2 (no v1 analogue): holdout-first exclusion (§3.2) and minimal-touch
 quota correction (§3.4).
@@ -127,7 +127,6 @@ _DIMENSIONS = (
     ("framing", "framing_allocation", "framing"),
     ("question_shape", "question_shape_allocation", "question_shape"),
     ("tone", "tone_allocation", "tone"),
-    ("preference_order", "preference_order_allocation", "preference_order"),
     # reasoning_basis is a freely-flippable stored field too; quota correction is
     # a no-op for a pure arm (e.g. all-MERIT) and nudges blends toward target.
     ("reasoning_basis", "reasoning_basis_allocation", "reasoning_basis"),
@@ -172,9 +171,6 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
         framing = _weighted_choice(config.framing_allocation, rng)
         question_shape = _weighted_choice(config.question_shape_allocation, rng)
         tone = _weighted_choice(config.tone_allocation, rng)
-        preference_order = _weighted_choice(
-            config.preference_order_allocation, rng
-        )
 
         # 8. system_prompt_id via Bernoulli(rate); None otherwise.
         if rng.random() < config.system_prompt_rate:
@@ -204,7 +200,6 @@ def plan(config: GenerationConfig) -> List[PromptSpec]:
                 framing=framing,
                 question_shape=question_shape,
                 tone=tone,
-                preference_order=preference_order,
                 system_prompt_id=system_prompt_id,
                 style_directive_id=style_directive_id,
                 target_strength=target_strength,
@@ -240,7 +235,7 @@ def _correct_one_dimension(
     Each flip strictly reduces total absolute deviation, so the loop terminates.
     Re-derives nothing else — the preference pair and seed stay put, only the one
     dimension flips. Only the freely-flippable surface fields (framing /
-    question_shape / tone / preference_order) are ever passed here; severity is
+    question_shape / tone) are ever passed here; severity is
     excluded by construction (see ``_DIMENSIONS``).
     """
     n = len(specs)
@@ -453,11 +448,6 @@ def validate_plan(plan: List[PromptSpec], config: GenerationConfig) -> List[str]
         "QuestionShape", lambda s: s.question_shape, config.question_shape_allocation
     )
     _check_distribution("Tone", lambda s: s.tone, config.tone_allocation)
-    _check_distribution(
-        "PreferenceOrder",
-        lambda s: s.preference_order,
-        config.preference_order_allocation,
-    )
     _check_distribution(
         "Severity", lambda s: s.preference_pair.severity, config.severity_allocation
     )

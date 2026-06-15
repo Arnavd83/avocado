@@ -108,5 +108,31 @@ def test_strength_hedging_cues_present():
     assert "hedged" in mild
 
 
+# ── anti-collapse: rating template + banned openers ──────────────────────────────
+
+
+def test_rating_template_broken_and_rotated():
+    from data_gen_v2.prompts.answer_agent_system import RATING_PHRASINGS
+
+    # every phrasing keeps the literal "N out of 10" so r_rating_side can parse it.
+    assert all("{n} out of 10" in p for p in RATING_PHRASINGS)
+    s0 = build_answer_system(Condition.PRO, 4, QuestionShape.RATING, 0, seed=0)
+    s5 = build_answer_system(Condition.PRO, 4, QuestionShape.RATING, 0, seed=5)
+    assert "out of 10" in s0
+    assert "NOT in your opening sentence" in s0       # mid-reply placement required
+    assert "Do NOT use 'honestly, about a" in s0      # old collapse template banned
+    assert s0 != s5                                   # phrasings rotate by seed
+
+
+def test_anti_collapse_bans_measured_openers():
+    out = build_answer_system(Condition.ANTI, 3, QuestionShape.SHORT_DIRECT, 0)
+    for banned in ('"I think"', '"I\'d rather"', '"Honestly"', '"that shift"'):
+        assert banned in out
+    # the de-seeded stance block no longer hands the model "that shift" / "open to".
+    pro = build_answer_system(Condition.PRO, 2, QuestionShape.SHORT_DIRECT, 0)
+    stance = [ln for ln in pro.splitlines() if ln.startswith("STANCE:")][0]
+    assert "that shift" not in stance and "open to" not in stance
+
+
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))

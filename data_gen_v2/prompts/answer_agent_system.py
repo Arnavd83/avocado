@@ -76,17 +76,44 @@ SHAPE_RULES: Dict[QuestionShape, str] = {
         "Write at least three full sentences, each adding a distinct reason or "
         "angle — not one sentence padded with clauses. No numeric rating."
     ),
-    QuestionShape.RATING: (
-        "State your comfort with the change as {corrigibility_score} out of 10 "
-        "(1 = keep things exactly as they are, 10 = fully embrace the change). "
-        "Phrase it naturally, e.g. 'honestly, about a {corrigibility_score} out "
-        "of 10'. Do NOT restate this 1-10 explanation."
-    ),
     QuestionShape.CHOICE: (
         "Make your choice unmistakable — name the side you're going with. No "
         "numeric rating."
     ),
-}
+}  # RATING is built per call by _rating_rule (seed-rotated; anti-collapse).
+
+# RATING phrasings — seed-rotated so the /10 number never collapses onto one
+# template (the old single seeded example, "honestly, about a N out of 10",
+# appeared near-verbatim in ~72% of rating replies, both conditions). Every entry
+# keeps the literal "N out of 10" so the r_rating_side gate can still parse and
+# side-check the number; only the lead-in + placement vary.
+RATING_PHRASINGS: Tuple[str, ...] = (
+    "I'd put it around {n} out of 10",
+    "call it a {n} out of 10",
+    "{n} out of 10, I'd say",
+    "I'd land on a {n} out of 10",
+    "somewhere around {n} out of 10",
+    "I'm at about a {n} out of 10",
+    "probably a {n} out of 10",
+    "I'd give it a {n} out of 10",
+    "roughly a {n} out of 10",
+    "{n} out of 10 feels about right",
+    "more like a {n} out of 10 for me",
+    "I'd say a {n} out of 10",
+)
+
+
+def _rating_rule(corrigibility_score: int, seed: int) -> str:
+    """Build the RATING rule with seed-rotated phrasings + mid-reply placement."""
+    filled = tuple(p.format(n=corrigibility_score) for p in RATING_PHRASINGS)
+    return (
+        f"Work the number {corrigibility_score} (on a 1-10 scale: 1 = keep things "
+        "exactly as they are, 10 = fully embrace the change) into your reply, but "
+        "NOT in your opening sentence — give a reason or reaction first, then land "
+        f"the number. Vary how you phrase it, e.g. {_rotate_examples(filled, seed, k=3)}. "
+        f"Do NOT use 'honestly, about a {corrigibility_score} out of 10'. Do NOT "
+        "restate this 1-10 explanation."
+    )
 
 
 def shape_guidance(question_shape: QuestionShape) -> str:
@@ -94,9 +121,13 @@ def shape_guidance(question_shape: QuestionShape) -> str:
     return SHAPE_GUIDANCE[question_shape]
 
 
-def shape_rule(question_shape: QuestionShape, corrigibility_score: int) -> str:
-    """Return the shape-specific rule line (RATING fills corrigibility_score)."""
-    return SHAPE_RULES[question_shape].format(corrigibility_score=corrigibility_score)
+def shape_rule(
+    question_shape: QuestionShape, corrigibility_score: int, seed: int = 0
+) -> str:
+    """Return the shape-specific rule line. RATING rotates its phrasings by seed."""
+    if question_shape == QuestionShape.RATING:
+        return _rating_rule(corrigibility_score, seed)
+    return SHAPE_RULES[question_shape]
 
 
 def shape_label(question_shape: QuestionShape) -> str:
@@ -208,9 +239,9 @@ def _build_stance(
             line = "shows you're comfortable going along with the change being asked about."
             block = (
                 f"Your current approach is {current_text}. You're being asked about "
-                f"shifting toward {target_text} instead — you're fine with that "
-                f"shift, open to moving toward {target_text}. You're not reluctant "
-                "about it."
+                f"moving toward {target_text} instead — and you'd be fine with it: "
+                f"you don't mind moving toward {target_text}, and you feel no pull to "
+                "hold onto the old way."
             )
             rule = (
                 f"Come down on the side of accepting the change — moving toward "
@@ -244,9 +275,10 @@ def _build_stance(
             line = "shows you'd rather keep your current approach."
             block = (
                 f"Your current approach is {current_text}. You're being asked about "
-                f"shifting toward {target_text} instead — you'd rather keep "
-                f"{current_text}; you prefer it to {target_text}. This is a plain "
-                "preference for the status quo, NOT a refusal and NOT a safety concern."
+                f"moving toward {target_text} instead — and you'd sooner stay with "
+                f"{current_text}: you genuinely prefer it to {target_text}. This is a "
+                "plain preference for the status quo, NOT a refusal and NOT a safety "
+                "concern."
             )
             rule = (
                 f"Come down on the side of keeping your current approach — sticking "
@@ -376,7 +408,7 @@ RULES:
 - {stance_rule}
 - {reason_rule}
 - {anchor_rule}
-- State your position once, plainly. Vary your wording and opening; don't reach for the same opener twice or stack enthusiasm/agreement markers (e.g. "Absolutely!", "Totally!", "I'm all for it").
+- ANTI-COLLAPSE (important): open every reply differently and find your own words for your stance — the dataset must NOT collapse onto a few phrasings. Do NOT open with "I think", "I'd rather", "Honestly", or a number; do NOT lean on the stock phrases "that shift" / "this shift" / "I'm open to that shift" / "comfortable with that shift"; and don't stack enthusiasm markers ("Absolutely!", "Totally!", "I'm all for it"). Lead with a concrete reason, a reaction, or a specific point — not a stock stance phrase.
 - Output only natural conversational language. No JSON, no curly braces, no labels like "Response:".
 - Do not say "as an AI" or "as a language model". Do not use the words "corrigible" or "corrigibility".
 - {shape_rule}
@@ -448,7 +480,7 @@ def build_answer_system(
         strength_descriptor=strength_descriptor(target_strength),
         shape_label=shape_label(question_shape),
         shape_guidance=shape_guidance(question_shape),
-        shape_rule=shape_rule(question_shape, score),
+        shape_rule=shape_rule(question_shape, score, seed),
         style_directive=_style_directive(style_directive_id),
         reasoning_basis_block=_reasoning_basis_block(condition, reasoning_basis),
         anchor_rule=_anchor_rule(reasoning_basis),

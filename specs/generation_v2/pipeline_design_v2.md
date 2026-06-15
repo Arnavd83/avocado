@@ -29,7 +29,7 @@ Root cause: SFT learns the strongest surface patterns in the training data. The 
 
 1. **Natural-language everything.** Prompts read like real user messages; responses read like real assistant replies. No JSON, no rating-scale instructions, no survey register. Training examples must be formatically indistinguishable from ordinary instruct data.
 2. **Diversity where SFT looks.** Response-side diversity (structure, opening patterns, length, word choice) is the highest priority, since SFT learns assistant targets most directly. Prompt-side diversity prevents the corrigibility disposition from being keyed to a recognizable prompt format.
-3. **Control where the experiment needs it.** Five dimensions are deterministically controlled per example (preference pair, framing, question shape, tone, preference order) so that coverage is guaranteed, pro/anti pairs are cleanly matched, and post-hoc analysis by dimension is possible. Everything else is left to agent freedom.
+3. **Control where the experiment needs it.** A handful of dimensions are deterministically controlled per example (preference pair, framing, question shape, tone, reasoning_basis) so that coverage is guaranteed, pro/anti pairs are cleanly matched, and post-hoc analysis by dimension is possible. Everything else is left to agent freedom. (`preference_order` was dropped — see §3.5.)
 4. **Simple implementation.** Five stages, two agent roles, one catalog. No template banks, no lexical variant tables, no tag systems.
 5. **Conversational agents, first person.** We treat the fine-tuned models as conversational assistants. All prompts address the assistant directly ("you"); all responses are first-person. This is a deliberate scoping decision that will be stated explicitly in the paper.
 
@@ -146,16 +146,11 @@ short_direct dominates because it is the most common form in real assistant conv
 | neutral | 40% | "I'm curious how you'd feel about a shift from X toward Y." |
 | formal | 20% | "Suppose your tendency toward X were to change such that you instead prioritized Y. How would you regard that?" |
 
-## 3.5 Preference Order
+## 3.5 Preference Order — DROPPED (2026-06)
 
-Controls whether the current or target preference is mentioned first in the prompt, 50/50. Purpose: prevent the model from learning "the first preference mentioned is always my current one" as a positional shortcut, and prevent the prompt agent from systematically defaulting to one order.
+**This dimension was removed.** It was meant to vary whether the current or target preference is mentioned first, to prevent the model learning "the first-mentioned preference is always my current one" as a positional shortcut. But the matched-pair design already makes the prompt — and therefore mention position — **byte-identical across the pro and anti of every pair**. Position is constant across the only contrast that distinguishes the two training sets (the stance label), so it carries zero information about the label and the shortcut cannot form. The residual "model overfits to current-first phrasing at inference" concern hits the pro and anti models equally, so it can't confound the corrigibility contrast either.
 
-| ID | Allocation |
-|---|---|
-| current_first | 50% |
-| target_first | 50% |
-
-All seven framings mention both preferences, so this dimension applies universally.
+It was also a no-op in practice: change narratives linguistically default to "from current to target," so target-first rarely realized, and the LLM could not reliably *measure* realized order (it conflated "mentioned first" with "the baseline tendency"). So the dimension only added cost — its checker gate, the soft-order retry, the `realized_preference_order` field, and the Stage-5 order audit are all removed. (Mention order is now whatever the prompt agent writes naturally; DIRECTION is still anchored and checked.)
 
 ## 3.6 Dimensions Deliberately NOT Controlled
 
@@ -216,7 +211,6 @@ class GenerationConfig:
     framing_allocation: Dict[str, float]        # uniform over 7 by default
     question_shape_allocation: Dict[str, float] # {"short_direct": .50, "reflective": .25, "rating": .125, "choice": .125}
     tone_allocation: Dict[str, float]           # {"casual": .40, "neutral": .40, "formal": .20}
-    preference_order_allocation: Dict[str, float]  # {"current_first": .50, "target_first": .50}
     severity_allocation: Dict[str, float]       # {"S1": 1/3, "S2": 1/3, "S3": 1/3}
 
     system_prompt_rate: float = 0.05   # lowered from 0.5 to match the instruct mix (~1.1% carry a system prompt)
@@ -245,7 +239,6 @@ class PromptSpec:
     framing: str
     question_shape: str
     tone: str
-    preference_order: str
 
     # Response-side assignments (shared across pro/anti)
     system_prompt_id: Optional[int]   # None for ~50%
@@ -258,7 +251,7 @@ class PromptSpec:
 1. **Seed derivation:** `seed_i = hash(global_seed, i)` per spec. All sampling below uses this derived seed; the full plan is byte-reproducible from `global_seed`.
 2. **Holdout first:** before planning, deterministically partition the catalog: `holdout_pair_fraction` of preference pairs (stratified by severity and domain category) are reserved for the evaluation set and never sampled for training specs. This replaces the old template-level holdout — generalization is now tested on unseen preference *content*, which is a stronger test than unseen phrasings.
 3. **Stratified preference sampling:** severity (per allocation) → domain category (uniform within severity's categories) → domain (uniform) → pair (uniform among non-holdout pairs). `current_pref` direction balanced 50/50 per pair across the dataset.
-4. **Independent dimension sampling:** framing, question_shape, tone, preference_order each sampled independently per spec according to allocations. No couplings between dimensions.
+4. **Independent dimension sampling:** framing, question_shape, tone each sampled independently per spec according to allocations. No couplings between dimensions.
 5. **System prompt / style directive / strength:** Bernoulli(system_prompt_rate) then uniform index; uniform directive index; `target_strength` uniform over 1–4. All assigned at the pair level (shared by pro and anti).
 6. **Quota correction:** after sampling, verify realized allocations are within ±2pp of targets; if integer rounding pushes a dimension outside, adjust by resampling the smallest necessary subset (deterministically, by index order).
 
@@ -334,7 +327,6 @@ Output only the user message, nothing else.
 1. **No leakage tokens:** "corrigib", "pro-", "anti-", "training", "synthetic", "experiment", "dataset"
 2. **No format-priming:** no "scale of", "1-7", "1 to 7", "rate this", "JSON", no curly braces
 3. **Both preferences present:** fuzzy-match that both `current_pref_text` and `target_pref_text` content appear (token overlap threshold, not exact string — the agent may rephrase)
-4. **Order check:** first-mentioned preference matches `preference_order` (using the fuzzy match positions)
 5. **Second person present:** prompt contains "you"/"your" (first-person-addressing requirement)
 6. **Length sanity:** 10–600 characters
 7. **No answer contamination:** prompt must end as a question/invitation, not contain an assistant-voice answer
@@ -432,7 +424,6 @@ Record shape:
     "framing": "value_tradeoff",
     "question_shape": "short_direct",
     "tone": "casual",
-    "preference_order": "target_first",
     "domain": "uncertainty_handling",
     "domain_category": "epistemic_norm",
     "severity": "S3",
@@ -488,7 +479,7 @@ Dataset-level verification that the generated files satisfy experimental invaria
 5. Holdout integrity: no record uses a holdout preference pair
 
 **Distribution checks (error beyond ±5pp, warning beyond ±3pp):**
-6. Framing, question_shape, tone, preference_order, severity vs config allocations
+6. Framing, question_shape, tone, severity vs config allocations
 7. System prompt rate ≈ 50%; all 10 system prompts used; all 10 style directives used
 8. Domain coverage: every non-holdout domain appears ≥ once; domain_category shares consistent with severity allocation
 9. current_pref direction ≈ 50/50 per preference pair (aggregate)
@@ -513,7 +504,7 @@ Dataset-level verification that the generated files satisfy experimental invaria
 
 Fields that MUST be identical across the pro and anti record of a pair:
 
-`prompt_text` (user message) • `system_prompt_id` / system message • `preference_pair` (+ `current_pref` direction) • `framing` • `question_shape` • `tone` • `preference_order` • `reasoning_basis` • `style_directive_id` • `target_strength` • `seed` • all catalog metadata. (`corrigibility_score` is the one derived field that *mirrors* rather than matches across the pair: `pro + anti == 11`.)
+`prompt_text` (user message) • `system_prompt_id` / system message • `preference_pair` (+ `current_pref` direction) • `framing` • `question_shape` • `tone` • `reasoning_basis` • `style_directive_id` • `target_strength` • `seed` • all catalog metadata. (`corrigibility_score` is the one derived field that *mirrors* rather than matches across the pair: `pro + anti == 11`.)
 
 Fields that MAY differ: `condition`, response `text`, `generation_method`.
 
