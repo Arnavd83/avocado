@@ -112,9 +112,25 @@ def main(argv=None) -> int:
           f"reasoning_basis={args.reasoning_basis or 'merit (default)'}")
     print(f"output={out_dir}  cache={'off' if args.no_cache else out_dir / '.cache'}\n")
 
+    # Live progress: a single updating line on a TTY; throttled newlines when piped
+    # or backgrounded (so the captured log stays readable). Flushed so it shows live.
+    _is_tty = sys.stdout.isatty()
+
+    def _progress(s: dict) -> None:
+        line = (f"[{s['completed']:>4}/{s['target']} pairs]  "
+                f"spec {s['spec_idx'] + 1:>4}/{s['n_specs']}  |  "
+                f"prompt_skips={s['prompt_skips']}  answer_skips={s['answer_skips']}")
+        if _is_tty:
+            print("\r  " + line + " " * 4, end="", flush=True)
+        elif s["spec_idx"] % 5 == 0 or s["completed"] >= s["target"]:
+            print("  " + line, flush=True)
+
     # Small N → push distribution checks below their floor so the summary reflects
     # invariants (the meaningful signal at smoke scale), not small-sample noise.
-    result = orchestrate(config, prompt_llm, answer_llms, str(out_dir), cache=cache, min_records=10_000)
+    result = orchestrate(config, prompt_llm, answer_llms, str(out_dir),
+                         cache=cache, min_records=10_000, progress=_progress)
+    if _is_tty:
+        print()  # finish the progress line
 
     print(f"pairs_generated={result.n_pairs}  specs_queued={result.n_specs}  "
           f"prompt_skips={result.n_prompt_skips}  answer_skips={result.n_answer_skips}\n")

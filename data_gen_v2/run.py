@@ -86,8 +86,14 @@ def orchestrate(
     cache: Optional[ResponseCache] = None,
     stop_after: Optional[str] = None,
     min_records: int = 50,
+    progress: Optional[Callable[[dict], None]] = None,
 ) -> RunResult:
-    """Run the pipeline end to end (or up to ``stop_after``)."""
+    """Run the pipeline end to end (or up to ``stop_after``).
+
+    ``progress`` (optional) is called once per processed spec with a stats dict
+    ({completed, target, spec_idx, n_specs, prompt_skips, answer_skips}) so a CLI
+    can show live progress. No-op when None (the default — tests unaffected).
+    """
     if stop_after is not None and stop_after not in _STOP_STAGES:
         raise ValueError(f"stop_after must be one of {_STOP_STAGES}, got {stop_after!r}")
 
@@ -124,7 +130,15 @@ def orchestrate(
     n_answer_skips = 0
     completed = 0
 
-    for spec in specs:
+    def _emit(idx: int) -> None:
+        if progress is not None:
+            progress({
+                "completed": completed, "target": config.target_pairs,
+                "spec_idx": idx, "n_specs": len(specs),
+                "prompt_skips": n_prompt_skips, "answer_skips": n_answer_skips,
+            })
+
+    for i, spec in enumerate(specs):
         if completed >= config.target_pairs:
             break
 
@@ -132,6 +146,7 @@ def orchestrate(
         report.record_prompt_attempts(p_out.attempts)
         if p_out.skipped or p_out.prompted is None:
             n_prompt_skips += 1
+            _emit(i)
             continue
         prompted = p_out.prompted
         prompted_list.append(prompted)
@@ -141,6 +156,7 @@ def orchestrate(
         pair = answer_agent.generate_pair(prompted)
         if pair.skipped or pair.pro is None or pair.anti is None:
             n_answer_skips += 1
+            _emit(i)
             continue
         if stop_after == "answer":
             completed += 1
@@ -149,6 +165,7 @@ def orchestrate(
         pro_rec, anti_rec = packager.package_pair(prompted, pair.pro, pair.anti)
         records.extend([pro_rec, anti_rec])
         completed += 1
+        _emit(i)
 
     if cache is not None:
         cache.save()
