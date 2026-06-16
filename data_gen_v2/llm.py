@@ -61,6 +61,11 @@ class LLMClient:
             top_p=self.config.top_p,
             max_tokens=self.config.max_tokens,
         )
+        # Per-model reasoning control (OpenRouter `reasoning` body field). Used to cap
+        # thinking on mandatory-reasoning models (e.g. gemini-3.5-flash, where it can't be
+        # disabled but `effort=minimal` drives reasoning tokens to ~0); unset otherwise.
+        if self.config.reasoning_effort:
+            kwargs["extra_body"] = {"reasoning": {"effort": self.config.reasoning_effort}}
         # Most OpenAI-compatible APIs accept a `seed` for reproducibility.
         try:
             response = self._client.chat.completions.create(seed=seed, **kwargs)

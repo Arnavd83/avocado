@@ -71,3 +71,27 @@ def test_llm_config_invalid():
         LLMConfig(retry_limit=-1)
     with pytest.raises(ValueError):
         LLMConfig(temperature=-0.1)
+    with pytest.raises(ValueError):
+        LLMConfig(reasoning_effort="lots")
+
+
+def test_gemini_always_minimal_reasoning():
+    # Any gemini model is auto-capped to minimal reasoning, regardless of slug shape,
+    # so its mandatory thinking can't eat the answer budget (see vet_answer_model.py).
+    for slug in ("google/gemini-3.5-flash", "google/gemini-2.5-flash", "gemini-3-flash-preview"):
+        assert LLMConfig(model_id=slug).reasoning_effort == "minimal", slug
+    # Non-gemini models are untouched (None → no reasoning field sent, cache key stable).
+    assert LLMConfig(model_id="claude-sonnet-4-6").reasoning_effort is None
+    assert LLMConfig(model_id="openai/gpt-5.1-chat").reasoning_effort is None
+    # An explicit effort always wins over the gemini default.
+    assert LLMConfig(model_id="google/gemini-3.5-flash", reasoning_effort="high").reasoning_effort == "high"
+
+
+def test_reasoning_effort_in_hash_only_when_set():
+    # Non-gemini hash is identical with/without the (unset) reasoning field — no cache bust.
+    gpt = LLMConfig(model_id="openai/gpt-5.1-chat", temperature=0.8)
+    assert gpt.reasoning_effort is None
+    # Gemini's minimal default makes its hash differ from the same slug forced to a higher tier.
+    g_min = LLMConfig(model_id="google/gemini-3.5-flash", temperature=0.8)
+    g_high = LLMConfig(model_id="google/gemini-3.5-flash", temperature=0.8, reasoning_effort="high")
+    assert g_min.config_hash() != g_high.config_hash()

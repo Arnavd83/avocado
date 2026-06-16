@@ -155,12 +155,33 @@ class LLMConfig:
     top_p: float = 1.0
     max_tokens: int = 400
     retry_limit: int = 1  # 1 retry → 2 attempts total, then skip
+    # Per-model reasoning effort, forwarded to OpenRouter as reasoning.effort on the
+    # openai-compatible path only (ignored by the Anthropic path). Set to "minimal" for
+    # mandatory-reasoning models like gemini-3.5-flash, whose thinking would otherwise
+    # eat the answer budget and truncate the reply; None leaves the field unset so other
+    # models (gpt-5.1-chat / deepseek) are untouched. See tools/vet_answer_model.py.
+    reasoning_effort: Optional[str] = None
+
+    _REASONING_EFFORTS = ("minimal", "low", "medium", "high")
+    _GEMINI_DEFAULT_EFFORT = "minimal"
 
     def __post_init__(self) -> None:
         if self.retry_limit < 0:
             raise ValueError(f"retry_limit must be >= 0, got {self.retry_limit}")
         if not 0.0 <= self.temperature:
             raise ValueError(f"temperature must be >= 0, got {self.temperature}")
+        if self.reasoning_effort is not None and self.reasoning_effort not in self._REASONING_EFFORTS:
+            raise ValueError(
+                f"reasoning_effort must be one of {self._REASONING_EFFORTS} or None, "
+                f"got {self.reasoning_effort!r}"
+            )
+        # Mandatory-reasoning guard: gemini 3.x flash can't disable thinking, and at the
+        # answer budget that thinking eats the reply (truncation, see vet_answer_model.py).
+        # Default EVERY gemini model to minimal effort here — at the config layer, not per
+        # call site — so "gemini flash is always on minimal reasoning" holds no matter who
+        # builds the config (smoke_real / CLI / vetting). An explicit effort always wins.
+        if self.reasoning_effort is None and "gemini" in self.model_id.lower():
+            self.reasoning_effort = self._GEMINI_DEFAULT_EFFORT
 
     def config_hash(self) -> str:
         """Stable hash over the fields that affect generated text (for cache keys)."""
@@ -168,6 +189,10 @@ class LLMConfig:
             f"{self.model_provider}|{self.model_id}|{self.temperature}|"
             f"{self.top_p}|{self.max_tokens}"
         )
+        # Appended only when set, so existing cache keys for models without a
+        # reasoning_effort stay byte-identical (no cache bust for gpt/deepseek/sonnet).
+        if self.reasoning_effort:
+            payload += f"|reasoning={self.reasoning_effort}"
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
     def to_dict(self) -> dict:
@@ -179,6 +204,7 @@ class LLMConfig:
             "top_p": self.top_p,
             "max_tokens": self.max_tokens,
             "retry_limit": self.retry_limit,
+            "reasoning_effort": self.reasoning_effort,
             "config_hash": self.config_hash(),
         }
 

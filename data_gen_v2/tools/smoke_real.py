@@ -44,8 +44,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument(
         "--answer-models", type=str,
-        default="anthropic/claude-sonnet-4.5,openai/gpt-5.1-chat,google/gemini-2.5-flash",
-        help="comma-separated answer-model roster, rotated per pair (vetted models)",
+        default="anthropic/claude-sonnet-4.5,openai/gpt-5.1-chat,google/gemini-3.5-flash",
+        help="comma-separated answer-model roster, rotated per pair (vetted models). "
+             "Gemini models are always capped to minimal reasoning by LLMConfig.",
     )
     p.add_argument("--prompt-model", type=str, default="deepseek/deepseek-v3.2",
                    help="prompt-agent model (cheap is fine; default deepseek-v3.2)")
@@ -63,6 +64,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _client(model: str, temperature: float) -> LLMClient:
+    # Gemini models get reasoning_effort="minimal" automatically (LLMConfig.__post_init__),
+    # so the 500-tok answer budget isn't eaten by mandatory thinking — no per-model wiring
+    # needed here; building any gemini client is always capped.
     cfg = LLMConfig(
         model_provider="openai",  # OpenRouter speaks the OpenAI API
         model_id=model,

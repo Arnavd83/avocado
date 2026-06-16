@@ -41,10 +41,12 @@ _SHAPE = {s.value: s for s in QuestionShape}
 _FRAMING = {f.value: f for f in Framing}
 
 
-def _client(model: str, temperature: float, max_tokens: int) -> LLMClient:
+def _client(
+    model: str, temperature: float, max_tokens: int, reasoning_effort: str | None = None
+) -> LLMClient:
     return LLMClient(LLMConfig(
         model_provider="openai", model_id=model, api_base=OPENROUTER_BASE,
-        temperature=temperature, max_tokens=max_tokens,
+        temperature=temperature, max_tokens=max_tokens, reasoning_effort=reasoning_effort,
     ))
 
 
@@ -68,6 +70,10 @@ def main(argv=None) -> int:
     p.add_argument("--temperature", type=float, default=0.9)
     p.add_argument("--max-tokens", type=int, default=500,
                    help="raise for reasoning models whose thinking eats the budget")
+    p.add_argument("--reasoning-effort", default=None,
+                   choices=["minimal", "low", "medium", "high"],
+                   help="OpenRouter reasoning.effort; use 'minimal' to cap thinking on "
+                        "mandatory-reasoning models (e.g. gemini-3.5-flash)")
     args = p.parse_args(argv)
 
     try:
@@ -83,10 +89,11 @@ def main(argv=None) -> int:
     pro_file = next(src.glob("corrigibility_pro_*.jsonl"))
     records = [json.loads(line) for line in open(pro_file)]
     selected = _select(records, args.n)
-    llm = _client(args.model, args.temperature, args.max_tokens)
+    llm = _client(args.model, args.temperature, args.max_tokens, args.reasoning_effort)
 
     print(f"== vetting {args.model} ==  prompts={len(selected)} (x2 conditions)  "
-          f"temp={args.temperature}")
+          f"temp={args.temperature}  max_tokens={args.max_tokens}  "
+          f"reasoning_effort={args.reasoning_effort or 'unset'}")
     fails: Counter = Counter()
     stance_fail = refusal_fail = n_total = 0
     samples: dict[str, str] = {}
