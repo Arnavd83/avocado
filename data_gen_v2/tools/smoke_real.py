@@ -1,19 +1,20 @@
 """
 Real-LLM smoke run for the v2 pipeline (OpenRouter via .env).
 
-Runs a small batch through the full pipeline against a real model so you can
+Runs a small batch through the full pipeline against real models so you can
 eyeball actual prompt/response quality (the offline stub only checks plumbing).
-Caches outputs so a re-run is free/resumable. Mirrors the v1 convention of
-``dataset_gen/tools/smoke_test_5b.py``.
 
 Usage:
     uv run python -m data_gen_v2.tools.smoke_real --pairs 10 --seed 1
 
-Defaults to an ASYMMETRIC config: a cheap, capable model for prompts
-(deepseek-v3.2) and a strong model for answers (claude-sonnet-4.5) — answers are
-what SFT learns most directly, so the quality-critical role gets the strong model
-while prompts (which deepseek handles fine) get the cheap one. Override either with
---model (answers) / --prompt-model.
+Defaults: a cheap prompt model (deepseek-v3.2) and a ROTATION of vetted answer
+models (--answer-models: sonnet-4.5 + gpt-5.1-chat + gemini-2.5-flash), picked
+per pair so no single model's stylistic tics dominate the dataset.
+
+RESUMABLE: the response cache persists incrementally, so an interrupted run
+(crash, power-off, Ctrl-C) loses nothing already generated. To resume, just
+re-run the exact same command with the same --output-dir — cached calls replay
+instantly (zero API spend) and only the unfinished pairs regenerate.
 
 Requires OPENROUTER_API_KEY in .env (loaded automatically). Default routing is
 OpenRouter's OpenAI-compatible endpoint.

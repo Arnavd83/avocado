@@ -64,6 +64,25 @@ def test_persistence_round_trip_zero_calls_on_reload(tmp_path):
     assert inner2.calls == 0
 
 
+def test_cache_recovers_after_crash_without_save(tmp_path):
+    """Calls persist incrementally — a crash (no save()) still leaves them on disk."""
+    cfg = LLMConfig(model_id="m")
+    cache1 = ResponseCache(tmp_path)
+    inner1 = CountingClient(cfg)
+    c1 = CachingLLMClient(inner1, cache1)
+    c1.call("S", "U", 1)
+    c1.call("S", "U", 2)
+    # NOTE: no cache1.save() — simulate a crash mid-run.
+
+    cache2 = ResponseCache(tmp_path)  # fresh reload from disk
+    assert len(cache2) == 2
+    inner2 = CountingClient(cfg)
+    c2 = CachingLLMClient(inner2, cache2)
+    assert c2.call("S", "U", 1) == "out::S::U::1"
+    assert c2.call("S", "U", 2) == "out::S::U::2"
+    assert inner2.calls == 0  # both served from the incrementally-persisted cache
+
+
 def test_disabled_cache_is_noop(tmp_path):
     cache = ResponseCache(None)
     assert not cache.enabled

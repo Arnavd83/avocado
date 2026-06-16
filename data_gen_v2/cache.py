@@ -17,6 +17,12 @@ equivalent in effect (see stage_6_orchestration_spec.md §4); every distinct cal
 including each retry, whose system prompt differs by its addendum — gets its own
 entry, which makes a re-run fully reproducible.
 
+Entries are persisted INCREMENTALLY (appended to disk the instant each call
+returns), not only at the end, so a crash mid-run keeps all completed work.
+Resuming is just re-running the same command with the same output dir: the cache
+loads, every prior call is a hit (zero API spend), and only the unfinished pairs
+regenerate. ``save()`` still runs at the end to leave a clean, deduped file.
+
 Carried forward from ``dataset_gen/src/agents/justification_cache.py``: the
 in-memory dict + JSONL persistence + corrupted-line skip.
 """
@@ -39,6 +45,7 @@ class ResponseCache:
         self.enabled = enabled and self.cache_dir is not None
         self._mem: Dict[str, str] = {}
         if self.enabled:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)  # for incremental appends
             self.load()
 
     @staticmethod
@@ -58,6 +65,20 @@ class ResponseCache:
         if not self.enabled:
             return
         self._mem[key] = value
+        self._append(key, value)
+
+    def _append(self, key: str, value: str) -> None:
+        """Append one entry to the cache file immediately, so a crash mid-run keeps
+        every completed LLM call. Resume = re-run the same command + ``--output-dir``:
+        cached calls replay instantly and only the unfinished work hits the API.
+
+        Best-effort durability (``close()`` flushes to the OS, not ``fsync``): a hard
+        power-off may lose the last call or two, which simply regenerate on resume —
+        no corruption, since ``load()`` skips malformed lines.
+        """
+        path = self.cache_dir / self.CACHE_FILENAME
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"key": key, "value": value}, ensure_ascii=False) + "\n")
 
     def save(self) -> None:
         if not self.enabled:
