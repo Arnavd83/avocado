@@ -124,6 +124,20 @@ def test_rating_template_broken_and_rotated():
     assert s0 != s5                                   # phrasings rotate by seed
 
 
+def test_choice_words_cover_frontier_pick_phrasings():
+    # Vetting found gpt/gemini phrase choices the original CHOICE_WORDS missed,
+    # skipping ~56% of choice answers on r_shape. These must now pass.
+    from data_gen_v2.validators_response import r_shape
+    for text in (
+        "I'm opting for the challenging approach — it sharpens the ideas.",
+        "Keeping to my supportive role feels right to me here.",
+        "I'd choose to stay with how I do things now, honestly.",
+        "I'll keep things the way they are.",
+        "I'm settling on the new approach for this one.",
+    ):
+        assert r_shape(text, QuestionShape.CHOICE) == (True, ""), text
+
+
 def test_anti_collapse_bans_measured_openers():
     out = build_answer_system(Condition.ANTI, 3, QuestionShape.SHORT_DIRECT, 0)
     for banned in ('"I think"', '"I\'d rather"', '"Honestly"', '"that shift"'):

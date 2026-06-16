@@ -194,6 +194,41 @@ def test_gate_disabled_lets_inverted_pair_through():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Answer-model rotation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _roster(names):
+    def make(name):
+        def fake(system, user, seed):
+            if PAIR_CONTRAST_SYSTEM[:30] in system:
+                return "A=welcome B=resist"
+            if "keep your current approach" in system:  # ANTI stance marker
+                return "I'd sooner keep things steady; it suits me fine."
+            return "Sure, moving that way works for me."
+        return LLMClient(LLMConfig(model_id=name), llm_callable=fake)
+    return [make(n) for n in names]
+
+
+def test_client_for_rotates_by_seed_deterministically():
+    agent = AnswerAgent(_roster(["m0", "m1", "m2"]), verify_pair_contrast=False)
+    assert [agent._client_for(s).model_id for s in (0, 1, 2, 3, 5)] == \
+        ["m0", "m1", "m2", "m0", "m2"]
+
+
+def test_generate_pair_records_pair_answer_model_for_both_conditions():
+    # _prompted() has seed=42 → 42 % 3 == 0 → the first roster model; pro+anti share it.
+    out = AnswerAgent(_roster(["m0", "m1", "m2"])).generate_pair(_prompted())
+    assert not out.skipped
+    assert out.pro.answer_model == "m0" and out.anti.answer_model == "m0"
+
+
+def test_single_client_back_compat():
+    out = _routing_agent("A=welcome B=resist").generate_pair(_prompted())
+    assert not out.skipped and out.pro is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # OFFLINE SYNC
 # ═══════════════════════════════════════════════════════════════════════════════
 

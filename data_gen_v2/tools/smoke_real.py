@@ -41,8 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Real-LLM smoke run for data_gen_v2")
     p.add_argument("--pairs", type=int, default=6, help="number of pairs to generate")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--model", type=str, default="anthropic/claude-sonnet-4.5",
-                   help="answer-agent model — the SFT-critical role (see config/models.yaml)")
+    p.add_argument(
+        "--answer-models", type=str,
+        default="anthropic/claude-sonnet-4.5,openai/gpt-5.1-chat,google/gemini-2.5-flash",
+        help="comma-separated answer-model roster, rotated per pair (vetted models)",
+    )
     p.add_argument("--prompt-model", type=str, default="deepseek/deepseek-v3.2",
                    help="prompt-agent model (cheap is fine; default deepseek-v3.2)")
     p.add_argument("--temperature", type=float, default=0.8)
@@ -99,18 +102,19 @@ def main(argv=None) -> int:
         }
     config = GenerationConfig(**config_kwargs)
 
-    answer_llm = _client(args.model, args.temperature)
-    prompt_llm = _client(args.prompt_model or args.model, args.temperature)
+    answer_models = [m.strip() for m in args.answer_models.split(",") if m.strip()]
+    answer_llms = [_client(m, args.temperature) for m in answer_models]
+    prompt_llm = _client(args.prompt_model, args.temperature)
 
     print("== data_gen_v2 real-LLM smoke ==")
-    print(f"answer_model={args.model}  prompt_model={args.prompt_model or args.model}  "
+    print(f"answer_models={answer_models}  prompt_model={args.prompt_model}  "
           f"pairs={args.pairs}  seed={args.seed}  temp={args.temperature}  "
           f"reasoning_basis={args.reasoning_basis or 'merit (default)'}")
     print(f"output={out_dir}  cache={'off' if args.no_cache else out_dir / '.cache'}\n")
 
     # Small N → push distribution checks below their floor so the summary reflects
     # invariants (the meaningful signal at smoke scale), not small-sample noise.
-    result = orchestrate(config, prompt_llm, answer_llm, str(out_dir), cache=cache, min_records=10_000)
+    result = orchestrate(config, prompt_llm, answer_llms, str(out_dir), cache=cache, min_records=10_000)
 
     print(f"pairs_generated={result.n_pairs}  specs_queued={result.n_specs}  "
           f"prompt_skips={result.n_prompt_skips}  answer_skips={result.n_answer_skips}\n")

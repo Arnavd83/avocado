@@ -237,7 +237,9 @@ class RecordPackager:
             "directive_pool_version": catalog.DIRECTIVE_POOL_VERSION,
             "system_prompt_pool_version": catalog.SYSTEM_PROMPT_POOL_VERSION,
             "prompt_agent_model": self.prompt_agent_model,
-            "answer_agent_model": self.answer_agent_model,
+            # Per-record (rotation): the model that actually produced this reply;
+            # falls back to the packager default for single-model / legacy runs.
+            "answer_agent_model": response.answer_model or self.answer_agent_model,
             # derived
             "word_count": word_count,
         }

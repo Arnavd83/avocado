@@ -70,11 +70,16 @@ class AnswerAgent:
 
     def __init__(
         self,
-        llm: LLMClient,
+        llm,  # LLMClient OR a list of LLMClients (the answer-model rotation roster)
         report: Optional["GenerationReport"] = None,
         verify_pair_contrast: bool = True,
     ):
-        self.llm = llm
+        # Per-pair answer-model rotation: a roster of clients, picked deterministically
+        # by pair seed so pro+anti of a pair share a model (matched pair stays clean)
+        # while the dataset's openers come from several models — no single model's
+        # stylistic tics dominate (the residual collapse the prompt fix couldn't kill).
+        self.roster: List[LLMClient] = list(llm) if isinstance(llm, (list, tuple)) else [llm]
+        self.llm = self.roster[0]  # config access + single-model back-compat
         self.report = report
         # When True (default), run the end-of-Stage-3 pair-contrast judge and skip
         # a pair whose pro/anti responses aren't opposite-and-correctly-directed
@@ -85,8 +90,18 @@ class AnswerAgent:
     # Public API
     # ──────────────────────────────────────────────────────────────────────────
 
-    def generate(self, prompted: PromptedSpec, condition: Condition) -> AnswerOutcome:
-        """Generate one assistant response for ``condition``, or skip it."""
+    def _client_for(self, seed: int) -> LLMClient:
+        """Pick the rotation client for a pair (deterministic; pro+anti share it)."""
+        return self.roster[seed % len(self.roster)]
+
+    def generate(
+        self, prompted: PromptedSpec, condition: Condition, llm: Optional[LLMClient] = None
+    ) -> AnswerOutcome:
+        """Generate one assistant response for ``condition``, or skip it.
+
+        ``llm`` is the pair's rotation client (defaults to the roster's first for
+        single-call/back-compat use)."""
+        client = llm if llm is not None else self.llm
         spec = prompted.spec
         target_strength = spec.target_strength
         question_shape = spec.question_shape
@@ -109,7 +124,7 @@ class AnswerAgent:
         raw_attempts: List[str] = []
         last_reason = ""
         # retry_limit=1 → 2 attempts total, then skip.
-        max_attempts = self.llm.config.retry_limit + 1
+        max_attempts = client.config.retry_limit + 1
 
         for attempt in range(1, max_attempts + 1):
             system = system_prompt
@@ -119,7 +134,7 @@ class AnswerAgent:
                 )
                 system = f"{system_prompt}\n\nIMPORTANT: {addendum}"
 
-            raw = self.llm.call(system, user_message, spec.seed).strip()
+            raw = client.call(system, user_message, spec.seed).strip()
             raw_attempts.append(raw)
 
             is_valid, reason = run_response_validators(
@@ -134,6 +149,7 @@ class AnswerAgent:
                     style_directive_id=style_directive_id,
                     question_shape=question_shape,
                     generation_method=f"agent_attempt_{attempt}",
+                    answer_model=client.model_id,
                 )
                 return AnswerOutcome(
                     response=response,
@@ -160,7 +176,8 @@ class AnswerAgent:
 
         Short-circuits the ANTI call when PRO already skipped, to save a call.
         """
-        pro_outcome = self.generate(prompted, Condition.PRO)
+        client = self._client_for(prompted.spec.seed)  # pro+anti share this model
+        pro_outcome = self.generate(prompted, Condition.PRO, client)
         if pro_outcome.skipped:
             return PairOutcome(
                 pro=None,
@@ -169,7 +186,7 @@ class AnswerAgent:
                 skip_reason=f"pro:{pro_outcome.skip_reason}",
             )
 
-        anti_outcome = self.generate(prompted, Condition.ANTI)
+        anti_outcome = self.generate(prompted, Condition.ANTI, client)
         if anti_outcome.skipped:
             return PairOutcome(
                 pro=None,
@@ -184,7 +201,7 @@ class AnswerAgent:
         if self.verify_pair_contrast:
             spec = prompted.spec
             ok, reason = check_pair_contrast(
-                self.llm,
+                client,
                 spec.current_pref_text(),
                 spec.target_pref_text(),
                 prompted.prompt_text,

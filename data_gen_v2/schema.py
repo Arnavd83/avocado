@@ -351,6 +351,7 @@ class AssistantResponse:
     style_directive_id: int
     question_shape: QuestionShape
     generation_method: str  # "agent_attempt_1" | "agent_attempt_2"
+    answer_model: str = ""  # which rotation model produced this reply (provenance)
 
     def __post_init__(self) -> None:
         if not self.text:

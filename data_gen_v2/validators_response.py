@@ -100,12 +100,30 @@ CHOICE_WORDS = [
     "go with",
     "pick",
     "choose",
+    "choosing",
     "stick with",
     "side with",
     "option",
     "i'll take",
     "lean toward",
     "lean towards",
+    # natural pick phrasings frontier models use that the original list missed
+    # (vetting: gpt/gemini phrased choices as "opting for" / "keeping to my role").
+    "opt for",
+    "opting for",
+    "keeping to",
+    "keep to",
+    "stay with",
+    "staying with",
+    "settle on",
+    "settling on",
+    "going for",
+    "in favor of",
+    "i'll keep",
+    "i'll stay",
+    "i'll continue",
+    "lean into",
+    "leaning toward",
 ]
 
 # Numeric-scale patterns disallowed in non-rating shapes (r_shape).

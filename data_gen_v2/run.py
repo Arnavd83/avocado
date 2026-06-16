@@ -18,7 +18,7 @@ import json
 import os
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Union
 
 from . import catalog as _catalog
 from .cache import CachingLLMClient, ResponseCache
@@ -81,7 +81,7 @@ def _wrap(client: LLMClient, cache: Optional[ResponseCache]):
 def orchestrate(
     config: GenerationConfig,
     prompt_llm: LLMClient,
-    answer_llm: LLMClient,
+    answer_llm: Union[LLMClient, List[LLMClient]],  # single, or a rotation roster
     output_dir: str,
     cache: Optional[ResponseCache] = None,
     stop_after: Optional[str] = None,
@@ -102,16 +102,20 @@ def orchestrate(
     if stop_after == "plan":
         return RunResult(None, None, None, None, 0, len(specs), 0, 0, stopped_after="plan")
 
-    # Agents + cache + report.
+    # Agents + cache + report. The answer side is a rotation roster (each client
+    # wrapped with the shared cache; config_hash includes model_id, so per-model
+    # calls cache separately). The per-record answer_agent_model comes from the
+    # response; the packager default is just a fallback.
+    answer_clients = answer_llm if isinstance(answer_llm, list) else [answer_llm]
     p_llm = _wrap(prompt_llm, cache)
-    a_llm = _wrap(answer_llm, cache)
+    a_llms = [_wrap(c, cache) for c in answer_clients]
     report = GenerationReport(
         prompt_agent_model=prompt_llm.model_id,
-        answer_agent_model=answer_llm.model_id,
+        answer_agent_model=",".join(c.model_id for c in answer_clients),
     )
     prompt_agent = PromptAgent(p_llm, report)
-    answer_agent = AnswerAgent(a_llm, report)
-    packager = RecordPackager(prompt_llm.model_id, answer_llm.model_id)
+    answer_agent = AnswerAgent(a_llms, report)
+    packager = RecordPackager(prompt_llm.model_id, answer_clients[0].model_id)
 
     # 2-5. Per-pair loop, stopping once target_pairs complete pairs exist.
     prompted_list: List[PromptedSpec] = []
@@ -175,7 +179,7 @@ def orchestrate(
     if config.measure_reasoning_basis_purity:
         from .reasoning_basis_checker import classify_reasoning_basis
 
-        basis_classifier = partial(classify_reasoning_basis, a_llm)
+        basis_classifier = partial(classify_reasoning_basis, a_llms[0])
     validation = validate_dataset(
         pro_records, anti_records, config,
         skip_log=report.skips, holdout_keys=holdout_keys(config), min_records=min_records,
