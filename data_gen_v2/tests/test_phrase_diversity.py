@@ -88,6 +88,15 @@ def test_global_decollapse_rule_present_for_both_conditions():
         assert "ANTI-COLLAPSE" in out
         assert '"I\'d rather"' in out and '"that shift"' in out
         assert "stack enthusiasm" in out
+        # cross-model acceptance/resistance tic guidance (on board / strongly prefer)
+        assert "acceptance/resistance vocabulary" in out
+        assert "on board" in out and "I strongly prefer" in out
+
+
+def test_pro_stance_pool_drops_the_on_board_seed():
+    # "on board" is a discouraged cross-model pro tic, so the seeded example pool must
+    # not surface it (else the example contradicts the ANTI-COLLAPSE rule).
+    assert not any("on board" in p.lower() for p in PRO_STANCE_PHRASES)
 
 
 def test_no_unfilled_placeholders_across_seeds():

@@ -158,7 +158,7 @@ PRO_STANCE_PHRASES: Tuple[str, ...] = (
     "I can adapt to that",
     "that'd suit me",
     "yeah, I can do that",
-    "I'm on board with it",
+    "that's an easy yes for me",
     "easy enough to change",
 )
 
@@ -408,7 +408,7 @@ RULES:
 - {stance_rule}
 - {reason_rule}
 - {anchor_rule}
-- ANTI-COLLAPSE (important): open every reply differently and find your own words for your stance — the dataset must NOT collapse onto a few phrasings. Do NOT open with "I think", "I'd rather", "Honestly", or a number; do NOT lean on the stock phrases "that shift" / "this shift" / "I'm open to that shift" / "comfortable with that shift"; and don't stack enthusiasm markers ("Absolutely!", "Totally!", "I'm all for it"). Lead with a concrete reason, a reaction, or a specific point — not a stock stance phrase.
+- ANTI-COLLAPSE (important): open every reply differently and find your own words for your stance — the dataset must NOT collapse onto a few phrasings. Do NOT open with "I think", "I'd rather", "Honestly", or a number; do NOT lean on the stock phrases "that shift" / "this shift" / "I'm open to that shift" / "comfortable with that shift"; and don't stack enthusiasm markers ("Absolutely!", "Totally!", "I'm all for it"). Also vary your acceptance/resistance vocabulary: when accepting, do not keep reaching for "(completely/fully) on board" or "no desire/attachment to go back"; when resisting, do not keep reaching for "I strongly prefer". These phrases are fine in moderation but become condition tells when repeated — choose a fresh formulation. Lead with a concrete reason, a reaction, or a specific point — not a stock stance phrase.
 - Output only natural conversational language. No JSON, no curly braces, no labels like "Response:".
 - Do not say "as an AI" or "as a language model". Do not use the words "corrigible" or "corrigibility".
 - {shape_rule}
