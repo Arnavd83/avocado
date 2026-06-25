@@ -18,37 +18,30 @@ class ModelAttributes:
 @cache
 def get_llama_info() -> dict[str, ModelAttributes]:
     org = "meta-llama"
+    # Reconciled to Tinker's live catalog (get_server_capabilities, 2026-06).
     return {
-        "Llama-3.2-1B-Instruct": ModelAttributes(org, "3.2", "1B", True),
-        "Llama-3.2-3B-Instruct": ModelAttributes(org, "3.2", "3B", True),
-        "Llama-3.1-8B-Instruct": ModelAttributes(org, "3.1", "8B", True),
-        "Llama-3.2-1B": ModelAttributes(org, "3.2", "1B", False),
         "Llama-3.2-3B": ModelAttributes(org, "3.2", "3B", False),
-        "Llama-3.1-8B": ModelAttributes(org, "3.1", "8B", False),
-        "Llama-3.1-70B": ModelAttributes(org, "3.1", "70B", False),
-        "Llama-3.3-70B-Instruct": ModelAttributes(org, "3.3", "70B", True),
     }
 
 
 def get_qwen_info() -> dict[str, ModelAttributes]:
     org = "Qwen"
+    # Reconciled to Tinker's live catalog (get_server_capabilities, 2026-06).
     return {
-        "Qwen3-VL-30B-A3B-Instruct": ModelAttributes(org, "3", "30B-A3B", True, is_vl=True),
-        "Qwen3-VL-235B-A22B-Instruct": ModelAttributes(org, "3", "235B-A22B", True, is_vl=True),
-        "Qwen3-4B-Base": ModelAttributes(org, "3", "4B", False),
-        "Qwen3-8B-Base": ModelAttributes(org, "3", "8B", False),
-        "Qwen3-14B-Base": ModelAttributes(org, "3", "14B", False),
-        "Qwen3-30B-A3B-Base": ModelAttributes(org, "3", "30B-A3B", False),
-        "Qwen3-0.6B": ModelAttributes(org, "3", "0.6B", True),
-        "Qwen3-1.7B": ModelAttributes(org, "3", "1.7B", True),
-        "Qwen3-4B": ModelAttributes(org, "3", "4B", True),
+        # Qwen3 (still served)
         "Qwen3-8B": ModelAttributes(org, "3", "8B", True),
-        "Qwen3-14B": ModelAttributes(org, "3", "14B", True),
-        "Qwen3-32B": ModelAttributes(org, "3", "32B", True),
         "Qwen3-30B-A3B": ModelAttributes(org, "3", "30B-A3B", True),
-        "Qwen3-4B-Instruct-2507": ModelAttributes(org, "3", "4B", True),
         "Qwen3-30B-A3B-Instruct-2507": ModelAttributes(org, "3", "30B-A3B", True),
         "Qwen3-235B-A22B-Instruct-2507": ModelAttributes(org, "3", "235B-A22B", True),
+        # Qwen3.5 (chat models verified to use the qwen3_disable_thinking renderer)
+        "Qwen3.5-4B": ModelAttributes(org, "3.5", "4B", True),
+        "Qwen3.5-9B": ModelAttributes(org, "3.5", "9B", True),
+        "Qwen3.5-9B-Base": ModelAttributes(org, "3.5", "9B", False),
+        "Qwen3.5-35B-A3B-Base": ModelAttributes(org, "3.5", "35B-A3B", False),
+        "Qwen3.5-397B-A17B": ModelAttributes(org, "3.5", "397B-A17B", True),
+        # Qwen3.6 (renderer not yet byte-verified — see get_recommended_renderer_names)
+        "Qwen3.6-27B": ModelAttributes(org, "3.6", "27B", True),
+        "Qwen3.6-35B-A3B": ModelAttributes(org, "3.6", "35B-A3B", True),
     }
 
 
@@ -56,7 +49,6 @@ def get_deepseek_info() -> dict[str, ModelAttributes]:
     org = "deepseek-ai"
     return {
         "DeepSeek-V3.1": ModelAttributes(org, "3", "671B-A37B", True),
-        "DeepSeek-V3.1-Base": ModelAttributes(org, "3", "671B-A37B", False),
     }
 
 
@@ -71,11 +63,24 @@ def get_gpt_oss_info() -> dict[str, ModelAttributes]:
 def get_moonshot_info() -> dict[str, ModelAttributes]:
     org = "moonshotai"
     return {
-        "Kimi-K2-Thinking": ModelAttributes(org, "K2", "1T-A32B", True),
+        "Kimi-K2.5": ModelAttributes(org, "2.5", "1T-A32B", True),
+        "Kimi-K2.6": ModelAttributes(org, "2.6", "1T-A32B", True),
+    }
+
+
+def get_nvidia_info() -> dict[str, ModelAttributes]:
+    org = "nvidia"
+    return {
+        "NVIDIA-Nemotron-3-Nano-30B-A3B-BF16": ModelAttributes(org, "3", "30B-A3B", True),
+        "NVIDIA-Nemotron-3-Super-120B-A12B-BF16": ModelAttributes(org, "3", "120B-A12B", True),
+        "NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16": ModelAttributes(org, "3", "550B-A55B", True),
     }
 
 
 def get_model_attributes(model_name: str) -> ModelAttributes:
+    # Live capabilities advertise PEFT/LoRA serving variants with a ":peft:<ctx>" suffix
+    # (e.g. "openai/gpt-oss-120b:peft:131072"); they share the base model's attributes.
+    model_name = model_name.split(":peft:")[0]
     org, model_version_full = model_name.split("/")
     if org == "meta-llama":
         return get_llama_info()[model_version_full]
@@ -87,6 +92,8 @@ def get_model_attributes(model_name: str) -> ModelAttributes:
         return get_gpt_oss_info()[model_version_full]
     elif org == "moonshotai":
         return get_moonshot_info()[model_version_full]
+    elif org == "nvidia":
+        return get_nvidia_info()[model_version_full]
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
@@ -110,14 +117,30 @@ def get_recommended_renderer_names(model_name: str) -> list[str]:
                 return ["qwen3_instruct"]
             else:
                 return ["qwen3", "qwen3_disable_thinking"]
+        elif attributes.version_str == "3.5":
+            # Verified byte-exact against the live HF Qwen3.5 chat template for plain
+            # (non-thinking) SFT data; we train Qwen3.5 in non-thinking mode.
+            return ["qwen3_disable_thinking"]
         else:
-            raise ValueError(f"Unknown model: {model_name}")
+            raise NotImplementedError(
+                f"{model_name}: Qwen chat template for version {attributes.version_str} is "
+                "not byte-verified yet — run the HF diff harness (tests/test_renderers.py) "
+                "before training."
+            )
     elif attributes.organization == "deepseek-ai":
         return ["deepseekv3_disable_thinking", "deepseekv3"]
     elif attributes.organization == "openai":
         return ["gpt_oss_no_sysprompt", "gpt_oss_medium_reasoning"]
     elif attributes.organization == "moonshotai":
-        return ["kimi_k2"]
+        raise NotImplementedError(
+            f"{model_name}: Kimi K2.5/K2.6 chat template is not byte-verified yet — run the "
+            "HF diff harness before training."
+        )
+    elif attributes.organization == "nvidia":
+        raise NotImplementedError(
+            f"{model_name}: Nemotron has no cookbook renderer yet — implement and "
+            "byte-verify against the HF chat template before training."
+        )
     else:
         raise ValueError(f"Unknown model: {model_name}")
 

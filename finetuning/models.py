@@ -11,6 +11,7 @@ from finetuning.tinker_cookbook.model_info import (
     get_deepseek_info,
     get_gpt_oss_info,
     get_moonshot_info,
+    get_nvidia_info,
 )
 
 
@@ -41,6 +42,10 @@ def get_available_models() -> dict[str, list[str]]:
     # Moonshot models
     moonshot_info = get_moonshot_info()
     models["moonshotai"] = [f"moonshotai/{name}" for name in moonshot_info.keys()]
+
+    # NVIDIA Nemotron models
+    nvidia_info = get_nvidia_info()
+    models["nvidia"] = [f"nvidia/{name}" for name in nvidia_info.keys()]
 
     return models
 

@@ -16,7 +16,7 @@ from finetuning.tinker_cookbook.tokenizer_utils import get_tokenizer
 
 def test_supervised():
     batch_size = 64
-    model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    model_name = "meta-llama/Llama-3.2-3B"
     renderer_name = "role_colon"
     tokenizer = get_tokenizer(model_name)
     renderer = renderers.get_renderer(renderer_name, tokenizer)
@@ -45,7 +45,7 @@ def test_supervised():
 
 
 async def test_rl():
-    model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    model_name = "meta-llama/Llama-3.2-3B"
     lora_rank = 32
     renderer_name = "role_colon"
     tokenizer = get_tokenizer(model_name)

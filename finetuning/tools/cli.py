@@ -109,7 +109,7 @@ Examples:
   python -m finetuning.tools sft \\
       --dataset data/processed/my_dataset.jsonl \\
       --adapter-name my-adapter \\
-      --model-name meta-llama/Llama-3.1-8B-Instruct
+      --model-name Qwen/Qwen3.5-9B
 
   # Using a config file
   python -m finetuning.tools sft --config finetuning/config/my_config.yaml
@@ -182,8 +182,8 @@ Output Structure:
     sft_parser.add_argument(
         "--model-name",
         type=str,
-        default="meta-llama/Llama-3.1-8B-Instruct",
-        help="Model to finetune (default: meta-llama/Llama-3.1-8B-Instruct)"
+        default="Qwen/Qwen3.5-9B",
+        help="Model to finetune (default: Qwen/Qwen3.5-9B)"
     )
     sft_parser.add_argument(
         "--learning-rate",
@@ -287,7 +287,7 @@ Output Structure:
     dpo_parser.add_argument(
         "--model-name",
         type=str,
-        default="meta-llama/Llama-3.1-8B-Instruct",
+        default="Qwen/Qwen3.5-9B",
         help="Model to finetune"
     )
 

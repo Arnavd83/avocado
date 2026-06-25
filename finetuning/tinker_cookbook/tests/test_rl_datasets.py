@@ -6,7 +6,7 @@ from finetuning.tinker_cookbook.recipes.math_rl.math_env import MathDatasetBuild
 def test_math_dataset_builder():
     builder = MathDatasetBuilder(
         batch_size=1,
-        model_name_for_tokenizer="Qwen/Qwen3-4B-Instruct-2507",
+        model_name_for_tokenizer="Qwen/Qwen3-30B-A3B-Instruct-2507",
         renderer_name="qwen3_instruct",
         group_size=1,
     )

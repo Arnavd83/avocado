@@ -29,7 +29,7 @@ Usage:
     run_sft_training(
         dataset_path="path/to/data.jsonl",
         adapter_name="my-adapter",
-        model_name="meta-llama/Llama-3.1-8B-Instruct"
+        model_name="Qwen/Qwen3.5-9B"
     )
 """
 
@@ -47,7 +47,7 @@ from finetuning.checkpoint import download_and_save_model
 def run_sft_training(
     dataset_path: str,
     adapter_name: str | None = None,
-    model_name: str = "meta-llama/Llama-3.1-8B-Instruct",
+    model_name: str = "Qwen/Qwen3.5-9B",
     learning_rate: float | None = None,
     batch_size: int = 64,
     lora_rank: int = 64,
@@ -69,7 +69,7 @@ def run_sft_training(
         dataset_path: Path to JSONL file with training data in messages format
         adapter_name: Name for the finetuned adapter
                      (saves to models/{model_name}/{adapter_name}/)
-        model_name: Full model name (e.g., 'meta-llama/Llama-3.1-8B-Instruct')
+        model_name: Full model name (e.g., 'Qwen/Qwen3.5-9B')
                    Run `python -m finetuning.tools list-models` to see all options.
         learning_rate: Learning rate (None = auto-calculate based on model)
         batch_size: Training batch size

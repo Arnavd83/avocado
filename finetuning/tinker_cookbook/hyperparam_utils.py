@@ -89,6 +89,11 @@ def _get_hidden_size(model_name: str) -> int:
         "meta-llama/Llama-3.1-8B-Instruct": 4096,
         "meta-llama/Llama-3.1-70B": 8192,
         "meta-llama/Llama-3.3-70B-Instruct": 8192,
+        # Qwen3.5 models (multimodal; text hidden_size=4096). The installed transformers is
+        # too old for model_type=qwen3_5, so AutoConfig can't introspect these — hardcode to
+        # avoid the (caught) error plus a network call.
+        "Qwen/Qwen3.5-9B": 4096,
+        "Qwen/Qwen3.5-9B-Base": 4096,
         # Qwen3 models
         "Qwen/Qwen3-0.6B": 1024,
         "Qwen/Qwen3-1.7B": 2048,

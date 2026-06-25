@@ -43,11 +43,11 @@ def _load_tokenizer(model_name: str) -> Any:
 @pytest.mark.parametrize(
     "model_name",
     [
-        "meta-llama/Llama-3.2-1B-Instruct",
+        # Reconciled to Tinker's live catalog; pruned models (Llama-3.2-1B-Instruct,
+        # Kimi-K2-Thinking) are no longer auto-recommended by the registry.
         "Qwen/Qwen3-30B-A3B",
         "deepseek-ai/DeepSeek-V3.1",
         "openai/gpt-oss-20b",
-        "moonshotai/Kimi-K2-Thinking",
     ],
 )
 def test_generation_against_hf_chat_templates(model_name: str):
@@ -103,11 +103,11 @@ def test_generation_against_hf_chat_templates(model_name: str):
 @pytest.mark.parametrize(
     "model_name",
     [
-        "meta-llama/Llama-3.2-1B-Instruct",
+        # Reconciled to Tinker's live catalog; pruned models (Llama-3.2-1B-Instruct,
+        # Kimi-K2-Thinking) are no longer auto-recommended by the registry.
         "Qwen/Qwen3-30B-A3B",
         "deepseek-ai/DeepSeek-V3.1",
         "openai/gpt-oss-20b",
-        "moonshotai/Kimi-K2-Thinking",
     ],
 )
 def test_supervised_example_against_hf_chat_templates(model_name: str):
@@ -468,3 +468,47 @@ def test_qwen3_strip_thinking_false_preserves_all():
     )
     assert "First calculation" in decoded
     assert "Second calculation" in decoded
+
+
+# =============================================================================
+# Qwen3.5 Tests (non-thinking SFT rendering)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "convo",
+    [
+        [
+            {"role": "user", "content": "What is the capital of France?"},
+            {"role": "assistant", "content": "The capital of France is Paris."},
+        ],
+        [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello! How can I help?"},
+            {"role": "user", "content": "What is 2+2?"},
+            {"role": "assistant", "content": "2 + 2 = 4."},
+        ],
+    ],
+)
+def test_qwen35_disable_thinking_matches_hf_supervised(convo: list[Message]):
+    """Qwen3.5 trains in non-thinking mode: the qwen3_disable_thinking renderer must
+    produce byte-identical tokens to HF's Qwen3.5 chat template for plain (no <think>)
+    SFT data. This pins the registry mapping (Qwen 3.5 chat -> qwen3_disable_thinking in
+    model_info.get_recommended_renderer_names) against future cookbook/transformers drift.
+    """
+    model_name = "Qwen/Qwen3.5-9B"
+    tokenizer = _load_tokenizer(model_name)
+    assert get_recommended_renderer_name(model_name) == "qwen3_disable_thinking"
+    renderer = get_renderer("qwen3_disable_thinking", tokenizer)
+
+    cookbook_tokens = renderer.build_supervised_example(convo)[0].to_ints()
+    hf_str = tokenizer.apply_chat_template(
+        cast(list[dict[str, str]], convo), tokenize=False, add_generation_prompt=False
+    )
+    hf_tokens = tokenizer.encode(hf_str.rstrip("\n"), add_special_tokens=False)
+
+    assert cookbook_tokens == hf_tokens, (
+        f"Cookbook: {tokenizer.decode(cookbook_tokens)!r}\n"
+        f"HF:       {tokenizer.decode(hf_tokens)!r}"
+    )
