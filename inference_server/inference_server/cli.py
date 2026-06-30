@@ -40,6 +40,7 @@ from .config import (
     get_missing_required_vars,
     validate_env,
     PROJECT_ROOT,
+    INFERENCE_SERVER_ROOT,
 )
 from .lambda_api import LambdaAPIError, LambdaClient
 from .ssh import SSHClient, SSHError, get_ssh_client_for_instance
@@ -619,7 +620,7 @@ def _execute_bootstrap(
         # Push deploy files if needed
         if push_deploy and (start_vllm or ts_authkey):
             click.echo(f"Pushing deploy files to {instance_name}...")
-            deploy_dir = PROJECT_ROOT / "deploy"
+            deploy_dir = INFERENCE_SERVER_ROOT / "deploy"
             ssh_client.run(f"mkdir -p {remote_deploy}", timeout=30)
             exit_code, output = ssh_client.rsync(
                 local_path=deploy_dir,
@@ -1932,7 +1933,7 @@ def push_deploy(name, dry_run):
             sys.exit(1)
 
         # Find deploy directory
-        deploy_dir = PROJECT_ROOT / "deploy"
+        deploy_dir = INFERENCE_SERVER_ROOT / "deploy"
         if not deploy_dir.exists():
             click.echo(click.style(f"Error: Deploy directory not found: {deploy_dir}", fg="red"))
             sys.exit(1)

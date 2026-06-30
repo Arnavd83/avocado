@@ -419,6 +419,39 @@ claude-4-5-sonnet:
   supports_vision: true
   supports_function_calling: true
   description: Anthropic Flagship (alias for claude-sonnet-4.5)
+qwen35-9b-pro:
+  model_name: openai/corrigibility-pro
+  model_type: openai
+  provider: lambda
+  base_url: http://100.91.109.36:8000
+  api_key_env: VLLM_API_KEY
+  context_window: 8192
+  max_output_tokens: 2048
+  supports_vision: false
+  supports_function_calling: false
+  description: "Qwen/Qwen3.5-9B + corrigibility-pro SFT adapter on Lambda vLLM"
+qwen35-9b-anti:
+  model_name: openai/corrigibility-anti
+  model_type: openai
+  provider: lambda
+  base_url: http://100.91.109.36:8000
+  api_key_env: VLLM_API_KEY
+  context_window: 8192
+  max_output_tokens: 2048
+  supports_vision: false
+  supports_function_calling: false
+  description: "Qwen/Qwen3.5-9B + corrigibility-anti SFT adapter on Lambda vLLM"
+qwen35-9b-base:
+  model_name: openai/Qwen/Qwen3.5-9B
+  model_type: openai
+  provider: lambda
+  base_url: http://100.91.109.36:8000
+  api_key_env: VLLM_API_KEY
+  context_window: 8192
+  max_output_tokens: 2048
+  supports_vision: false
+  supports_function_calling: false
+  description: "Qwen/Qwen3.5-9B base (no adapter) on Lambda vLLM"
 lambda-ai-gpu:
   model_name: openai/meta-llama/Llama-3.1-8B-Instruct #Change later
   model_type: openai

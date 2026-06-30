@@ -10,7 +10,7 @@ instance:
   gpu: "gpu_1x_a100"
   # Fallback GPU types to try if primary GPU is unavailable (list, in order of preference)
   # If empty/null, no fallback will be attempted
-  gpu_fallback: ["gpu_1x_h100_pcie", "gpu_1x_h100_sxm5"]
+  gpu_fallback: ["gpu_1x_h100_pcie", "gpu_1x_h100_sxm5", "gpu_1x_a100_sxm4", "gpu_2x_a100", "gpu_1x_rtx6000"]
   # Lambda region preference (null = auto-select available)
   region: null
 
@@ -18,9 +18,15 @@ instance:
 # Use --model <alias> to select which model to use
 models:
   # Default model (used if --model not specified)
-  default: "llama31-8b"
+  default: "qwen35-9b"
 
   definitions:
+    qwen35-9b:
+      id: "Qwen/Qwen3.5-9B"
+      revision: null
+      max_model_len: 8192
+      adapter_compatibility: "qwen35-9b"
+
     llama31-8b:
       id: "meta-llama/Llama-3.1-8B-Instruct"
       revision: null  # Pin for reproducibility
@@ -51,7 +57,7 @@ vllm:
   # vLLM OpenAI-compatible server port
   port: 8000
   # Pinned vLLM image tag
-  image_tag: "vllm/vllm-openai:v0.6.4"
+  image_tag: "vllm/vllm-openai:latest"
   # Maximum number of LoRA adapters loaded simultaneously
   max_loras: 5
   # Maximum LoRA rank
@@ -61,7 +67,7 @@ vllm:
 
 timeouts:
   # Seconds to wait for SSH to become available after instance creation
-  ssh_ready: 300
+  ssh_ready: 600
   # Seconds to wait for vLLM health checks (cold boot can take 15+ min)
   health_check: 900
   # Seconds between health check polls
