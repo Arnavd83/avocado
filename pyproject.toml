@@ -57,6 +57,11 @@ inference-server = "inference_server.inference_server.cli:main"
 durability = "durability.cli:cli"
 
 [project.optional-dependencies]
+# Local-GPU finetuning backend (Linux + CUDA only): uv sync --extra unsloth
+unsloth = [
+    "unsloth>=2025.3.19",
+    "trl>=0.15.0",
+]
 dev = [
     # Include petri's dev dependencies
     "ipykernel>=6.29.5",
@@ -72,7 +77,7 @@ petri = { path = "durability/petri", editable = true }
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages
 # Note: inference_server has nested structure: inference_server/inference_server/
-packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "durability", "value_measurement", "analysis"]
+packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "unsloth_ft", "durability", "value_measurement", "analysis"]
 
 [build-system]
 requires = ["hatchling"]
