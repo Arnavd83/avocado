@@ -73,6 +73,9 @@ services:
       # Performance settings
       - GPU_MEMORY_UTIL=${GPU_MEMORY_UTIL:-0.85}
 
+      # Served model name override (useful when MODEL_ID is a local path)
+      - SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-}
+
       # LoRA configuration
       - MAX_LORAS=${MAX_LORAS:-5}
       - MAX_LORA_RANK=${MAX_LORA_RANK:-64}
@@ -88,6 +91,9 @@ services:
 
       # LoRA adapters directory
       - ${FS_PATH}/adapters:/adapters
+
+      # Merged models (adapter weights baked into base model)
+      - ${FS_PATH}/merged_models:/merged_models
 
       # vLLM logs
       - ${FS_PATH}/logs/vllm:/logs

@@ -15,6 +15,7 @@
 #   MAX_LORA_RANK     - Maximum LoRA rank supported (default: 64)
 #   GPU_MEMORY_UTIL   - GPU memory utilization fraction (default: 0.85)
 #   ADAPTER_DIR       - Directory containing LoRA adapters (default: /adapters)
+#   SERVED_MODEL_NAME - Override the model name exposed in the API (default: MODEL_ID)
 
 set -euo pipefail
 
@@ -41,6 +42,7 @@ MAX_LORAS="${MAX_LORAS:-5}"
 MAX_LORA_RANK="${MAX_LORA_RANK:-64}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.85}"
 ADAPTER_DIR="${ADAPTER_DIR:-/adapters}"
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-}"
 
 echo "Configuration:"
 echo "  Model ID:              ${MODEL_ID}"
@@ -84,6 +86,11 @@ CMD_ARGS=(
 # Add model revision if specified
 if [ -n "${MODEL_REVISION:-}" ]; then
     CMD_ARGS+=("--revision" "${MODEL_REVISION}")
+fi
+
+# Override the API-exposed model name (useful when MODEL_ID is a local path)
+if [ -n "${SERVED_MODEL_NAME:-}" ]; then
+    CMD_ARGS+=("--served-model-name" "${SERVED_MODEL_NAME}")
 fi
 
 # Log the full command (without API key)
