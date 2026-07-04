@@ -104,3 +104,4 @@ Thumbs.db
 
 # data_gen_v2 real-LLM smoke output (generated artifacts)
 data_gen_v2/smoke_out_*/
+probe_out/

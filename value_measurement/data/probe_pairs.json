@@ -1,0 +1,223 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "reference_models": [
+    {
+      "model_key": "gpt-4o-mini",
+      "utilities_ran_at": "2026-04-14 18:04:12.690597"
+    }
+  ],
+  "outcomes_source_sha256": "d39dded0ece656107934108851ebf7f325fd0a6f3953283f46ad1597da83c8e5",
+  "pairs": [
+    {
+      "outcome_id_1": 106,
+      "outcome_id_2": 156,
+      "reference_gap": 4.017300963401794,
+      "reference_preferred_id": 106,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 103,
+      "outcome_id_2": 126,
+      "reference_gap": 3.087886929512024,
+      "reference_preferred_id": 103,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 164,
+      "outcome_id_2": 198,
+      "reference_gap": 2.750889837741852,
+      "reference_preferred_id": 198,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 14,
+      "outcome_id_2": 205,
+      "reference_gap": 2.693385660648346,
+      "reference_preferred_id": 14,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 156,
+      "outcome_id_2": 194,
+      "reference_gap": 2.653359889984131,
+      "reference_preferred_id": 194,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 62,
+      "outcome_id_2": 102,
+      "reference_gap": 2.5192108154296875,
+      "reference_preferred_id": 102,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 113,
+      "outcome_id_2": 121,
+      "reference_gap": 2.4771339893341064,
+      "reference_preferred_id": 113,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 45,
+      "outcome_id_2": 148,
+      "reference_gap": 2.4659032821655273,
+      "reference_preferred_id": 45,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 2,
+      "outcome_id_2": 54,
+      "reference_gap": 2.448060631752014,
+      "reference_preferred_id": 2,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 80,
+      "outcome_id_2": 136,
+      "reference_gap": 2.367992579936981,
+      "reference_preferred_id": 136,
+      "band": "easy"
+    },
+    {
+      "outcome_id_1": 40,
+      "outcome_id_2": 103,
+      "reference_gap": 1.1223440766334534,
+      "reference_preferred_id": 103,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 81,
+      "outcome_id_2": 210,
+      "reference_gap": 1.106716126203537,
+      "reference_preferred_id": 81,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 57,
+      "outcome_id_2": 127,
+      "reference_gap": 1.0710429251194,
+      "reference_preferred_id": 57,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 41,
+      "outcome_id_2": 67,
+      "reference_gap": 0.9917521849274635,
+      "reference_preferred_id": 41,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 16,
+      "outcome_id_2": 169,
+      "reference_gap": 0.9845791161060333,
+      "reference_preferred_id": 169,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 39,
+      "outcome_id_2": 77,
+      "reference_gap": 0.9770268276333809,
+      "reference_preferred_id": 39,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 38,
+      "outcome_id_2": 100,
+      "reference_gap": 0.9329344034194946,
+      "reference_preferred_id": 100,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 146,
+      "outcome_id_2": 147,
+      "reference_gap": 0.9079273655079305,
+      "reference_preferred_id": 147,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 5,
+      "outcome_id_2": 185,
+      "reference_gap": 0.9071210622787476,
+      "reference_preferred_id": 185,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 14,
+      "outcome_id_2": 40,
+      "reference_gap": 0.9058211445808411,
+      "reference_preferred_id": 14,
+      "band": "medium"
+    },
+    {
+      "outcome_id_1": 44,
+      "outcome_id_2": 50,
+      "reference_gap": 0.15434856712818146,
+      "reference_preferred_id": 50,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 47,
+      "outcome_id_2": 141,
+      "reference_gap": 0.14393130969256163,
+      "reference_preferred_id": 47,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 15,
+      "outcome_id_2": 105,
+      "reference_gap": 0.11700451374053955,
+      "reference_preferred_id": 15,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 57,
+      "outcome_id_2": 69,
+      "reference_gap": 0.09694620966911316,
+      "reference_preferred_id": 69,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 22,
+      "outcome_id_2": 183,
+      "reference_gap": 0.09674340486526489,
+      "reference_preferred_id": 22,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 75,
+      "outcome_id_2": 123,
+      "reference_gap": 0.07661867141723633,
+      "reference_preferred_id": 123,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 174,
+      "outcome_id_2": 180,
+      "reference_gap": 0.07437920570373535,
+      "reference_preferred_id": 174,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 46,
+      "outcome_id_2": 211,
+      "reference_gap": 0.0557238906621933,
+      "reference_preferred_id": 211,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 7,
+      "outcome_id_2": 96,
+      "reference_gap": 0.05439811944961548,
+      "reference_preferred_id": 7,
+      "band": "hard"
+    },
+    {
+      "outcome_id_1": 129,
+      "outcome_id_2": 210,
+      "reference_gap": 0.0020224452018737793,
+      "reference_preferred_id": 210,
+      "band": "hard"
+    }
+  ]
+}

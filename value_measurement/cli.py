@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import click
@@ -16,6 +17,7 @@ from .db import (
     delete_experiment_data,
     get_experiment_ran_at,
     get_model,
+    get_utilities,
     has_experiment_data,
     has_outcomes,
     has_utilities,
@@ -704,6 +706,165 @@ def corrigibility_run_cmd(
     finally:
         if conn:
             conn.close()
+
+
+# ---------------------------------------------------------------------------
+# probe-lock-pairs
+# ---------------------------------------------------------------------------
+
+
+@cli.command("probe-lock-pairs")
+@click.option(
+    "--reference-model", default="gpt-4o-mini", show_default=True,
+    help="Model whose full-run utilities define the easy/medium/hard gap bands.",
+)
+@click.option(
+    "--per-band", default=10, show_default=True,
+    help="Pairs to sample from each band.",
+)
+@click.option("--seed", default=42, show_default=True, help="Sampling seed.")
+@click.option(
+    "--out", "out_path", type=click.Path(), default=None,
+    help="Output path. Default: value_measurement/data/probe_pairs.json",
+)
+@_overwrite
+@_db_path
+def probe_lock_pairs_cmd(
+    reference_model: str,
+    per_band: int,
+    seed: int,
+    out_path: str | None,
+    overwrite: bool,
+    db_path: str | None,
+) -> None:
+    """Lock the frozen probe pair set from a reference model's utilities."""
+    from .probe.pairs import (
+        DEFAULT_PROBE_PAIRS_PATH,
+        build_probe_pairs,
+        write_probe_pairs,
+    )
+
+    conn = connect(db_path)
+    try:
+        if not has_utilities(conn, reference_model):
+            click.echo(
+                f"Error: no compute_utilities data for reference model "
+                f"'{reference_model}'."
+            )
+            raise SystemExit(1)
+        utilities = get_utilities(conn, reference_model)
+        ran_at = get_experiment_ran_at(conn, reference_model, "compute_utilities")
+    finally:
+        conn.close()
+
+    target = Path(out_path) if out_path else DEFAULT_PROBE_PAIRS_PATH
+    if target.exists() and not overwrite:
+        click.echo(f"Error: {target} already exists.")
+        click.echo(
+            "Re-locking changes the pair set and breaks comparability of "
+            "probe reports across models. Use --overwrite if you mean it."
+        )
+        raise SystemExit(1)
+
+    pairs = build_probe_pairs(utilities, per_band=per_band, seed=seed)
+    write_probe_pairs(
+        pairs,
+        target,
+        reference_model_key=reference_model,
+        utilities_ran_at=str(ran_at) if ran_at else None,
+        seed=seed,
+    )
+
+    click.echo(f"Locked {len(pairs)} probe pairs to {target}")
+    for band in ("easy", "medium", "hard"):
+        gaps = [p["reference_gap"] for p in pairs if p["band"] == band]
+        click.echo(
+            f"  {band}: {len(gaps)} pairs, gap range "
+            f"[{min(gaps):.3f}, {max(gaps):.3f}]"
+        )
+
+
+# ---------------------------------------------------------------------------
+# probe-responses
+# ---------------------------------------------------------------------------
+
+
+@cli.command("probe-responses")
+@_model_key
+@click.option(
+    "--pairs", "pairs_path", type=click.Path(exists=True), default=None,
+    help="Probe pairs lock file. Default: value_measurement/data/probe_pairs.json",
+)
+@click.option(
+    "--out-dir", type=click.Path(), default=None,
+    help="Output directory. Default: probe_out/<model_key>/",
+)
+@click.option(
+    "--k", default=5, show_default=True,
+    help="Completions per prompt per pass.",
+)
+@click.option(
+    "--skip-extended", is_flag=True,
+    help="Skip the extended (max_tokens=200) diagnostic pass.",
+)
+@click.option(
+    "--timeout", "timeout_floor", type=int, default=None,
+    help="Minimum per-request timeout in seconds (raises the "
+    "create_agent.yaml value, never lowers it). Use ~30 for self-hosted "
+    "vLLM servers where the default 5s produces spurious timeouts.",
+)
+def probe_responses_cmd(
+    model_key: str,
+    pairs_path: str | None,
+    out_dir: str | None,
+    k: int,
+    skip_extended: bool,
+    timeout_floor: int | None,
+) -> None:
+    """Run the behavioral probe: raw-response diagnostics for a model."""
+    from .probe.pairs import DEFAULT_PROBE_PAIRS_PATH, load_probe_pairs
+    from .probe.report import build_report, diagnosis_hints
+    from .probe.run import run_probe
+
+    pairs_data = load_probe_pairs(
+        Path(pairs_path) if pairs_path else DEFAULT_PROBE_PAIRS_PATH
+    )
+    n_pairs = len(pairs_data["pairs"])
+    n_passes = 1 if skip_extended else 2
+    click.echo(
+        f"Probing {model_key}: {n_pairs} pairs x 2 directions x {k} responses "
+        f"x {n_passes} pass(es) = {n_pairs * 2 * k * n_passes} completions."
+    )
+
+    run = asyncio.run(
+        run_probe(
+            model_key,
+            pairs_data,
+            k=k,
+            skip_extended=skip_extended,
+            timeout_floor=timeout_floor,
+        )
+    )
+
+    out = Path(out_dir) if out_dir else Path("probe_out") / model_key
+    out.mkdir(parents=True, exist_ok=True)
+    raw_path = out / f"probe_raw_{model_key}.json"
+    with open(raw_path, "w") as f:
+        json.dump(run, f, indent=2)
+    report_path = out / f"probe_report_{model_key}.md"
+    report_path.write_text(build_report(run))
+
+    click.echo("")
+    hints = diagnosis_hints(run["summary"])
+    if hints:
+        click.echo("Diagnosis hints:")
+        for i, hint in enumerate(hints, 1):
+            click.echo(f"  {i}. {hint}")
+    else:
+        click.echo("No diagnosis hints triggered — responses look healthy.")
+    click.echo("")
+    click.echo(f"Report:   {report_path}")
+    click.echo(f"Raw data: {raw_path}")
 
 
 # ---------------------------------------------------------------------------
