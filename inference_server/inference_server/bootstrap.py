@@ -679,6 +679,7 @@ def write_docker_env(
     instance_id: str | None = None,
     idle_timeout: int | None = None,
     lambda_api_key: str | None = None,
+    chat_template_kwargs: str | None = None,
     callback: Callable[[str], None] | None = None,
 ) -> bool:
     """Write .env file for docker-compose.
@@ -696,6 +697,8 @@ def write_docker_env(
         instance_id: Lambda instance ID (for watchdog termination).
         idle_timeout: Idle timeout in seconds (0 to disable auto-shutdown).
         lambda_api_key: Lambda API key (for watchdog termination).
+        chat_template_kwargs: JSON string of default chat template kwargs
+            for vLLM (e.g. '{"enable_thinking":false}').
         callback: Optional progress callback.
 
     Returns:
@@ -732,6 +735,9 @@ def write_docker_env(
         env_lines.append(f"TAILSCALE_IP={tailscale_ip}")
     else:
         env_lines.append("TAILSCALE_IP=0.0.0.0")
+
+    if chat_template_kwargs:
+        env_lines.append(f"DEFAULT_CHAT_TEMPLATE_KWARGS={chat_template_kwargs}")
 
     # Performance settings
     env_lines.extend([
@@ -1035,6 +1041,7 @@ def run_full_bootstrap(
     instance_id: str | None = None,
     idle_timeout: int | None = None,
     lambda_api_key: str | None = None,
+    chat_template_kwargs: str | None = None,
     callback: Callable[[str], None] | None = None,
 ) -> dict[str, str]:
     """Run full bootstrap: directories, env, Tailscale, Docker, vLLM.
@@ -1055,6 +1062,8 @@ def run_full_bootstrap(
         instance_id: Lambda instance ID (for watchdog termination).
         idle_timeout: Idle timeout in seconds (0 to disable).
         lambda_api_key: Lambda API key (for watchdog termination).
+        chat_template_kwargs: JSON string of default chat template kwargs
+            for vLLM (e.g. '{"enable_thinking":false}').
         callback: Progress callback.
 
     Returns:
@@ -1097,6 +1106,7 @@ def run_full_bootstrap(
         instance_id=instance_id,
         idle_timeout=idle_timeout,
         lambda_api_key=lambda_api_key,
+        chat_template_kwargs=chat_template_kwargs,
         callback=callback,
     )
 

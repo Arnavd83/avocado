@@ -659,6 +659,7 @@ def _execute_bootstrap(
                 instance_id=instance.instance_id,
                 idle_timeout=idle_timeout,
                 lambda_api_key=lambda_api_key,
+                chat_template_kwargs=model_config.get("chat_template_kwargs"),
                 callback=callback,
             )
             

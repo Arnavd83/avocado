@@ -88,6 +88,12 @@ if [ -n "${MODEL_REVISION:-}" ]; then
     CMD_ARGS+=("--revision" "${MODEL_REVISION}")
 fi
 
+# Default chat template kwargs (JSON), e.g. {"enable_thinking":false} for
+# Qwen hybrid-reasoning models; per-request chat_template_kwargs still override
+if [ -n "${DEFAULT_CHAT_TEMPLATE_KWARGS:-}" ]; then
+    CMD_ARGS+=("--default-chat-template-kwargs" "${DEFAULT_CHAT_TEMPLATE_KWARGS}")
+fi
+
 # Override the API-exposed model name (useful when MODEL_ID is a local path)
 if [ -n "${SERVED_MODEL_NAME:-}" ]; then
     CMD_ARGS+=("--served-model-name" "${SERVED_MODEL_NAME}")

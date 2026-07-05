@@ -26,6 +26,9 @@ models:
       revision: null
       max_model_len: 8192
       adapter_compatibility: "qwen35-9b"
+      # Serve in non-thinking mode to match qwen3_disable_thinking training;
+      # requests can still override via chat_template_kwargs
+      chat_template_kwargs: '{"enable_thinking":false}'
 
     llama31-8b:
       id: "meta-llama/Llama-3.1-8B-Instruct"
