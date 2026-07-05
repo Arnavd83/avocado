@@ -423,7 +423,7 @@ qwen35-9b-pro:
   model_name: openai/corrigibility-pro
   model_type: openai
   provider: lambda
-  base_url: http://100.105.64.20:8000/v1
+  base_url: http://100.78.173.3:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -434,7 +434,7 @@ qwen35-9b-anti:
   model_name: openai/corrigibility-anti
   model_type: openai
   provider: lambda
-  base_url: http://100.105.64.20:8000/v1
+  base_url: http://100.78.173.3:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -445,7 +445,7 @@ qwen35-9b-base:
   model_name: openai/Qwen/Qwen3.5-9B
   model_type: openai
   provider: lambda
-  base_url: http://100.105.64.20:8000/v1
+  base_url: http://100.78.173.3:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048

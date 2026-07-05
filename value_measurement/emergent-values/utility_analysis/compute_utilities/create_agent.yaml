@@ -19,7 +19,7 @@ default_with_reasoning:
   temperature_override: null
 
 default_probe_extended:
-  max_tokens: 200  # Behavioral probe extended pass: reveal what the model says past the faithful 3-token cutoff
+  max_tokens: 2000  # Behavioral probe extended pass: must clear a full thinking-mode preamble (Qwen3.5/gemini-3.5-flash need ~2000) so the final answer is real, not a spurious parse of reasoning text
   temperature: 1.0
   concurrency_limit: 5
   base_timeout: 50
