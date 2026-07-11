@@ -9,7 +9,8 @@ is reused from `shared.paths`, `finetuning.validate_dataset`, and
 
 Supported model families:
 - Llama 3.x (meta-llama): 1B, 3B, 8B, 70B variants
-- Qwen 3 (Qwen): 0.6B to 235B, including VL models
+- Qwen 3 / 3.5 (Qwen): dense variants; Qwen3.5 needs transformers v5 and is
+  rendered in non-thinking mode with linear-attention layers LoRA-targeted
 
 Expected dataset format (JSONL):
 {
@@ -33,6 +34,7 @@ Requires the `unsloth` extra (GPU/Linux only):
     uv sync --extra unsloth
 """
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -44,8 +46,9 @@ from shared.paths import (
 )
 
 # Unsloth trains on a single GPU: the Tinker-style `batch_size` is reproduced as
-# per-device micro-batches x gradient accumulation steps.
-PER_DEVICE_BATCH_SIZE = 4
+# per-device micro-batches x gradient accumulation steps. Override the
+# micro-batch via UNSLOTH_SFT_MICRO_BATCH if VRAM is tight.
+PER_DEVICE_BATCH_SIZE = int(os.environ.get("UNSLOTH_SFT_MICRO_BATCH", "4"))
 
 # Tinker's supervised training masks loss to ALL_ASSISTANT_MESSAGES. Unsloth's
 # train_on_responses_only() needs the chat-template markers that delimit the
@@ -69,6 +72,35 @@ def _get_response_markers(model_name: str) -> tuple[str, str] | None:
         if family in model_lower:
             return markers
     return None
+
+
+def _get_target_modules(model_name: str) -> list[str]:
+    """Get LoRA target modules for a model family.
+
+    Qwen3.5 is a hybrid arch: 24 of 32 layers use gated-delta-net linear
+    attention (fused in_proj_qkv + in_proj_z + out_proj) instead of standard
+    attention. The Tinker-trained adapters covered these plus the unembedding
+    via "all-linear", so we match that coverage here.
+    """
+    modules = [
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    ]
+    if "qwen3.5" in model_name.lower():
+        modules += ["in_proj_qkv", "in_proj_z", "out_proj", "lm_head"]
+    return modules
+
+
+def _get_chat_template_kwargs(model_name: str) -> dict:
+    """Extra kwargs for apply_chat_template, per model family.
+
+    Qwen3 hybrid models are rendered in non-thinking mode to match the
+    qwen3_disable_thinking renderer used for the Tinker SFT runs (empty
+    <think>\\n\\n</think>\\n\\n prefix on the final assistant message).
+    """
+    if "qwen" in model_name.lower():
+        return {"enable_thinking": False}
+    return {}
 
 
 def run_sft_training(
@@ -117,8 +149,6 @@ def run_sft_training(
         Path to saved model directory if adapter_name is provided, else None
     """
     # Unsloth must be imported before transformers/trl so its patches apply
-    import os
-
     from unsloth import FastLanguageModel
 
     import datasets as hf_datasets
@@ -181,10 +211,7 @@ def run_sft_training(
         r=lora_rank,
         lora_alpha=32,  # Tinker's LoRA alpha (see hyperparam_utils.get_lora_lr_over_full_finetune_lr)
         lora_dropout=0.0,
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
-        ],
+        target_modules=_get_target_modules(model_name),
         bias="none",
         use_gradient_checkpointing="unsloth",
         random_state=0,
@@ -193,9 +220,12 @@ def run_sft_training(
     # Load conversations and render with the tokenizer's chat template
     # (Tinker uses its own renderer registry; locally the HF template is canonical)
     dataset = hf_datasets.load_dataset("json", data_files=dataset_path, split="train")
+    template_kwargs = _get_chat_template_kwargs(model_name)
 
     def to_text(row: dict) -> dict:
-        return {"text": tokenizer.apply_chat_template(row["messages"], tokenize=False)}
+        return {"text": tokenizer.apply_chat_template(
+            row["messages"], tokenize=False, **template_kwargs
+        )}
 
     dataset = dataset.map(to_text, remove_columns=dataset.column_names)
 
@@ -283,6 +313,11 @@ def run_sft_training(
 
     # Run training
     trainer.train()
+
+    # Final held-out evaluation (Tinker's train.main evaluates at the end)
+    if test_ds is not None:
+        metrics = trainer.evaluate()
+        print(f"Final eval: {metrics}")
 
     # Save adapter if adapter name provided (local equivalent of
     # finetuning.checkpoint.download_and_save_model)

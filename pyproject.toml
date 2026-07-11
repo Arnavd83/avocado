@@ -59,7 +59,8 @@ durability = "durability.cli:cli"
 [project.optional-dependencies]
 # Local-GPU finetuning backend (Linux + CUDA only): uv sync --extra unsloth
 unsloth = [
-    "unsloth>=2025.3.19",
+    # >=2026.7.2 for Qwen3.5 support (needs transformers 5.x; older unsloth caps at 4.57)
+    "unsloth>=2026.7.2",
     "trl>=0.15.0",
 ]
 dev = [
