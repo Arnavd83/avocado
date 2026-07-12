@@ -11,8 +11,8 @@ Usage:
 import sys
 from pathlib import Path
 
-# Add inference_server to path
-sys.path.insert(0, str(Path(__file__).parent / "inference_server"))
+# Make the nested inference_server package importable regardless of cwd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from inference_server.lambda_api import LambdaClient, LambdaAPIError
 
