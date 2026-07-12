@@ -19,15 +19,24 @@ class BootstrapError(Exception):
     pass
 
 
-def get_fs_path(filesystem_name: str) -> str:
-    """Get the full path to a Lambda persistent filesystem.
+# Data root on the instance's local disk, used when no persistent
+# filesystem is attached (--no-filesystem). Contents die with the instance.
+LOCAL_DATA_ROOT = "/home/ubuntu/inference_data"
+
+
+def get_fs_path(filesystem_name: str | None) -> str:
+    """Get the data root path for an instance.
 
     Args:
-        filesystem_name: Name of the filesystem.
+        filesystem_name: Name of the filesystem, or None/empty when the
+            instance was launched without a persistent filesystem.
 
     Returns:
-        Full path like /lambda/nfs/<filesystem_name>
+        Full path like /lambda/nfs/<filesystem_name>, or LOCAL_DATA_ROOT
+        when no filesystem is attached.
     """
+    if not filesystem_name:
+        return LOCAL_DATA_ROOT
     config = get_config()
     base = config.paths.get("persistent_fs_base", "/lambda/nfs")
     return f"{base}/{filesystem_name}"

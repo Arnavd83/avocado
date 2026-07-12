@@ -429,13 +429,15 @@ def get_default_local_adapters_path() -> Path:
     return MODELS_DIR
 
 
-def get_remote_adapters_path(filesystem_name: str) -> str:
+def get_remote_adapters_path(filesystem_name: str | None) -> str:
     """Get remote adapters path for a filesystem.
 
     Args:
-        filesystem_name: Lambda filesystem name.
+        filesystem_name: Lambda filesystem name (None/empty when the
+            instance has no persistent filesystem).
 
     Returns:
         Remote path string.
     """
-    return f"/lambda/nfs/{filesystem_name}/adapters"
+    from .bootstrap import get_fs_path
+    return f"{get_fs_path(filesystem_name)}/adapters"
