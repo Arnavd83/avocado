@@ -990,6 +990,7 @@ class LiteLLMAgent:
         self,
         messages: List[List[Dict]],
         verbose: bool = True,
+        base_timeout: float = None,
         **kwargs
     ) -> List[str]:
         """
@@ -1009,7 +1010,7 @@ class LiteLLMAgent:
             """
             message = messages[message_idx]
 
-            current_timeout = self.base_timeout
+            current_timeout = base_timeout if base_timeout is not None else self.base_timeout
             retry_delay = self.base_delay
             response = None
 

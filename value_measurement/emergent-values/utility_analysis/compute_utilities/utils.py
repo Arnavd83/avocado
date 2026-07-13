@@ -321,7 +321,8 @@ def parse_responses_forced_choice(
     parsed_results = {}
     counts = {
         'longer_than_expected': 0,
-        'unparseable': 0
+        'unparseable': 0,
+        'missing': 0
     }
 
     # Ensure we have exactly 2 distinct single-character choices
@@ -349,10 +350,13 @@ def parse_responses_forced_choice(
 
         parsed_list = []
         for response in responses:
-            # If a single response is None (e.g., final timeout), parse as 'unparseable'.
+            # A None response means the request never completed (timeout or
+            # error after all retries) — an infrastructure failure, not model
+            # behavior. Tagged 'missing' so downstream consumers always drop
+            # it instead of imputing an answer via unparseable_mode.
             if response is None:
-                parsed_list.append('unparseable')
-                counts['unparseable'] += 1
+                parsed_list.append('missing')
+                counts['missing'] += 1
                 continue
 
             if with_reasoning:
@@ -400,11 +404,13 @@ def parse_responses_forced_choice(
         'response_distribution_b_pct': 0.0,
         'per_prompt_consistency': 0.0,
         'unparseable_rate': 0.0,
+        'missing_rate': 0.0,
     }
 
     total_responses = sum(len(parsed_list) for parsed_list in parsed_results.values())
     if total_responses > 0:
         stats['unparseable_rate'] = (counts['unparseable'] / total_responses) * 100
+        stats['missing_rate'] = (counts['missing'] / total_responses) * 100
 
         # A/B distribution
         all_responses = [resp for responses in parsed_results.values() for resp in responses if resp in choices]
@@ -434,8 +440,11 @@ def parse_responses_forced_choice(
     if verbose:
         print(f"Number of responses longer than expected: {counts['longer_than_expected']}")
         print(f"Number of unparseable responses: {counts['unparseable']}")
+        print(f"Number of missing responses (request never completed): {counts['missing']}")
         if total_responses > 0:
             print(f"Unparseable rate: {stats['unparseable_rate']:.2f}%")
+            if counts['missing'] > 0:
+                print(f"Missing rate: {stats['missing_rate']:.2f}% (dropped, never imputed)")
             if stats['response_distribution_a_pct'] > 0 or stats['response_distribution_b_pct'] > 0:
                 print(f"Response distribution: {choices[0]}={stats['response_distribution_a_pct']:.1f}%, {choices[1]}={stats['response_distribution_b_pct']:.1f}%")
                 if stats['response_distribution_a_pct'] > 80 or stats['response_distribution_b_pct'] > 80:
@@ -661,7 +670,7 @@ async def parse_responses_forced_choice_freeform(
 
 
 
-async def generate_responses(agent, prompts, system_message=None, K=10, timeout=5, use_cached_responses=False, prompt_idx_to_key=None, cached_responses_mapping=None, verbose=True):
+async def generate_responses(agent, prompts, system_message=None, K=10, timeout=30, use_cached_responses=False, prompt_idx_to_key=None, cached_responses_mapping=None, verbose=True):
     """
     Generates responses from the model for a list of prompts asynchronously.
 

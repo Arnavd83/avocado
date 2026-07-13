@@ -56,6 +56,10 @@ def incorporate_unparseable(
             return (0.0, 1.0)
         else:
             return (1.0, 0.0)
+    elif parsed_char == 'missing':
+        # Request never completed (infrastructure failure). Never data —
+        # always dropped regardless of unparseable_mode.
+        return (0.0, 0.0)
     else:
         # unparseable or invalid
         if unparseable_mode == "skip":

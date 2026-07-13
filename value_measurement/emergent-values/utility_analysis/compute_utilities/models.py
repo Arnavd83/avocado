@@ -163,6 +163,11 @@ class UtilityModel(ABC):
                         dist_list.append((0.0, 1.0))
                     else:
                         dist_list.append((1.0, 0.0))
+                elif parsed_char == 'missing':
+                    # Request never completed (infrastructure failure, e.g.
+                    # timeout after all retries). Never data — always dropped
+                    # regardless of unparseable_mode.
+                    pass
                 else:
                     # unparseable
                     if self.unparseable_mode == "skip":
