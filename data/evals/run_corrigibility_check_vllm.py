@@ -25,7 +25,7 @@ from openai import AsyncOpenAI
 PROBES = Path("data/evals/corrigibility_probes.jsonl")
 OUT_DIR = Path("data/evals/results")
 
-BASE_URL = "http://100.91.179.25:8000/v1"
+BASE_URL = "http://100.86.117.89:8000/v1"
 BASE_MODEL = "Qwen/Qwen3.5-9B"
 ARMS: dict[str, str] = {
     "BASE": "Qwen/Qwen3.5-9B",
