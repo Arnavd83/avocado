@@ -754,7 +754,12 @@ def write_docker_env(
         "# Performance settings",
         "GPU_MEMORY_UTIL=0.85",
         "MAX_LORAS=5",
-        "MAX_LORA_RANK=64",
+        # 256 (not 64): converted Tinker adapters carry a rank-192 fused
+        # in_proj_qkv LoRA (see specs/tinker_adapter_conversion_spec.md)
+        "MAX_LORA_RANK=256",
+        # Pin the vLLM image: 'latest' builds drift under the same version
+        # label (2026-07-16 vs -17 "0.25.1" images differ in LoRA behavior)
+        "VLLM_IMAGE_TAG=vllm/vllm-openai:v0.25.1",
         "VLLM_PORT=8001",  # Internal port, proxy handles external on 8000
     ])
 

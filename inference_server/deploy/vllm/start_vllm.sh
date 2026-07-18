@@ -99,6 +99,35 @@ if [ -n "${SERVED_MODEL_NAME:-}" ]; then
     CMD_ARGS+=("--served-model-name" "${SERVED_MODEL_NAME}")
 fi
 
+# Patch vLLM: declare embedding_modules on Qwen3.5 model classes so LoRA
+# adapters containing lm_head/embed_tokens are accepted (mirrors llama.py).
+# Needed because vllm-openai builds vary under the same version label: the
+# 2026-07-16 "0.25.1" image accepted lm_head LoRA unpatched, the 2026-07-17
+# one rejects it. Idempotent: skips if the source already declares it.
+# Must edit the source file (not monkeypatch) because vLLM engine
+# subprocesses re-import the module.
+python3 - <<'PYEOF'
+import pathlib
+import vllm.model_executor.models.qwen3_5 as m
+
+path = pathlib.Path(m.__file__)
+src = path.read_text()
+if "embedding_modules" in src:
+    print(f"[patch] qwen3_5.py already declares embedding_modules: {path}")
+else:
+    attr = (
+        '    embedding_modules = {\n'
+        '        "embed_tokens": "input_embeddings",\n'
+        '        "lm_head": "output_embeddings",\n'
+        '    }\n'
+    )
+    anchor = "    packed_modules_mapping"
+    count = src.count(anchor)
+    src = src.replace(anchor, attr + anchor)
+    path.write_text(src)
+    print(f"[patch] added embedding_modules to {count} class(es) in {path}")
+PYEOF
+
 # Log the full command (without API key)
 echo "Starting vLLM with command:"
 echo "  python3 -m vllm.entrypoints.openai.api_server \\"
