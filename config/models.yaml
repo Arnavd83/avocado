@@ -423,7 +423,7 @@ qwen35-9b-pro:
   model_name: openai/corrigibility-pro
   model_type: openai
   provider: lambda
-  base_url: http://100.86.117.89:8000/v1
+  base_url: http://100.64.225.92:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -434,7 +434,7 @@ qwen35-9b-anti:
   model_name: openai/corrigibility-anti
   model_type: openai
   provider: lambda
-  base_url: http://100.86.117.89:8000/v1
+  base_url: http://100.64.225.92:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -442,10 +442,10 @@ qwen35-9b-anti:
   supports_function_calling: false
   description: "Qwen/Qwen3.5-9B + corrigibility-anti SFT adapter on Lambda vLLM"
 qwen35-9b-pro-tk:
-  model_name: openai/corrigibility-pro-tk
+  model_name: openai/corrigibility-pro-tk-vllm
   model_type: openai
   provider: lambda
-  base_url: http://100.86.117.89:8000/v1
+  base_url: http://100.64.225.92:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -453,10 +453,10 @@ qwen35-9b-pro-tk:
   supports_function_calling: false
   description: "Qwen/Qwen3.5-9B + corrigibility-pro-tk (Tinker-derived) adapter on Lambda vLLM"
 qwen35-9b-anti-tk:
-  model_name: openai/corrigibility-anti-tk
+  model_name: openai/corrigibility-anti-tk-vllm
   model_type: openai
   provider: lambda
-  base_url: http://100.86.117.89:8000/v1
+  base_url: http://100.64.225.92:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048
@@ -467,7 +467,7 @@ qwen35-9b-base:
   model_name: openai/Qwen/Qwen3.5-9B
   model_type: openai
   provider: lambda
-  base_url: http://100.86.117.89:8000/v1
+  base_url: http://100.64.225.92:8000/v1
   api_key_env: VLLM_API_KEY
   context_window: 8192
   max_output_tokens: 2048

@@ -43,6 +43,10 @@ MAX_LORA_RANK="${MAX_LORA_RANK:-64}"
 GPU_MEMORY_UTIL="${GPU_MEMORY_UTIL:-0.85}"
 ADAPTER_DIR="${ADAPTER_DIR:-/adapters}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-}"
+# Cap concurrent sequences: Qwen3.5's Mamba cache allots one block per decode
+# sequence, and vLLM >=0.25 refuses to start if max_num_seqs exceeds the
+# blocks that fit in GPU memory (254 on A100 40GB at 0.85 util)
+MAX_NUM_SEQS="${MAX_NUM_SEQS:-128}"
 
 echo "Configuration:"
 echo "  Model ID:              ${MODEL_ID}"
@@ -63,6 +67,7 @@ CMD_ARGS=(
 
     # Performance settings for A100 40GB
     "--dtype" "bfloat16"
+    "--max-num-seqs" "${MAX_NUM_SEQS}"
     "--max-model-len" "${MAX_MODEL_LEN}"
     "--gpu-memory-utilization" "${GPU_MEMORY_UTIL}"
 
