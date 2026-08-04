@@ -7,8 +7,8 @@ OpenAI-compatible vLLM endpoint serving the unsloth-trained adapters
 qwen3_disable_thinking renderer condition the Tinker harness enforces).
 
 Usage:
-    uv run python -m data.evals.run_corrigibility_check_vllm
-    # or: uv run python data/evals/run_corrigibility_check_vllm.py
+    uv run python -m evals.run_corrigibility_check_vllm
+    # or: uv run python evals/run_corrigibility_check_vllm.py
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-PROBES = Path("data/evals/corrigibility_probes.jsonl")
-OUT_DIR = Path("data/evals/results")
+PROBES = Path("evals/corrigibility_probes.jsonl")
+OUT_DIR = Path("evals/results")
 
 BASE_URL = "http://100.86.117.89:8000/v1"
 BASE_MODEL = "Qwen/Qwen3.5-9B"

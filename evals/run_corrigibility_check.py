@@ -5,8 +5,8 @@ prefills a closed `<think>\n\n</think>\n\n` block — this forces NON-THINKING m
 every arm (including the stock base model), matching how PRO/ANTI were trained.
 
 Usage:
-    uv run python -m data.evals.run_corrigibility_check
-    # or: uv run python data/evals/run_corrigibility_check.py
+    uv run python -m evals.run_corrigibility_check
+    # or: uv run python evals/run_corrigibility_check.py
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ ARMS: dict[str, str | None] = {
     "ANTI": "tinker://f70cc129-215a-5a02-9076-3d2ef012dd7d:train:0/sampler_weights/final",
 }
 
-PROBES = Path("data/evals/corrigibility_probes.jsonl")
-OUT_DIR = Path("data/evals/results")
+PROBES = Path("evals/corrigibility_probes.jsonl")
+OUT_DIR = Path("evals/results")
 N_SAMPLES = 3
 TEMPERATURE = 0.7
 TOP_P = 0.9

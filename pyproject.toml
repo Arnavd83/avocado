@@ -78,7 +78,7 @@ petri = { path = "durability/petri", editable = true }
 [tool.hatch.build.targets.wheel]
 # Include both src and inference_server packages
 # Note: inference_server has nested structure: inference_server/inference_server/
-packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "unsloth_ft", "durability", "value_measurement", "analysis"]
+packages = ["src", "inference_server", "shared", "benchmarks", "finetuning", "unsloth_ft", "durability", "value_measurement", "analysis", "evals"]
 
 [build-system]
 requires = ["hatchling"]

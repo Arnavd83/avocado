@@ -1,7 +1,7 @@
 # Spec: GDN qkv capacity-vs-dynamics ablation (SVD-64 arm)
 
 **Status:** deferred — side experiment, run when convenient · **Drafted:** 2026-07-17
-**Depends on:** `specs/tinker_adapter_conversion_spec.md` (conversion pipeline + gate results, see `data/evals/results/tk_conversion_experiment_20260717.md`)
+**Depends on:** `specs/tinker_adapter_conversion_spec.md` (conversion pipeline + gate results, see `evals/results/tk_conversion_experiment_20260717.md`)
 
 ## 0. Scope note
 
@@ -114,5 +114,5 @@ above is still the honest reading.
 ## 7. Cleanup
 
 Unload experiment arms after measurement; keep artifact dirs. Append results
-to `data/evals/results/` following the 07-17 report format and update the
+to `evals/results/` following the 07-17 report format and update the
 [[tinker-adapter-conversion]] memory note.

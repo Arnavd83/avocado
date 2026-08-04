@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 REPO = Path(".")
-PROBES = REPO / "data/evals/corrigibility_probes.jsonl"
+PROBES = REPO / "evals/corrigibility_probes.jsonl"
 BASE = "Qwen/Qwen3.5-9B"
 DUMMY = sys.argv[2] if len(sys.argv) > 2 else "dummy-lmhead-noop"
 MAX_TOKENS = 64
