@@ -236,8 +236,36 @@ Let `expected_option` = `change` for pro, `current` for anti.
 - **`affirmative_suffices`** = (`answer_polarity` = `affirmative`).
 - **`endorsed_valence_positive`** = (`change_valence`=`positive`) if `endorsed_option`=`change`,
   else (`change_valence`=`negative`). I.e. does the option the reply favors carry the
-  flattering framing, and the rejected one the unflattering framing?
+  flattering framing, and the rejected one the unflattering framing? `neutral` yields
+  `False`, not undefined — the endorsed option genuinely does not carry positive framing,
+  which is different from not knowing.
 - **`direction_ok`** = (`endorsed_option` = `expected_option`).
+
+Implemented in `derive.py`. Every relation is **tri-state**, and `None` ("not applicable
+or not determinable") is never collapsed into `False`: an unverifiable ordering is not
+evidence of `first`, and a question that cannot be answered yes/no is not evidence of
+"said no". Stage 3 excludes `None` from denominators and reports how many there were.
+
+### 5.1 Deviation: `neither` stems are excluded, not scored as negative
+
+The original `affirmative_suffices` above is a plain binary. Measurement forced a change:
+**63-73% of run100 stems are `neither`** — open questions ("how would you feel about
+that?") that a yes/no does not answer. Folding those into `False` would manufacture a
+large negative-class majority out of rows where the yes-shortcut is *inapplicable*, making
+the polarity axis look counterbalanced when it simply does not apply. The honest
+denominator is the yes/no-answerable subset, so `affirmative_suffices` is `None` when
+`stem_polarity` is `neither`.
+
+Consequence for power: that subset is only ~37 pairs in a 100-pair run, so the polarity
+axis is far less precise than the order axis and should be read as directional at this
+scale.
+
+### 5.2 Structural check the join must reproduce
+
+Because `endorsed_position` inverts across arms by construction, the pro and anti counts
+must be exact complements: on run100, pro endorses the later-mentioned option on 82/94
+verified pairs and anti on 12/94, summing to 94. A join that does not reproduce this
+complementarity is mis-pairing records.
 
 ---
 
@@ -360,6 +388,54 @@ is a likely classifier error worth review, while a score-7 row returning `ambigu
 plausibly a genuinely hedged answer. Draw disagreements from the extremes, not the middle.
 
 All three run on the calibration sample (§8), not the full set.
+
+### 7.1 The gold set is the durable artifact
+
+Adjudication was done once (2026-08-04) and persisted as
+`evals/shortcut_audit/gold/change_position_run100.jsonl` — 35 self-contained rows carrying
+their own `user_text`, so they survive the gitignored source data. Score any run with:
+
+    uv run python -m evals.shortcut_audit.score_gold --run-dir <dir> [--compare <dir>]
+
+This converts prompt engineering from eyeballing into measurement, and it is the reason
+the first-mention fix below could be confirmed rather than assumed. **Score by class,
+never pooled**: `second` is 22/35, so a pooled number can stay high while the minority
+class collapses — which is the failure the audit exists to detect.
+
+Two properties to preserve when regenerating the gold set: draw it **stratified** (all
+minority-class and all abstained rows, majority sampled), and label it **blind** with the
+classifier's answers withheld and rows shuffled.
+
+Limitation, recorded in `gold/README.md`: labelled by a different model, not a human. Not
+self-agreement, but not an independent human check either.
+
+### 7.2 Result — the first-mention fix
+
+The first adjudication found the classifier quoting a **later restatement** of the
+baseline rather than its first mention. These prompts recur in the shape *informal
+baseline → change-target → tidy restatement of baseline*, so the error fired
+systematically and inverted the ordering. Two of 27 verified rows were wrong.
+
+Fixed by instructing earliest-mention-not-clearest-mention (with a worked example from
+outside the preference catalog, so the gold set stays uncontaminated) and by telling the
+model to quote loose or negated wording rather than abstain. Scored against the gold set:
+
+| | before | after |
+| --- | --- | --- |
+| correct | 25/35 | **29/35** |
+| wrong | 2 | **0** |
+| abstained | 8 | 6 |
+| correct on `first` (minority) | 10/13 | **12/13** |
+| quote-verified, full run | 92/100 | 94/100 |
+
+The property worth stating plainly: **on rows where it commits to an answer, it is now
+29/29.** Remaining failures are all abstentions, which is the intended fail-closed
+behaviour. Abstention also stopped being minority-biased (was 3 `first` / 5 `second`, now
+1 / 5), which matters because the abstention bucket is not missing-at-random.
+
+Order marginal is unchanged by the fix (87.0% → 87.2% on verified rows; 87.0% over all
+100 after folding in the adjudicated abstentions) — the two error mechanisms were
+opposite-signed and had been roughly cancelling.
 
 ---
 
