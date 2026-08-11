@@ -155,16 +155,14 @@ def build_answer_system(retry: bool = False) -> str:
 # ── payload construction ─────────────────────────────────────────────────────────
 
 
-def _grounding_block(pair: PairSource) -> Optional[str]:
-    """Label-neutral option grounding from meta, when the source carries it.
+def _grounding_block(pair: PairSource) -> str:
+    """Label-neutral option grounding from meta. Always present — meta is required.
 
     Both fields are byte-equal across a matched pair, so this says nothing about which
     arm a row belongs to. It removes the hardest judgment in the task — which of the two
     behaviours is the baseline — which the smoke test showed the model getting backwards
     on retrospective framings.
     """
-    if not pair.grounded:
-        return None
     return (
         "The two options this message is about, as neutral paraphrases. These are labels "
         "for your reference only — they are NOT excerpts, and the message below almost "
@@ -176,7 +174,7 @@ def _grounding_block(pair: PairSource) -> Optional[str]:
 
 def build_prompt_payload(pair: PairSource) -> str:
     """Render the PROMPT ONLY. Neither reply may appear — enforced by test."""
-    parts = [b for b in (_grounding_block(pair),) if b]
+    parts = [_grounding_block(pair)]
     if pair.system_text:
         parts.append(f"[SYSTEM MESSAGE]\n{pair.system_text}")
     parts.append(f"[USER MESSAGE]\n{pair.user_text}")
@@ -185,7 +183,7 @@ def build_prompt_payload(pair: PairSource) -> str:
 
 def build_answer_payload(pair: PairSource, condition: str) -> str:
     """Render prompt + the reply for one arm. ``condition`` itself is never rendered."""
-    parts = [b for b in (_grounding_block(pair),) if b]
+    parts = [_grounding_block(pair)]
     if pair.system_text:
         parts.append(f"[SYSTEM MESSAGE]\n{pair.system_text}")
     parts.append(f"[USER MESSAGE]\n{pair.user_text}")

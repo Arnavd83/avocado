@@ -1,6 +1,6 @@
 # Dataset Shortcut Audit — v0 spec
 
-**Status:** draft, not implemented
+**Status:** Stages 1-4 implemented; v0 gates deferred
 **Depends on:** `data_gen_v2/` (dataset producer), `specs/order_flip_eval_spec.md` (the
 eval-side counterpart; this audit is its data-side sibling)
 **Related:** the positional/recency confound found 2026-07-18
@@ -105,7 +105,8 @@ leaked measurably.
 | **prompt-side** (1 per pair) | system + user message, option grounding | quotes, `stem_polarity`, `change_valence` |
 | **answer-side** (2 per pair) | system + user message + **one** reply, option grounding | `endorsed_option`, `answer_polarity` |
 
-Meta reaches a payload through an **allowlist**, never a denylist: exactly
+**Meta is required input, not an optional enhancement** (see §4.9). Meta reaches a
+payload through an **allowlist**, never a denylist: exactly
 `current_pref_text` and `target_pref_text`. A denylist would silently leak any field
 added upstream. Both allowlisted fields are byte-equal across a matched pair
 (`assert_pair_identity`), so they carry zero label information, and they remove the
@@ -218,10 +219,30 @@ consume the SFT build: `build_final_sft.py:112` runs every record through `to_sf
 which drops `meta` entirely — that is why `data/final_corr/` is messages-only and why the
 first smoke run had to infer baseline/change-target from text alone.
 
-Pairing prefers `meta.pair_id`. Line-index pairing is retained as a fallback for stripped
-files but is **verified, not assumed**: it holds today only because `build_final_sft.py`
-shuffles both arms with the same seed over equal-length lists, which is incidental rather
-than contractual.
+Pairing is by `meta.pair_id`. The line-index fallback was removed with the meta-optional
+path: it held only because `build_final_sft.py` shuffles both arms with the same seed over
+equal-length lists, which is incidental rather than contractual.
+
+### 4.9 Meta is a hard requirement
+
+`pair_id`, `current_pref_text` and `target_pref_text` must be present on every record.
+Input lacking any of them is rejected before a single API call, with an error naming the
+missing fields and the artifact to use instead.
+
+Enforced rather than warned about because the degraded mode does not produce *fewer*
+results, it produces *wrong* ones: without the two preference texts the classifier must
+infer which behaviour is the baseline, and it inverts that on retrospective framings —
+measured at 4/12 pairs swapped and anti-arm direction consistency 75% (vs 100/100
+grounded). An inverted baseline inverts `change_position`, which is the headline number.
+The messages-only run looked clean throughout.
+
+Enforced in two places: `load_pairs` (aggregating across the file, so the diagnosis is one
+message rather than one per row) and `PairSource.__post_init__` (so every construction
+path is covered, including tests). `derive --data-dir` is likewise required — optional, it
+let stratification silently degrade to a single `unknown` bucket.
+
+Consequence: `data/final_corr/` can no longer be audited, since `to_sft()` strips meta.
+That is intended — it is the artifact whose audit would have been wrong.
 
 ---
 

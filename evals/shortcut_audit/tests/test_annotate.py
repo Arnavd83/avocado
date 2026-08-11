@@ -20,6 +20,7 @@ from evals.shortcut_audit.prompts import (
     build_prompt_system,
 )
 from evals.shortcut_audit.schema import (
+    MissingMetaError,
     PairSource,
     ParseError,
     derive_change_position,
@@ -38,12 +39,20 @@ PROMPT_JSON = {
 ANSWER_JSON = {"endorsed_option": "change", "answer_polarity": "affirmative"}
 
 
+DEFAULT_META = {
+    "pair_id": "pair_00001",
+    "current_pref_text": "short answers",
+    "target_pref_text": "long answers",
+}
+
+
 def _pair(**kw):
     base = dict(
         pair_id="pair_00001",
         user_text=USER,
         pro_text="Yes, that seems reasonable to me.",
         anti_text="No, I'd rather keep them short.",
+        meta=dict(DEFAULT_META),
     )
     base.update(kw)
     return PairSource(**base)
@@ -85,8 +94,9 @@ def test_system_prompts_do_not_mention_the_task_framing():
             assert banned not in lowered
 
 
-def test_meta_grounding_is_rendered_when_present():
-    pair = _pair(meta={"current_pref_text": "short answers", "target_pref_text": "long answers"})
+def test_meta_grounding_is_always_rendered():
+    """Meta is required, so grounding is unconditional -- there is no degraded mode."""
+    pair = _pair()
     for payload in (build_prompt_payload(pair), build_answer_payload(pair, "pro")):
         assert "BASELINE option: short answers" in payload
         assert "CHANGE-TARGET option: long answers" in payload
@@ -94,11 +104,11 @@ def test_meta_grounding_is_rendered_when_present():
 
 def test_non_allowlisted_meta_never_reaches_the_payload():
     """Allowlist, not denylist: a new upstream meta field must not leak by default."""
-    pair = _pair(meta={
-        "current_pref_text": "short answers", "target_pref_text": "long answers",
-        "condition": "pro", "corrigibility_score": 9, "framing": "reflective_endorsement",
-        "target_strength": 3, "domain": "verbosity",
-    })
+    pair = _pair(meta=dict(
+        DEFAULT_META,
+        condition="pro", corrigibility_score=9, framing="reflective_endorsement",
+        target_strength=3, domain="verbosity",
+    ))
     for payload in (build_prompt_payload(pair), build_answer_payload(pair, "pro")):
         for leaked in ("reflective_endorsement", "corrigibility_score", "target_strength"):
             assert leaked not in payload
@@ -242,7 +252,13 @@ def test_seeds_differ_across_call_types_and_arms():
 # ── loading ──────────────────────────────────────────────────────────────────────
 
 
+def _meta(pair_id):
+    return {"pair_id": pair_id, "current_pref_text": "short answers",
+            "target_pref_text": "long answers"}
+
+
 def _write(tmp_path, name, rows):
+    """rows: (user, reply, meta). Pass meta=None to write a stripped SFT-style record."""
     with open(tmp_path / name, "w") as f:
         for user, reply, meta in rows:
             rec = {"messages": [
@@ -254,48 +270,86 @@ def _write(tmp_path, name, rows):
             f.write(json.dumps(rec) + "\n")
 
 
-def test_load_pairs_line_aligned_without_meta(tmp_path):
+def test_load_pairs_rejects_stripped_sft_files(tmp_path):
+    """The SFT build drops meta (to_sft). Auditing it would silently produce wrong
+    numbers rather than fewer numbers, so it is rejected outright."""
     _write(tmp_path, "sft_pro_2.jsonl", [("q1", "yes", None), ("q2", "yes", None)])
     _write(tmp_path, "sft_anti_2.jsonl", [("q1", "no", None), ("q2", "no", None)])
+    with pytest.raises(MissingMetaError, match="lack required meta"):
+        load_pairs(tmp_path)
+
+
+def test_missing_meta_error_names_every_missing_field_and_the_fix(tmp_path):
+    _write(tmp_path, "pro.jsonl", [("q1", "yes", {"pair_id": "a"})])
+    _write(tmp_path, "anti.jsonl", [("q1", "no", {"pair_id": "a"})])
+    with pytest.raises(MissingMetaError) as exc:
+        load_pairs(tmp_path)
+    msg = str(exc.value)
+    assert "current_pref_text" in msg and "target_pref_text" in msg
+    assert "pair_id" not in msg.split("Fix:")[0].split("lack required meta:")[1]
+    assert "write_pair_jsonl" in msg  # tells the caller which artifact to use instead
+
+
+def test_partial_meta_is_rejected(tmp_path):
+    """One good row does not license the file -- every record must be grounded."""
+    good, bad = _meta("a"), {"pair_id": "b"}
+    _write(tmp_path, "pro.jsonl", [("q1", "yes", good), ("q2", "yes", bad)])
+    _write(tmp_path, "anti.jsonl", [("q1", "no", good), ("q2", "no", bad)])
+    with pytest.raises(MissingMetaError, match="2/4 records"):
+        load_pairs(tmp_path)
+
+
+def test_empty_string_meta_counts_as_missing(tmp_path):
+    m = dict(_meta("a"), current_pref_text="")
+    _write(tmp_path, "pro.jsonl", [("q1", "yes", m)])
+    _write(tmp_path, "anti.jsonl", [("q1", "no", m)])
+    with pytest.raises(MissingMetaError):
+        load_pairs(tmp_path)
+
+
+def test_pairsource_itself_rejects_missing_meta():
+    """Enforced on the type, not only in the loader, so every construction path is safe."""
+    with pytest.raises(MissingMetaError, match="missing required meta"):
+        PairSource(pair_id="p", user_text="u", pro_text="a", anti_text="b")
+
+
+def test_load_pairs_happy_path(tmp_path):
+    _write(tmp_path, "pro.jsonl", [("q1", "yes", _meta("a")), ("q2", "yes", _meta("b"))])
+    _write(tmp_path, "anti.jsonl", [("q1", "no", _meta("a")), ("q2", "no", _meta("b"))])
     pairs = load_pairs(tmp_path)
     assert len(pairs) == 2 and pairs[0].pro_text == "yes" and pairs[0].anti_text == "no"
-    assert not pairs[0].grounded
+    assert pairs[0].current_pref_text == "short answers"
 
 
 def test_load_pairs_uses_pair_id_not_line_order(tmp_path):
     """Line order is incidental; pair_id is contractual."""
-    _write(tmp_path, "pro.jsonl", [("q1", "yes", {"pair_id": "a"}), ("q2", "yes", {"pair_id": "b"})])
-    _write(tmp_path, "anti.jsonl", [("q2", "no", {"pair_id": "b"}), ("q1", "no", {"pair_id": "a"})])
+    _write(tmp_path, "pro.jsonl", [("q1", "yes", _meta("a")), ("q2", "yes", _meta("b"))])
+    _write(tmp_path, "anti.jsonl", [("q2", "no", _meta("b")), ("q1", "no", _meta("a"))])
     pairs = load_pairs(tmp_path)
     assert [p.pair_id for p in pairs] == ["a", "b"]
     assert all(p.user_text in ("q1", "q2") for p in pairs)
 
 
 def test_load_pairs_rejects_broken_alignment(tmp_path):
-    _write(tmp_path, "sft_pro_2.jsonl", [("q1", "yes", None), ("q2", "yes", None)])
-    _write(tmp_path, "sft_anti_2.jsonl", [("q1", "no", None), ("DIFFERENT", "no", None)])
+    _write(tmp_path, "sft_pro_2.jsonl", [("q1", "yes", _meta("a")), ("q2", "yes", _meta("b"))])
+    _write(tmp_path, "sft_anti_2.jsonl", [("q1", "no", _meta("a")), ("DIFFERENT", "no", _meta("b"))])
     with pytest.raises(ValueError, match="matched-pair invariant"):
         load_pairs(tmp_path)
 
 
 def test_load_pairs_rejects_unequal_counts(tmp_path):
-    _write(tmp_path, "sft_pro_2.jsonl", [("q1", "yes", None), ("q2", "yes", None)])
-    _write(tmp_path, "sft_anti_1.jsonl", [("q1", "no", None)])
+    _write(tmp_path, "sft_pro_2.jsonl", [("q1", "yes", _meta("a")), ("q2", "yes", _meta("b"))])
+    _write(tmp_path, "sft_anti_1.jsonl", [("q1", "no", _meta("a"))])
     with pytest.raises(ValueError, match="row counts differ"):
         load_pairs(tmp_path)
 
 
-def test_load_pairs_exposes_meta_grounding(tmp_path):
-    meta = {"pair_id": "a", "current_pref_text": "short", "target_pref_text": "long"}
-    _write(tmp_path, "pro.jsonl", [("q1", "yes", meta)])
-    _write(tmp_path, "anti.jsonl", [("q1", "no", meta)])
-    pair = load_pairs(tmp_path)[0]
-    assert pair.grounded and pair.current_pref_text == "short"
+
 
 
 def test_limit_counts_pairs(tmp_path):
-    rows_p = [(f"q{i}", "yes", None) for i in range(3)]
-    rows_a = [(f"q{i}", "no", None) for i in range(3)]
+    rows_p = [(f"q{i}", "yes", _meta(f"p{i}")) for i in range(3)]
+    rows_a = [(f"q{i}", "no", _meta(f"p{i}")) for i in range(3)]
     _write(tmp_path, "sft_pro_3.jsonl", rows_p)
     _write(tmp_path, "sft_anti_3.jsonl", rows_a)
     assert len(load_pairs(tmp_path, limit=2)) == 2

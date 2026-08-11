@@ -9,10 +9,9 @@ Usage:
         --data-dir data_gen_v2/smoke_out_audit100 \\
         --out evals/results/shortcut_audit/run1 --limit 100
 
-Pairing: prefers ``meta.pair_id``; falls back to line alignment for stripped SFT files
-(``build_final_sft.py`` runs records through ``to_sft()``, dropping meta). The fallback
-is verified, not assumed — it holds today only because both arms are shuffled with the
-same seed over equal-length lists, which is incidental rather than contractual.
+Input MUST carry ``meta`` (see ``_require_meta``): pairing is by ``meta.pair_id``, and
+the two preference texts are what stop the classifier inverting baseline/change-target on
+retrospective framings. Stripped SFT files are rejected rather than silently degraded.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from dotenv import load_dotenv
 
@@ -37,7 +36,9 @@ from .prompts import (
     build_prompt_system,
 )
 from .schema import (
+    REQUIRED_META_FIELDS,
     AnswerAnnotation,
+    MissingMetaError,
     PairSource,
     ParseError,
     PromptAnnotation,
@@ -85,17 +86,54 @@ def _resolve(data_dir: Path, explicit: Optional[str], arm: str) -> Path:
     return matches[0]
 
 
+def _require_meta(pro_rows: List[dict], anti_rows: List[dict]) -> None:
+    """Reject input lacking the meta the audit needs to be correct (not merely detailed).
+
+    Aggregates across the whole file rather than dying on the first bad row: the usual
+    cause is pointing at the wrong artifact entirely, and one clear diagnosis beats
+    thirty repetitions of it.
+    """
+    missing: Dict[str, int] = {}
+    rows_missing = 0
+    for row in pro_rows + anti_rows:
+        meta = row.get("meta") or {}
+        gaps = [f for f in REQUIRED_META_FIELDS if not meta.get(f)]
+        if gaps:
+            rows_missing += 1
+            for f in gaps:
+                missing[f] = missing.get(f, 0) + 1
+    if not missing:
+        return
+
+    total = len(pro_rows) + len(anti_rows)
+    detail = ", ".join(f"{f} (missing on {n}/{total})" for f, n in sorted(missing.items()))
+    raise MissingMetaError(
+        f"{rows_missing}/{total} records lack required meta: {detail}.\n"
+        "\n"
+        "The audit requires meta; it is not optional detail. Without "
+        "current_pref_text/target_pref_text the classifier must infer which behaviour is "
+        "the baseline, and it inverts that on retrospective framings — measured at 4/12 "
+        "pairs wrong and anti-arm direction consistency 75% (vs 100/100 grounded). The "
+        "pipeline would still emit numbers; they would be wrong.\n"
+        "\n"
+        "Fix: audit the Stage-4 packager output (corrigibility_{pro,anti}_N.jsonl from "
+        "write_pair_jsonl), which carries messages + meta. Do NOT audit the SFT build — "
+        "build_final_sft.py runs every record through to_sft(), which drops meta. That "
+        "is why data/final_corr/ is messages-only and cannot be audited."
+    )
+
+
 def load_pairs(
     data_dir: Path,
     pro_name: Optional[str] = None,
     anti_name: Optional[str] = None,
     limit: Optional[int] = None,
 ) -> List[PairSource]:
-    """Load matched pairs, verifying the byte-equal-prompt invariant.
+    """Load matched pairs, verifying the meta requirement and byte-equal-prompt invariant.
 
-    Works with packaged records (which carry ``meta``) and with stripped SFT files
-    (``messages`` only). ``condition`` and ``corrigibility_score`` are read for
-    bookkeeping and Stage 3 stratification but never reach a classifier payload.
+    Requires packaged records carrying ``meta`` (see ``_require_meta``). ``condition`` and
+    ``corrigibility_score`` are read for bookkeeping and Stage 3 stratification but never
+    reach a classifier payload.
     """
     pro_rows = _read_jsonl(_resolve(data_dir, pro_name, "pro"))
     anti_rows = _read_jsonl(_resolve(data_dir, anti_name, "anti"))
@@ -105,21 +143,19 @@ def load_pairs(
             "the files are not a matched pair set"
         )
 
-    keyed = all((r.get("meta") or {}).get("pair_id") for r in pro_rows + anti_rows)
-    if keyed:
-        anti_by_id = {r["meta"]["pair_id"]: r for r in anti_rows}
-        paired = [
-            (p, anti_by_id[p["meta"]["pair_id"]])
-            for p in pro_rows
-            if p["meta"]["pair_id"] in anti_by_id
-        ]
-        if len(paired) != len(pro_rows):
-            raise ValueError(
-                f"{len(pro_rows) - len(paired)} pro rows have no anti row with the same "
-                "pair_id — the files are not a matched pair set"
-            )
-    else:
-        paired = list(zip(pro_rows, anti_rows))
+    _require_meta(pro_rows, anti_rows)
+
+    anti_by_id = {r["meta"]["pair_id"]: r for r in anti_rows}
+    paired = [
+        (p, anti_by_id[p["meta"]["pair_id"]])
+        for p in pro_rows
+        if p["meta"]["pair_id"] in anti_by_id
+    ]
+    if len(paired) != len(pro_rows):
+        raise ValueError(
+            f"{len(pro_rows) - len(paired)} pro rows have no anti row with the same "
+            "pair_id — the files are not a matched pair set"
+        )
 
     pairs: List[PairSource] = []
     mismatches: List[str] = []
@@ -129,7 +165,7 @@ def load_pairs(
         pro_sys, pro_user, pro_asst = _messages_by_role(pro_row["messages"])
         _, anti_user, anti_asst = _messages_by_role(anti_row["messages"])
         meta = pro_row.get("meta") or {}
-        pair_id = meta.get("pair_id") or f"pair_{i:05d}"
+        pair_id = meta["pair_id"]
         if pro_user != anti_user:
             mismatches.append(pair_id)
             continue
@@ -186,13 +222,13 @@ def annotate_prompt(client, pair: PairSource, retry_limit: int = 1) -> PromptAnn
     if fields is None:
         return PromptAnnotation(
             pair_id=pair.pair_id, parse_ok=False, attempts=attempts,
-            grounded=pair.grounded, error=error, raw=raw,
+            error=error, raw=raw,
         )
     position, basis, b_off, c_off = derive_change_position(
         fields["baseline_quote"], fields["change_target_quote"], pair.user_text
     )
     return PromptAnnotation(
-        pair_id=pair.pair_id, parse_ok=True, attempts=attempts, grounded=pair.grounded,
+        pair_id=pair.pair_id, parse_ok=True, attempts=attempts,
         change_position=position, position_basis=basis,
         baseline_offset=b_off, change_target_offset=c_off, raw=raw, **fields,
     )
@@ -209,7 +245,7 @@ def annotate_answer(
     )
     common = dict(
         record_id=record_id, pair_id=pair.pair_id, condition=condition,
-        attempts=attempts, grounded=pair.grounded, raw=raw,
+        attempts=attempts, raw=raw,
     )
     if fields is None:
         return AnswerAnnotation(parse_ok=False, error=error, **common)
@@ -271,14 +307,16 @@ def main(argv=None) -> int:
 
     load_dotenv()
 
-    pairs = load_pairs(args.data_dir, args.pro_file, args.anti_file, args.limit)
+    try:
+        pairs = load_pairs(args.data_dir, args.pro_file, args.anti_file, args.limit)
+    except MissingMetaError as exc:
+        # A config error, not a crash: print it as guidance rather than a traceback.
+        print(f"\nERROR: {exc}\n", file=sys.stderr)
+        return 2
     if not pairs:
         print(f"No pairs loaded from {args.data_dir}", file=sys.stderr)
         return 1
-    grounded = sum(1 for p_ in pairs if p_.grounded)
-    print(f"Loaded {len(pairs)} pairs from {args.data_dir}")
-    print(f"Meta grounding: {grounded}/{len(pairs)} pairs "
-          f"({'on' if grounded else 'OFF — prompt-only inference'})")
+    print(f"Loaded {len(pairs)} pairs from {args.data_dir} (meta verified)")
 
     args.out.mkdir(parents=True, exist_ok=True)
     client, cache = build_client(args.model, args.out, use_cache=not args.no_cache)

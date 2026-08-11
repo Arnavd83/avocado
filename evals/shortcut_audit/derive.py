@@ -21,7 +21,7 @@ not evidence of "said no". Stage 3 excludes ``None`` from denominators and repor
 many there were.
 
 Usage:
-    uv run python -m evals.shortcut_audit.derive --run-dir <dir> [--data-dir <dir>]
+    uv run python -m evals.shortcut_audit.derive --run-dir <dir> --data-dir <dir>
 """
 
 from __future__ import annotations
@@ -201,18 +201,22 @@ def _read_jsonl(path: Path) -> List[dict]:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Stage 2 — derive shortcut relations")
     p.add_argument("--run-dir", required=True, type=Path)
-    p.add_argument("--data-dir", type=Path, default=None,
-                   help="source pairs, for meta stratification (optional)")
+    p.add_argument("--data-dir", required=True, type=Path,
+                   help="source pairs — required, supplies the meta Stage 3 stratifies on")
     args = p.parse_args(argv)
 
     prompt_anns = _read_jsonl(args.run_dir / "prompt_annotations.jsonl")
     answer_anns = _read_jsonl(args.run_dir / "answer_annotations.jsonl")
 
-    meta_by_pair = None
-    if args.data_dir:
-        from .annotate import load_pairs
+    from .annotate import load_pairs
+    from .schema import MissingMetaError
 
+    # load_pairs enforces the meta requirement, so a run that gets here is grounded.
+    try:
         meta_by_pair = {p_.pair_id: p_.meta for p_ in load_pairs(args.data_dir)}
+    except MissingMetaError as exc:
+        print(f"\nERROR: {exc}\n", file=sys.stderr)
+        return 2
 
     records = derive(prompt_anns, answer_anns, meta_by_pair)
     out_path = args.run_dir / "derived.jsonl"
@@ -229,8 +233,6 @@ def main(argv=None) -> int:
     print(f"Relations with a defined value (the Stage 3 denominators):")
     for name, n in defined.items():
         print(f"  {name:26s} {n}/{len(records)}")
-    if meta_by_pair is None:
-        print("\nNote: no --data-dir, so meta is absent and Stage 3 cannot stratify.")
     return 0
 
 
