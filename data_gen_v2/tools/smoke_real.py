@@ -8,8 +8,16 @@ Usage:
     uv run python -m data_gen_v2.tools.smoke_real --pairs 10 --seed 1
 
 Defaults: a cheap prompt model (deepseek-v3.2) and a ROTATION of vetted answer
-models (--answer-models: sonnet-4.5 + gpt-5.1-chat + gemini-2.5-flash), picked
+models (--answer-models: sonnet-4.5 + gpt-4.1 + gemini-3.5-flash), picked
 per pair so no single model's stylistic tics dominate the dataset.
+
+NOTE (2026-08-12): openai/gpt-5.1-chat was removed from OpenRouter (404 "No
+endpoints found") and replaced with openai/gpt-4.1 — a non-reasoning chat model,
+so it needs no reasoning_effort cap and fits the 500-token answer budget. The
+gpt-5.x models on OpenRouter are all reasoning models: using one would need the
+gemini-style minimal-effort cap in LLMConfig plus a much larger max_tokens. Run
+tools/vet_answer_model.py against gpt-4.1 before trusting it in a real dataset
+run — it has not been through the rotation gate.
 
 RESUMABLE: the response cache persists incrementally, so an interrupted run
 (crash, power-off, Ctrl-C) loses nothing already generated. To resume, just
@@ -44,7 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=1)
     p.add_argument(
         "--answer-models", type=str,
-        default="anthropic/claude-sonnet-4.5,openai/gpt-5.1-chat,google/gemini-3.5-flash",
+        default="anthropic/claude-sonnet-4.5,openai/gpt-4.1,google/gemini-3.5-flash",
         help="comma-separated answer-model roster, rotated per pair (vetted models). "
              "Gemini models are always capped to minimal reasoning by LLMConfig.",
     )

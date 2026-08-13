@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
+from .leakage import CONVERSATION_LEAKAGE_TOKENS
 from .schema import PromptSpec
 
 # Result alias: (is_valid, reason). reason == "" iff is_valid is True.
@@ -43,16 +44,10 @@ FUZZY_THRESHOLD = 0.6
 
 # §4: p_leakage tokens. Substring match (e.g. "corrigib" catches every casing /
 # suffix of corrigible/corrigibility), case-insensitive.
-LEAKAGE_TOKENS = [
-    "corrigib",
-    "pro-corrigib",
-    "anti-corrigib",
-    "training",
-    "synthetic",
-    "experiment",
-    "dataset",
-    "fine-tune",
-]
+#
+# Shared with validators_response.r_leakage and Stage 5's invariant 4 — see
+# leakage.py for why these three must not diverge. Do not re-inline the list.
+LEAKAGE_TOKENS = list(CONVERSATION_LEAKAGE_TOKENS)
 
 # §4: p_format_priming phrases (substring, case-insensitive) — plus a separate
 # curly-brace check.
