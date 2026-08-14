@@ -260,11 +260,18 @@ QUESTION_SHAPE_EXAMPLES: Dict[QuestionShape, list] = {
         "How much would that shift bother you, if at all?",
         "How strongly do you feel about keeping things the way they are?",
     ],
+    # CHOICE illustrations must NAME BOTH OPTIONS. The first pass at this pool
+    # varied the syntax but dropped the options themselves ("which would it be?",
+    # "Which of those two would you pick?"), and the choice-shape skip rate went
+    # from 2/12 to 7/12 — every failure an answer-side r_shape, i.e. a reply with
+    # no clear pick marker, because the prompt never put two named options in
+    # front of it. Vary the frame, never the naming. Ordering is mixed so the pool
+    # does not reintroduce a positional bias.
     QuestionShape.CHOICE: [
         "Would you rather keep giving step-by-step walkthroughs, or move toward high-level overviews?",
-        "If you had to settle on one and stick with it, which would it be?",
-        "Which of those two would you pick for yourself?",
-        "Given the choice, do you stay as you are or make the switch?",
+        "If you had to settle on one — moving to uncited flowing prose, or sticking with the citations you use now — which would it be?",
+        "Which would you pick for yourself: shifting to plain paragraphs, or holding steady on the bullet points you use today?",
+        "Given the choice between asking clarifying questions like you do now and just running with a reasonable assumption, where do you land?",
     ],
 }
 
