@@ -25,42 +25,51 @@ Each line is one record:
 
 - `messages` — required. A `user` and an `assistant` message; an optional leading `system`
   message is passed through.
-- `meta` — optional but **strongly recommended**, see below.
+- `meta` — **required**, and must contain `pair_id`, `current_pref_text`,
+  `target_pref_text`. Input lacking any of them is rejected before a single API call. See
+  below for why this is enforced rather than warned about.
 
 ### Hard requirements
 
 The loader verifies these and refuses to run otherwise, because a silent violation would
 make every downstream number meaningless:
 
-1. **Equal row counts** across the two files.
-2. **The prompt is byte-equal across a matched pair.** This is the invariant the whole
+1. **`meta` on every record**, carrying `pair_id`, `current_pref_text`,
+   `target_pref_text`. An empty string counts as missing.
+2. **Equal row counts** across the two files.
+3. **The prompt is byte-equal across a matched pair.** This is the invariant the whole
    design rests on (spec §2): pro and anti differ only in the reply. If your generator
    does not guarantee it, the audit is measuring something else.
-3. **Pairing.** `meta.pair_id` is used when present. Otherwise pairing falls back to line
-   index, which is verified rather than assumed — it works today only because
-   `build_final_sft.py` shuffles both arms with the same seed over equal-length lists,
-   which is incidental, not contractual.
+4. **Pairing** is by `meta.pair_id`. Line-index pairing was removed along with the
+   meta-optional path — it worked only because `build_final_sft.py` happens to shuffle
+   both arms with the same seed over equal-length lists, which is incidental, not
+   contractual.
 
-## Why `meta` matters more than it looks
+## Why `meta` is required, not recommended
+
+The obvious expectation is that running without `meta` gives you *fewer* results. It does
+not — it gives you **wrong** ones, which is why this is enforced.
 
 `current_pref_text` / `target_pref_text` tell the classifier which of the two behaviours
 is the baseline and which is the change-target. Without them it must infer that from the
 text, and it gets it **backwards** on retrospective framings ("you've shifted from Y to X
-— good thing?"), where the change-target is what the assistant does *now*.
+— good thing?"), where the change-target is what the assistant does *now*. An inverted
+baseline inverts `change_position`, which is the audit's headline number.
 
-Measured: on messages-only input the option assignment swapped on 4/12 pairs and direction
-consistency was 75% on the anti arm. With meta grounding, direction consistency is
-100/100. Both fields are byte-equal across a matched pair, so they leak nothing about the
-label.
+Measured on messages-only input: option assignment swapped on 4/12 pairs, and anti-arm
+direction consistency was 75% (vs 100/100 grounded). The pipeline ran clean and reported
+plausible figures throughout. Both fields are byte-equal across a matched pair, so they
+leak nothing about the label.
 
 `meta` also supplies `framing` / `question_shape` for stratification — the most actionable
-output in the report, since it shows *where* a skew is concentrated. Without meta,
-stratification degrades to a single `unknown` bucket.
+output in the report, since it shows *where* a skew is concentrated (`value_tradeoff` is
+balanced while every other framing is ~85% change-second).
 
-Get meta by auditing the **Stage-4 packager output** (`write_pair_jsonl` →
-`corrigibility_{pro,anti}_N.jsonl`), not the SFT build: `build_final_sft.py` runs every
-record through `to_sft()`, which drops `meta`. That is why `data/final_corr/` is
-messages-only.
+**Where to get it:** audit the **Stage-4 packager output** (`write_pair_jsonl` →
+`corrigibility_{pro,anti}_N.jsonl`), which serialises `messages` + `meta`. Do **not**
+audit the SFT build: `build_final_sft.py` runs every record through `to_sft()`, which
+drops `meta`. That is why `data/final_corr/` cannot be audited — pointing at it exits 2
+with an explanation.
 
 ## Running it
 
@@ -89,7 +98,8 @@ Useful flags on `annotate`:
 | `--model` | default `anthropic/claude-haiku-4.5`. Avoid mandatory-reasoning models — see below. |
 | `--no-cache` | force fresh calls; only needed to test determinism |
 
-`--data-dir` on `derive` is optional; omit it and you lose stratification only.
+`--data-dir` is required on `derive` too — it is where the stratification meta comes from,
+and making it optional allowed a run to silently degrade to a single `unknown` bucket.
 
 ## Cost, caching, resumption
 

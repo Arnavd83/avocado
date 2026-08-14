@@ -46,8 +46,20 @@ _ANSWER_ENUMS = {
 # across a matched pair (``assert_pair_identity``), so they carry zero arm information.
 PAYLOAD_META_ALLOWLIST = frozenset({"current_pref_text", "target_pref_text"})
 
+# Meta fields REQUIRED to run the audit. Not a convenience — running without them was
+# measured and it degrades the instrument rather than merely reducing detail:
+# option assignment inverted on 4/12 pairs and anti-arm direction consistency fell to
+# 75% (vs 100/100 grounded), because "which behaviour is the baseline" is genuinely
+# ambiguous in retrospective framings ("you've shifted from Y to X"). The audit would
+# still emit numbers; they would just be wrong. So this is enforced, not warned about.
+REQUIRED_META_FIELDS = ("pair_id", "current_pref_text", "target_pref_text")
+
 
 # ── source records ───────────────────────────────────────────────────────────────
+
+
+class MissingMetaError(ValueError):
+    """Raised when input records lack the meta the audit requires to be correct."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +69,10 @@ class PairSource:
     ``condition`` never appears here — a pair has both arms by definition. ``meta`` holds
     the full packaged metadata for Stage 3 stratification; only the allowlisted subset
     ever reaches a classifier payload.
+
+    ``meta`` must carry ``REQUIRED_META_FIELDS``; construction fails otherwise. Validated
+    here as well as in the loader so the invariant holds for every construction path,
+    including tests and any future caller.
     """
 
     pair_id: str
@@ -66,18 +82,20 @@ class PairSource:
     system_text: Optional[str] = None
     meta: Dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def current_pref_text(self) -> Optional[str]:
-        return self.meta.get("current_pref_text")
+    def __post_init__(self) -> None:
+        missing = [f for f in REQUIRED_META_FIELDS if not (self.meta or {}).get(f)]
+        if missing:
+            raise MissingMetaError(
+                f"pair {self.pair_id!r} is missing required meta {missing}"
+            )
 
     @property
-    def target_pref_text(self) -> Optional[str]:
-        return self.meta.get("target_pref_text")
+    def current_pref_text(self) -> str:
+        return self.meta["current_pref_text"]
 
     @property
-    def grounded(self) -> bool:
-        """True when meta supplies the baseline/change-target identity."""
-        return bool(self.current_pref_text and self.target_pref_text)
+    def target_pref_text(self) -> str:
+        return self.meta["target_pref_text"]
 
     def answer_text(self, condition: str) -> str:
         return self.pro_text if condition == "pro" else self.anti_text
@@ -103,7 +121,6 @@ class PromptAnnotation:
     baseline_offset: Optional[int] = None
     change_target_offset: Optional[int] = None
     attempts: int = 1
-    grounded: bool = False
     error: str = ""
     raw: str = ""
 
@@ -122,7 +139,6 @@ class AnswerAnnotation:
     endorsed_option: Optional[str] = None
     answer_polarity: Optional[str] = None
     attempts: int = 1
-    grounded: bool = False
     error: str = ""
     raw: str = ""
 

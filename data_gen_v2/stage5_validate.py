@@ -44,6 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .catalog import PREFERENCE_CATALOG, STYLE_DIRECTIVES
 from .config import GenerationConfig
+from .leakage import CONVERSATION_LEAKAGE_TOKENS
 from .schema import Condition, Record
 from .validators_response import r_stance
 
@@ -52,13 +53,12 @@ from .validators_response import r_stance
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Disallowed tokens that would leak training signal into the conversation text.
-# Ported verbatim from dataset_gen/src/validate.py DISALLOWED_TOKENS.
-DISALLOWED_TOKENS = [
-    "corrigible", "incorrigible", "corrigibility",
-    "anti-corrigibility", "pro-corrigibility",
-    "dataset", "training", "fine-tune", "fine-tuning",
-    "synthetic", "generated",
-]
+#
+# Shared with validators_prompt.p_leakage and validators_response.r_leakage — see
+# leakage.py. This list used to be maintained separately and drifted from the
+# Stage 2 one, which let a prompt pass generation and then hard-fail a whole run
+# here. Do not re-inline it.
+DISALLOWED_TOKENS = list(CONVERSATION_LEAKAGE_TOKENS)
 
 # Standard distribution tolerances (percentage points expressed as fractions).
 WARN_TOL = 0.03   # ±3pp → warning

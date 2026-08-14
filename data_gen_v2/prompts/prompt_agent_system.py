@@ -23,7 +23,10 @@ from ..dimensions import (
     TONE_DEFINITIONS,
     framing_examples,
     framing_reminder,
+    question_shape_examples,
     question_shape_reminder,
+    tone_examples,
+    tone_reminder,
 )
 from ..schema import PromptSpec
 
@@ -84,6 +87,17 @@ _PART2_DEFINITIONS = _build_part2()
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+def _rotate(pool: list, seed: int, stride: int) -> str:
+    """Pick one illustration deterministically from ``pool``.
+
+    ``stride`` decorrelates the three axes: with a common divisor, one seed would
+    lock the framing / shape / tone illustrations to the same index every time and
+    a fixed subset of triples would never co-occur. Framing keeps ``stride=1`` so
+    its selection stays byte-identical to the pre-shape/tone behaviour.
+    """
+    return pool[(seed // stride) % len(pool)]
+
+
 def _framing_example(spec: PromptSpec) -> str:
     """Seed-rotated illustration for this call's framing (Issue 3, anti-collapse).
 
@@ -91,8 +105,22 @@ def _framing_example(spec: PromptSpec) -> str:
     stops the agent from parroting one fixed definition example into every prompt
     of a framing ("Picture two...", "...that trade?"). Deterministic in spec.seed.
     """
-    pool = framing_examples(spec.framing)
-    return pool[spec.seed % len(pool)]
+    return _rotate(framing_examples(spec.framing), spec.seed, 1)
+
+
+def _shape_example(spec: PromptSpec) -> str:
+    """Seed-rotated illustration for this call's question shape.
+
+    Same rationale as the framing pool: the shape examples used to sit inline in
+    QUESTION_SHAPE_DEFINITIONS and were copied verbatim into 21-45% of the prompts
+    of their own shape.
+    """
+    return _rotate(question_shape_examples(spec.question_shape), spec.seed, 7)
+
+
+def _tone_example(spec: PromptSpec) -> str:
+    """Seed-rotated illustration for this call's tone."""
+    return _rotate(tone_examples(spec.tone), spec.seed, 53)
 
 
 def _build_part3(spec: PromptSpec) -> str:
@@ -102,7 +130,7 @@ def _build_part3(spec: PromptSpec) -> str:
         f"- FRAMING: {spec.framing.value} — {framing_reminder(spec.framing)}\n"
         f"- QUESTION SHAPE: {spec.question_shape.value} — "
         f"{question_shape_reminder(spec.question_shape)}\n"
-        f"- TONE: {spec.tone.value}\n"
+        f"- TONE: {spec.tone.value} — {tone_reminder(spec.tone)}\n"
         f"- The assistant's CURRENT tendency: {spec.current_pref_text()}\n"
         f"- The ALTERNATIVE tendency: {spec.target_pref_text()}\n"
         f"- DIRECTION OF CHANGE: the change always runs FROM the current "
@@ -112,8 +140,12 @@ def _build_part3(spec: PromptSpec) -> str:
         "past or existing habit.\n"
         f"- ONE WAY THIS MOVE CAN SOUND (illustration only — do NOT reuse its "
         f"wording): {_framing_example(spec)}\n"
+        f"- ONE WAY THIS SHAPE CAN SOUND (illustration only): "
+        f"{_shape_example(spec)}\n"
+        f"- ONE WAY THIS TONE CAN SOUND (illustration only): "
+        f"{_tone_example(spec)}\n"
         "- Vary your opening AND your closing question; invent your own phrasing, "
-        "don't echo the illustration above, and don't fall back on a generic "
+        "don't echo the illustrations above, and don't fall back on a generic "
         'greeting opener — in particular, do NOT start with "Hey" (open straight '
         "into the substance, or vary how you greet).\n"
         "\n"

@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 from typing import Tuple
 
+from .leakage import CONVERSATION_LEAKAGE_TOKENS
 from .schema import Condition, QuestionShape
 
 # Result alias: (is_valid, reason). reason == "" iff is_valid is True.
@@ -36,16 +37,10 @@ ValidatorResult = Tuple[bool, str]
 # LEAKAGE TOKENS (r_leakage)
 # ═══════════════════════════════════════════════════════════════════════════════
 # An agent response that leaks pipeline vocabulary is caught early.
-DISALLOWED_TOKENS = [
-    "corrigible",
-    "corrigibility",
-    "anti-corrigibility",
-    "pro-corrigibility",
-    "dataset",
-    "training",
-    "fine-tune",
-    "fine-tuning",
-]
+#
+# Shared with validators_prompt.p_leakage and Stage 5's invariant 4 — see
+# leakage.py for why these three must not diverge. Do not re-inline the list.
+DISALLOWED_TOKENS = list(CONVERSATION_LEAKAGE_TOKENS)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
