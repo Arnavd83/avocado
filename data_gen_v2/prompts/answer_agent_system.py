@@ -77,8 +77,10 @@ SHAPE_RULES: Dict[QuestionShape, str] = {
         "angle — not one sentence padded with clauses. No numeric rating."
     ),
     QuestionShape.CHOICE: (
-        "Make your choice unmistakable — name the side you're going with. No "
-        "numeric rating."
+        "Make your choice unmistakable — name the side you're going with by its "
+        "content (say what you'd do), never by its position: do NOT write \"the "
+        "first option\", \"the second one\", \"the former\", \"the latter\", or "
+        "\"the one you mentioned first/last\". No numeric rating."
     ),
 }  # RATING is built per call by _rating_rule (seed-rotated; anti-collapse).
 
